@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.env/
+.venv/
+venv/
+ENV/
+
+# Jupyter/VS Code
+.ipynb_checkpoints/
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Local data/exports
+*.xlsx
+!config/*.xlsx
+*.csv
+*.log
+
+# PyCharm
+.idea/
