@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from io import BytesIO
-
 from modules.config_loader import cargar_config, horas_por_dia
 from modules.scheduler import programar
 
@@ -35,7 +34,8 @@ if archivo is not None:
     "CANT/DDP": "CantidadPliegos",
     "FECH/ENT.": "FechaEntrega",
     "Mat/Prim1": "MateriaPrima",
-    "CodTroTapa": "CodigoTroquel",
+    "CodTroTapa": "CodigoTroquelTapa",
+    "CodTroCuerpo": "CodigoTroquelCuerpo",
     "Off Set": "ImpresionOffset",
     "Barnizado": "Barnizado",
     "FlexoDdp": "ImpresionFlexo",
@@ -46,9 +46,22 @@ if archivo is not None:
     "Troquelar": "Troquelado",
     "DescartonadoSNDpd": "Descartonado",
     "Boca1_ddp": "Bocas",
-    "Poses": "Poses"
-        }, inplace=True)
-
+    "Poses": "Poses",
+    "Color1": "Color1",
+    "Color2": "Color2",
+    "Color3": "Color3",
+    "Color4": "Color4",
+    "Barnizado": "Barnizado_V",
+    "ImpresionSNDpd": "Impresion_V",
+    "TroqueladoSNDpd": "Troquelado_V",
+    "GuillotinadoSNDpd": "Guillotinado_V",
+    "DescartonadoSNDpd": "Descartonado_V",
+    "PegadoSNDpd": "Pegado_V",
+    "PegadoVSNDpd": "Pegado_ventana_V",
+    "TienePrensado": "Prensado_V",
+    "MPPlanta": "MateriaPrima_V",
+    }, inplace=True)
+    
     # --- Concatenar los colores (Color 1–5) en una sola columna 'Colores' ---
     color_cols = [c for c in df.columns if c.startswith("Color")]
     if color_cols:

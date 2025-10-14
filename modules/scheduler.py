@@ -71,18 +71,39 @@ def secuencia_para_orden(orden, cfg):
 def programar(df_ordenes, cfg, start=None):
     """Devuelve un schedule con dependencias entre procesos (flujo por OT)."""
     agenda = construir_calendario(cfg, start=start)
-    ultimo_en_maquina = {m: None for m in cfg["maquinas"]["Maquina"].unique()}
+    maquinas = cfg["maquinas"]["Maquina"].unique()   # array de nombres de máquina
+    ultimo_en_maquina = {maquina: None for maquina in maquinas}
     filas = []
 
     # Generar ID único de OT = ORDEN + PED
     df_ordenes["OT_id"] = df_ordenes["CodigoProducto"].astype(str) + "-" + df_ordenes["Subcodigo"].astype(str)
 
-    # Ordenar OTs por fecha de entrega
-    fecha_col = "FechaEntregaAjustada" if "FechaEntregaAjustada" in df_ordenes.columns else "FechaEntrega"
-    if fecha_col in df_ordenes.columns:
-        base = df_ordenes.sort_values([fecha_col, "CantidadPliegos"], ascending=[True, False])
+    # Determinar la columna de fecha que se usará
+    fecha_col = (
+    "FechaEntregaAjustada"
+    if "FechaEntregaAjustada" in df_ordenes.columns
+    else "FechaEntrega"
+    )
+
+    # --- Determinar columna de troquel disponible ---
+    if "CodigoTroquelTapa" in df_ordenes.columns and df_ordenes["CodigoTroquelTapa"].notna().any():
+        troquel_col = "CodigoTroquelTapa"
+    elif "CodigoTroquelCuerpo" in df_ordenes.columns and df_ordenes["CodigoTroquelCuerpo"].notna().any():
+        troquel_col = "CodigoTroquelCuerpo"
     else:
-        base = df_ordenes.sort_values(["CantidadPliegos"], ascending=[False])
+        troquel_col = None
+
+    # --- Ordenar priorizando por fecha, troquel y tamaño ---
+    if troquel_col:
+        base = df_ordenes.sort_values(
+            [fecha_col, troquel_col, "CantidadPliegos"],
+            ascending=[True, True, False]
+        )
+    else:
+        base = df_ordenes.sort_values(
+            [fecha_col, "CantidadPliegos"],
+            ascending=[True, False]
+        )
 
     # Recorrer cada OT (ORDEN + PED)
     for ot_id, grupo in base.groupby("OT_id"):

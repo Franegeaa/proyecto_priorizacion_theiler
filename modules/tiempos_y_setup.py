@@ -1,5 +1,5 @@
 import pandas as pd
-from modules.config_loader import es_si
+from modules.config_loader import cargar_config, es_si
 
 def capacidad_pliegos_h(proceso, maquina, cfg):
     fila = cfg["maquinas"].query("Proceso==@proceso and Maquina==@maquina")
