@@ -26,7 +26,7 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
 
 def horas_por_dia(cfg):
     j = cfg["jornada"]
-    base = float(j.loc[j["Parametro"]=="Horas_base_por_dia", "Valor"].iloc[0]) if (j["Parametro"]=="Horas_base_por_dia").any() else 8.0
+    base = j.loc[j["Parametro"]=="Horas_base_por_dia","Valor"].iloc[0] if (j["Parametro"]=="Horas_base_por_dia").any() else 8.0
     extra = float(j.loc[j["Parametro"]=="Horas_extra_por_dia","Valor"].iloc[0]) if (j["Parametro"]=="Horas_extra_por_dia").any() else 0.0
     return base + extra
 
