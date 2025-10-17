@@ -36,6 +36,7 @@ def usa_setup_menor(prev, curr, proceso):
 def tiempo_operacion_h(orden, proceso, maquina, cfg):
     cap = capacidad_pliegos_h(proceso, maquina, cfg)
     if not cap or cap <= 0:
+        print(f"⚠️ Sin capacidad definida para {proceso} ({maquina}) en config.")
         return (0.0, 0.0)
     proc_h = float(orden.get("CantidadPliegos", 0)) / cap
     return (0.0, proc_h)

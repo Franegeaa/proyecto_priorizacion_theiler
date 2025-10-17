@@ -86,6 +86,21 @@ if archivo is not None:
     df["_PEN_ImpresionFlexo"]  = imp_pend & mat.str.contains("micro", na=False)
     df["_PEN_ImpresionOffset"] = imp_pend & mat.str.contains("cartulina", na=False)
 
+    # OT_id para identificar la orden (si aún no existe)
+    if "OT_id" not in df.columns:
+        df["OT_id"] = (
+            df["CodigoProducto"].astype(str).str.strip() + "-" +
+            df["Subcodigo"].astype(str).str.strip()
+        )
+
+    # Listar OTs con impresión pendiente
+    ot_flexo = df.loc[df["_PEN_ImpresionFlexo"], "OT_id"].tolist()
+    ot_offset = df.loc[df["_PEN_ImpresionOffset"], "OT_id"].tolist()
+
+    # Consola (servidor)
+    print(f"Impresión Flexo pendiente ({len(ot_flexo)}): {ot_flexo}")
+    print(f"Impresión Offset pendiente ({len(ot_offset)}): {ot_offset}")
+    
     # Verificación mínima
     if "CantidadPliegos" not in df.columns:
         st.error("⚠️ Falta 'CANT/DDP' / 'CantidadPliegos' en el Excel.")

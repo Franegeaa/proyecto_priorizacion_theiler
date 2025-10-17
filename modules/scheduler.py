@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime, timedelta, time, date
+from datetime import datetime, timedelta, time
 from collections import defaultdict, deque
 
 from modules.config_loader import (
@@ -43,11 +43,10 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
 
 
 # =======================================================
-# Definición de procesos pendientes para cada OT (usan _PEN_*)
+# Procesos pendientes (_PEN_*)
 # =======================================================
 
 def _procesos_pendientes_de_orden(orden: pd.Series):
-    """Devuelve lista de procesos pendientes para esta OT en orden estándar."""
     flujo = [
         "Guillotina",
         "Impresión Flexo",
@@ -61,14 +60,13 @@ def _procesos_pendientes_de_orden(orden: pd.Series):
     ]
     pendientes = []
 
+    # Marcar sólo procesos que están pendientes (True)
     if es_si(orden.get("_PEN_Guillotina")):
         pendientes.append("Guillotina")
-
     if es_si(orden.get("_PEN_ImpresionFlexo")):
         pendientes.append("Impresión Flexo")
     if es_si(orden.get("_PEN_ImpresionOffset")):
         pendientes.append("Impresión Offset")
-
     if es_si(orden.get("_PEN_Barnizado")):
         pendientes.append("Barnizado")
     if es_si(orden.get("_PEN_OPP")):
@@ -82,42 +80,81 @@ def _procesos_pendientes_de_orden(orden: pd.Series):
     if es_si(orden.get("_PEN_Pegado")):
         pendientes.append("Pegado")
 
-    # Ordenar según flujo
     orden_idx = {p: i for i, p in enumerate(flujo)}
     pendientes.sort(key=lambda p: orden_idx.get(p, 999))
     return pendientes
 
 
 # =======================================================
-# Selección de máquina por proceso (según tus reglas)
+# Selección de máquina por proceso
 # =======================================================
 
-def _elegir_maquina_proceso(proceso: str, orden: pd.Series, cfg):
-    candidatos = cfg["maquinas"].query("Proceso==@proceso")["Maquina"].tolist()
+def elegir_maquina(proceso, orden, cfg):
+    """Selecciona la máquina adecuada según proceso y material (con debug)."""
+    proc_lower = proceso.lower()
+    print(f"\n🧩 [DEBUG] Evaluando proceso: {proceso}")
+
+    # Mostrar todos los procesos configurados
+    print("📋 Procesos en config:", cfg["maquinas"]["Proceso"].unique().tolist())
+
+    # Filtrado original
+    candidatos = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains(proc_lower.split()[0])]["Maquina"].tolist()
+    print(f"🔍 Palabra clave buscada: '{proc_lower.split()[0]}' → Candidatos encontrados: {candidatos}")
+
     if not candidatos:
+        print(f"⚠️ No se encontraron máquinas candidatas para '{proceso}'")
         return None
 
-    if proceso == "Troquelado" and float(orden.get("CantidadPliegos", 0)) > 3000:
-        if "Automática" in candidatos:
+    # 🔹 Troquelado
+    if proceso == "Troquelado":
+        cant = float(orden.get("CantidadPliegos", 0))
+        if cant > 3000 and "Automática" in candidatos:
+            print("✅ Seleccionada troqueladora Automática (>3000 pliegos)")
             return "Automática"
+        manuales = [m for m in candidatos if "manual" in m.lower()]
+        if manuales:
+            m_sel = manuales[hash(orden["CodigoProducto"]) % len(manuales)]
+            print(f"✅ Seleccionada troqueladora Manual: {m_sel}")
+            return m_sel
 
-    if proceso == "Impresión Flexo" and "Flexo" in candidatos:
-        return "Flexo"
-    if proceso == "Impresión Offset" and "Offset" in candidatos:
-        return "Offset"
+    # 🔹 Impresión
+    if "impresión" in proc_lower:
+        mat = str(orden.get("MateriaPrima", "")).lower()
+        print(f"🧾 Materia prima: {mat}")
 
-    if proceso == "Ventana" and "Ventanas" in candidatos:
-        return "Ventanas"
+        # FLEXO → microcorrugado
+        if "flexo" in proc_lower or "micro" in mat or "corrug" in mat:
+            flexos = [m for m in candidatos if "flexo" in m.lower()]
+            print(f"🎨 Flexo posibles: {flexos}")
+            return flexos[0] if flexos else None
 
+        # OFFSET → cartulina
+        if "offset" in proc_lower or "cartulin" in mat:
+            offsets = [m for m in candidatos if "offset" in m.lower()]
+            print(f"🖨 Offset posibles: {offsets}")
+            return offsets[0] if offsets else None
+
+    # 🔹 Ventana
+    if "ventan" in proc_lower:
+        vent = [m for m in candidatos if "ventan" in m.lower()]
+        print(f"🪟 Ventanas posibles: {vent}")
+        return vent[0] if vent else None
+
+    # 🔹 Pegado
+    if "peg" in proc_lower:
+        pegs = [m for m in candidatos if "peg" in m.lower() or "pegad" in m.lower()]
+        print(f"📦 Pegadoras posibles: {pegs}")
+        return pegs[0] if pegs else None
+
+    # 🔹 Fallback
+    print(f"⚙️ Default → {candidatos[0]}")
     return candidatos[0]
 
-
 # =======================================================
-# Claves de prioridad por máquina (minimizan setups)
+# Claves de prioridad
 # =======================================================
 
 def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
-    """Tupla de ordenamiento para clusterizar y reducir setups."""
     marca = str(orden.get("Cliente") or "").strip().lower()
     colores = str(orden.get("Colores") or "").strip().lower()
     troquel = str(orden.get("CodigoTroquel") or "").strip().lower()
@@ -126,7 +163,6 @@ def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
     pli_lar = orden.get("PliLar")
 
     if proceso in ("Impresión Flexo", "Impresión Offset"):
-        # Marca → Colores → Tamaño
         return (marca, colores, pli_anc, pli_lar)
     if proceso == "Troquelado":
         return (troquel,)
@@ -136,22 +172,24 @@ def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
 
 
 # =======================================================
-# Expandir en tareas por proceso pendiente
+# Expandir tareas
 # =======================================================
 
 def _expandir_tareas(df: pd.DataFrame, cfg, fecha_col: str):
-    """
-    Devuelve DataFrame 'tasks' con una fila por proceso pendiente:
-    [idx, OT_id, Proceso, Maquina, DueDate, GroupKey, CantidadPliegos, MateriaPrimaPlanta]
-    """
     tareas = []
     for idx, row in df.iterrows():
         ot = f"{row['CodigoProducto']}-{row['Subcodigo']}"
         pendientes = _procesos_pendientes_de_orden(row)
         for proceso in pendientes:
-            maquina = _elegir_maquina_proceso(proceso, row, cfg)
+            maquina = elegir_maquina(proceso, row, cfg)
             if not maquina:
+                print(f"⚠️ {ot} → no se encontró máquina para {proceso}")
                 continue
+
+            # Log específico para impresión y pegado
+            if "impresión" in proceso.lower() or "pegado" in proceso.lower():
+                print(f"🧱 {ot} → {proceso}, máquina candidata: {maquina}")
+
             tareas.append({
                 "idx": idx,
                 "OT_id": ot,
@@ -162,12 +200,16 @@ def _expandir_tareas(df: pd.DataFrame, cfg, fecha_col: str):
                 "Maquina": maquina,
                 "DueDate": row.get(fecha_col),
                 "GroupKey": _clave_prioridad_maquina(proceso, row),
-                "CantidadPliegos": row.get("CantidadPliegos", row.get("CANT/DDP", 0)),
+                "CantidadPliegos": row.get("CantidadPliegos", 0),
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
             })
+
     tasks = pd.DataFrame(tareas)
     if not tasks.empty:
         tasks["DueDate"] = pd.to_datetime(tasks["DueDate"], dayfirst=True, errors="coerce")
+        print("📊 Tareas generadas:", tasks["Proceso"].value_counts(dropna=False).to_dict())
+    else:
+        print("⚠️ No se generaron tareas pendientes.")
     return tasks
 
 
@@ -176,45 +218,21 @@ def _expandir_tareas(df: pd.DataFrame, cfg, fecha_col: str):
 # =======================================================
 
 def programar(df_ordenes: pd.DataFrame, cfg, start=None):
-    """
-    Devuelve:
-      schedule: detalle por proceso con Inicio/Fin y Atraso_h
-      carga_md: carga por máquina y día (HorasPlanificadas, CapacidadDia, HorasExtra)
-      resumen_ot: Fin_OT y atraso por OT
-
-    Reglas:
-      - Solo programa procesos pendientes (_PEN_*).
-      - Colas por máquina, ordenadas por DueDate → GroupKey → Cantidad desc.
-      - Respeta dependencias de flujo estándar.
-      - MPPlanta: solo programa si es False (o vacío).
-      - Jornada y feriados desde cfg.
-    """
+    """Planifica todas las tareas pendientes respetando precedencias."""
     if df_ordenes.empty:
-        vac = pd.DataFrame(columns=[
-            "OT_id","CodigoProducto","Subcodigo","Cliente","Proceso","Maquina",
-            "Setup_min","Proceso_h","Inicio","Fin","Motivo","Atraso_h"
-        ])
-        return vac, pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    # ID único y fecha
     df_ordenes["OT_id"] = df_ordenes["CodigoProducto"].astype(str) + "-" + df_ordenes["Subcodigo"].astype(str)
     fecha_col = "FechaEntregaAjustada" if "FechaEntregaAjustada" in df_ordenes.columns else "FechaEntrega"
 
-    # Agenda por máquina
     agenda = construir_calendario(cfg, start=start)
     maquinas = cfg["maquinas"]["Maquina"].unique()
     ultimo_en_maquina = {m: None for m in maquinas}
 
-    # Expandir tareas
     tasks = _expandir_tareas(df_ordenes, cfg, fecha_col)
     if tasks.empty:
-        vac = pd.DataFrame(columns=[
-            "OT_id","CodigoProducto","Subcodigo","Cliente","Proceso","Maquina",
-            "Setup_min","Proceso_h","Inicio","Fin","Motivo","Atraso_h"
-        ])
-        return vac, pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    # Precedencias (flujo estándar)
     anterior = {
         "Impresión Flexo": "Guillotina",
         "Impresión Offset": "Guillotina",
@@ -226,7 +244,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         "Pegado": "Ventana",
     }
 
-    # Colas por máquina
     colas = {}
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
@@ -236,16 +253,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         q.sort_values(by=["DueDate", "GroupKey", "CantidadPliegos"], ascending=[True, True, False], inplace=True)
         colas[m] = deque(q.to_dict("records"))
 
-    # Estados
     pendientes_por_ot = defaultdict(set)
     for _, t in tasks.iterrows():
         pendientes_por_ot[t["OT_id"]].add(t["Proceso"])
     completado = defaultdict(set)
 
-    # Carga por máquina/día
     carga_reg = []
-
     filas = []
+    h_dia = horas_por_dia(cfg)
 
     def quedan_tareas():
         return any(len(q) > 0 for q in colas.values())
@@ -259,15 +274,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         return True
 
     progreso = True
-    h_dia = horas_por_dia(cfg)
-
     while quedan_tareas() and progreso:
         progreso = False
         for maquina in maquinas:
             if not colas.get(maquina):
                 continue
 
-            # Buscar primera tarea ejecutable y con MP disponible (MPPlanta == False)
             idx_cand = None
             for i, t in enumerate(colas[maquina]):
                 mp = str(t.get("MateriaPrimaPlanta")).strip().lower()
@@ -277,20 +289,16 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 if lista_para_ejecutar(t):
                     idx_cand = i
                     break
-
             if idx_cand is None:
                 continue
 
-            # Traer la candidata al frente y popleft
             for _ in range(idx_cand):
                 colas[maquina].rotate(-1)
             t = colas[maquina].popleft()
-
             orden = df_ordenes.loc[t["idx"]]
-            # Tiempos
+
             setup_h, proc_h = tiempo_operacion_h(orden, t["Proceso"], maquina, cfg)
 
-            # Setup menor si corresponde (troquel/cliente/colores/tamaño iguales al anterior en esa máquina)
             if usa_setup_menor(ultimo_en_maquina.get(maquina), orden, t["Proceso"]):
                 setup_min = setup_menor_min(t["Proceso"], maquina, cfg)
                 motivo = "Setup menor (cluster)"
@@ -298,25 +306,37 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 setup_min = setup_base_min(t["Proceso"], maquina, cfg)
                 motivo = "Setup base"
 
-            total_h = proc_h + setup_min/60.0
+            total_h = proc_h + setup_min / 60.0
 
-            # Reservar en agenda
+            # ✅ Protección ante tiempos nulos
+            if pd.isna(total_h) or total_h <= 0:
+                print(f"⚠️ Se omitió {t['OT_id']} - {t['Proceso']} ({maquina}) por duración inválida ({total_h})")
+                continue
+
             bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
+            if not bloques:
+                print(f"⚠️ Agenda vacía al reservar {t['OT_id']} - {t['Proceso']} ({maquina})")
+                continue
+
             inicio = bloques[0][0]
             fin = bloques[-1][1]
 
-            # Registrar carga por día
+            # Carga por día
             for b_ini, b_fin in bloques:
                 d = b_ini.date()
-                horas = (b_fin - b_ini).total_seconds()/3600.0
-                carga_reg.append({"Fecha": d, "Maquina": maquina, "HorasPlanificadas": horas, "CapacidadDia": h_dia})
+                horas = (b_fin - b_ini).total_seconds() / 3600.0
+                carga_reg.append({
+                    "Fecha": d,
+                    "Maquina": maquina,
+                    "HorasPlanificadas": horas,
+                    "CapacidadDia": h_dia
+                })
 
-            # Atraso por tarea vs DueDate
             atraso_h = 0.0
             if pd.notna(t["DueDate"]):
                 due_dt = pd.to_datetime(t["DueDate"])
                 if fin > due_dt:
-                    atraso_h = (fin - due_dt).total_seconds()/3600.0
+                    atraso_h = (fin - due_dt).total_seconds() / 3600.0
 
             filas.append({
                 "OT_id": t["OT_id"],
@@ -333,7 +353,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 "Motivo": motivo,
                 "Atraso_h": round(atraso_h, 2),
             })
-
             ultimo_en_maquina[maquina] = orden.to_dict()
             completado[t["OT_id"]].add(t["Proceso"])
             progreso = True
@@ -342,19 +361,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     if not schedule.empty:
         schedule.sort_values(["OT_id", "Inicio"], inplace=True, ignore_index=True)
 
-    # Resumen por OT
-    if not schedule.empty:
-        fin_ot = schedule.groupby("OT_id")["Fin"].max().reset_index().rename(columns={"Fin": "Fin_OT"})
-        due = schedule.groupby("OT_id")["DueDate"].max().reset_index()
-        resumen_ot = fin_ot.merge(due, on="OT_id", how="left")
-        resumen_ot["Atraso_h"] = (
-            (resumen_ot["Fin_OT"] - resumen_ot["DueDate"]).dt.total_seconds()/3600.0
-        ).clip(lower=0).fillna(0.0).round(2)
-        resumen_ot["EnRiesgo"] = resumen_ot["Atraso_h"] > 0
-    else:
-        resumen_ot = pd.DataFrame(columns=["OT_id", "Fin_OT", "DueDate", "Atraso_h", "EnRiesgo"])
+    fin_ot = schedule.groupby("OT_id")["Fin"].max().reset_index().rename(columns={"Fin": "Fin_OT"})
+    due = schedule.groupby("OT_id")["DueDate"].max().reset_index()
+    resumen_ot = fin_ot.merge(due, on="OT_id", how="left")
+    resumen_ot["Atraso_h"] = (
+        (resumen_ot["Fin_OT"] - resumen_ot["DueDate"]).dt.total_seconds() / 3600.0
+    ).clip(lower=0).fillna(0.0).round(2)
+    resumen_ot["EnRiesgo"] = resumen_ot["Atraso_h"] > 0
 
-    # Carga por máquina/día
     carga_md = pd.DataFrame(carga_reg)
     if not carga_md.empty:
         carga_md = carga_md.groupby(["Fecha", "Maquina", "CapacidadDia"], as_index=False)["HorasPlanificadas"].sum()
