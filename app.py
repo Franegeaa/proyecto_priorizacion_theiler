@@ -96,11 +96,7 @@ if archivo is not None:
     # Listar OTs con impresión pendiente
     ot_flexo = df.loc[df["_PEN_ImpresionFlexo"], "OT_id"].tolist()
     ot_offset = df.loc[df["_PEN_ImpresionOffset"], "OT_id"].tolist()
-
-    # Consola (servidor)
-    print(f"Impresión Flexo pendiente ({len(ot_flexo)}): {ot_flexo}")
-    print(f"Impresión Offset pendiente ({len(ot_offset)}): {ot_offset}")
-    
+   
     # Verificación mínima
     if "CantidadPliegos" not in df.columns:
         st.error("⚠️ Falta 'CANT/DDP' / 'CantidadPliegos' en el Excel.")
@@ -110,7 +106,7 @@ if archivo is not None:
         st.stop()
 
     st.info("🧠 Generando programa…")
-    schedule, carga_md, resumen_ot = programar(df, cfg, start=date.today())
+    schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=date.today())
 
     # ==========================
     # Métricas principales
@@ -125,30 +121,51 @@ if archivo is not None:
     col3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
     col4.metric("Jornada (h/día)", f"{horas_por_dia(cfg):.1f}")
 
+
     # ==========================
-    # Seguimiento por OT (Gantt)
+    # Seguimiento visual (OT / Máquina)
     # ==========================
-    st.subheader("📊 Seguimiento por Orden (Timeline)")
+    st.subheader("📊 Seguimiento (Gantt)")
+
     if not schedule.empty and _HAS_PLOTLY:
-        fig = None
-        try:
+        vista = st.radio(
+        "Seleccioná el tipo de seguimiento:",
+        ["Por Orden de Trabajo (OT)", "Por Máquina"],
+        horizontal=True
+    )
+
+    fig = None
+    try:
+        if vista == "Por Orden de Trabajo (OT)":
             fig = px.timeline(
                 schedule,
                 x_start="Inicio", x_end="Fin",
                 y="OT_id", color="Proceso",
                 hover_data=["Maquina", "Cliente", "Atraso_h", "DueDate"],
-                title="Procesos por OT",
+                title="Procesos por Orden de Trabajo",
             )
             fig.update_yaxes(autorange="reversed")
-        except Exception:
-            fig = None
 
-        if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No se pudo renderizar el gráfico. Verificá que las columnas de fechas estén correctas.")
+        elif vista == "Por Máquina":
+            fig = px.timeline(
+                schedule,
+                x_start="Inicio", x_end="Fin",
+                y="Maquina", color="Proceso",
+                hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
+                title="Procesos por Máquina",
+            )
+            fig.update_yaxes(autorange="reversed")
+
+    except Exception as e:
+        st.warning(f"No se pudo renderizar el gráfico: {e}")
+
+    if fig is not None:
+        st.plotly_chart(fig, use_container_width=True)
+
     elif not _HAS_PLOTLY:
         st.info("Para ver el Gantt instalá Plotly: `pip install plotly`")
+    else:
+        st.info("No hay tareas planificadas para mostrar el seguimiento.")
 
     # ==========================
     # Filtro por OT
@@ -161,6 +178,31 @@ if archivo is not None:
         st.dataframe(df_show, use_container_width=True)
     else:
         st.info("No hay tareas planificadas (verificá pendientes o MPPlanta).")
+
+    # ==========================
+    # 📋 Detalle por máquina
+    # ==========================
+    st.subheader("📋 Detalle por máquina")
+    if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
+        maquinas_disponibles = sorted(detalle_maquina["Maquina"].unique().tolist())
+        maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
+
+        df_maquina = detalle_maquina[detalle_maquina["Maquina"] == maquina_sel].copy()
+        df_maquina.sort_values(by="Inicio", inplace=True)
+
+        st.dataframe(
+            df_maquina[["OT_id", "Proceso", "Inicio", "Fin"]]
+            .rename(columns={
+                "OT_id": "Orden de Trabajo",
+                "Proceso": "Proceso",
+                "Inicio": "Inicio (fecha y hora)",
+                "Fin": "Fin (fecha y hora)"
+            }),
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
 
     # ==========================
     # Carga por máquina / día
@@ -192,6 +234,8 @@ if archivo is not None:
             resumen_ot.to_excel(w, index=False, sheet_name="Resumen_OT")
         if not carga_md.empty:
             carga_md.to_excel(w, index=False, sheet_name="Carga_Maquina_Dia")
+        if 'detalle_maquina' in locals() and not detalle_maquina.empty:
+            detalle_maquina.to_excel(w, index=False, sheet_name="Detalle_Maquina")
     buf.seek(0)
     st.download_button(
         "⬇️ Descargar Excel de planificación",
