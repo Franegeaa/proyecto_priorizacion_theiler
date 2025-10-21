@@ -6,7 +6,7 @@ from modules.config_loader import (
     es_si, horas_por_dia, proximo_dia_habil, construir_calendario
 )
 from modules.tiempos_y_setup import (
-    setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
+    capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
 )
 
 # =======================================================
@@ -180,6 +180,17 @@ def _expandir_tareas(df: pd.DataFrame, cfg, fecha_col: str):
             maquina = elegir_maquina(proceso, row, cfg)
             if not maquina:
                 continue
+            
+            cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
+            poses = float(row.get("Poses", 1) or 1)
+            bocas = float(row.get("BocasTroquel", row.get("Boca1_ddp", 1)) or 1)
+
+            if proceso.lower().startswith("impres"):
+                pliegos = cant_prod / poses if poses > 0 else cant_prod
+            elif proceso.lower().startswith("troquel"):
+                pliegos = cant_prod / bocas if bocas > 0 else cant_prod
+            else:
+                pliegos = float(row.get("CantidadPliegos", cant_prod))
 
             tareas.append({
                 "idx": idx,
@@ -195,7 +206,43 @@ def _expandir_tareas(df: pd.DataFrame, cfg, fecha_col: str):
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
                 "CodigoTroquel": row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "",
                 "Colores": colores,
+                "CantidadPliegos": pliegos,
+                "Bocas": bocas,
+                "Poses": poses,
             })
+
+            # 🟦 Barnizado (solo si hay impresión offset pendiente)
+            if es_si(row.get("_PEN_Barnizado")) and es_si(row.get("_PEN_ImpresionOffset")):
+                tareas.append({
+                    "idx": idx,
+                    "OT_id": ot,
+                    "CodigoProducto": row["CodigoProducto"],
+                    "Subcodigo": row["Subcodigo"],
+                    "Cliente": row["Cliente"],
+                    "Proceso": "Barnizado",
+                    "Maquina": "Offset",
+                    "DueDate": row[fecha_col],
+                    "GroupKey": ("barnizado",),
+                    "CantidadPliegos": row.get("CantidadPliegos", 0),
+                    "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
+                })
+
+            # 🟩 Encapado (tercerizado, demora fija)
+            if es_si(row.get("_PEN_Encapado")):
+                tareas.append({
+                    "idx": idx,
+                    "OT_id": ot,
+                    "CodigoProducto": row["CodigoProducto"],
+                    "Subcodigo": row["Subcodigo"],
+                    "Cliente": row["Cliente"],
+                    "Proceso": "Encapado",
+                    "Maquina": "EXTERNO",
+                    "DueDate": row[fecha_col],
+                    "GroupKey": ("encapado",),
+                    "CantidadPliegos": row.get("CantidadPliegos", 0),
+                    "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
+                    "DuracionDias": 3,
+                })
 
     tasks = pd.DataFrame(tareas)
     if not tasks.empty:
@@ -233,29 +280,54 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     auto_name = auto_names[0] if auto_names else None
 
     if manuales:
-        carga_manual = {m: 0 for m in manuales}
+        # Carga acumulada (en horas estimadas) por cada manual
+        carga_manual = {m: 0.0 for m in manuales}
         troquel_a_manual = {}
+
         for i in tasks.index:
             if tasks.at[i, "Proceso"] != "Troquelado":
                 continue
+
             cant = float(tasks.at[i, "CantidadPliegos"] or 0)
             troq = str(df_ordenes.loc[tasks.at[i, "idx"]].get("CodigoTroquel", "")).strip().lower()
 
-            # Automática por tamaño
-            if cant > 3000 and auto_name is not None:
-                tasks.at[i, "Maquina"] = auto_name
-                continue
+            # Regla: >3000 pliegos → Automática si existe
+            # 🧠 Regla de asignación más flexible (balance de carga por horas)
+            if auto_name is not None:
+                # Calcular carga promedio de las manuales
+                carga_prom_manual = sum(carga_manual.values()) / max(len(carga_manual), 1)
+                carga_auto = carga_manual.get(auto_name, 0.0)
+                cap_auto = capacidad_pliegos_h("Troquelado", auto_name, cfg) or 6000
+
+                # Si es una OT grande o la automática está poco cargada → enviar allí
+                if cant > 3000 or carga_auto < 0.7 * carga_prom_manual:
+                    horas_estimadas_auto = cant / cap_auto
+                    carga_manual[auto_name] = carga_auto + horas_estimadas_auto
+                    tasks.at[i, "Maquina"] = auto_name
+                    continue
 
             if not troq:
                 continue
 
+            # Si el troquel ya fue asignado a una manual, se mantiene
             if troq in troquel_a_manual:
-                sel = troquel_a_manual[troq]
+                m_sel = troquel_a_manual[troq]
             else:
-                sel = min(carga_manual, key=carga_manual.get)
-                troquel_a_manual[troq] = sel
-            tasks.at[i, "Maquina"] = sel
-            carga_manual[sel] += 1
+                # Calcular carga actual (horas) para cada manual
+                cargas_estimadas = {}
+                for m in manuales:
+                    cap = capacidad_pliegos_h("Troquelado", m, cfg) or 5000
+                    cargas_estimadas[m] = carga_manual[m]
+
+                # Elegir la de menor carga horaria actual
+                m_sel = min(cargas_estimadas, key=cargas_estimadas.get)
+                troquel_a_manual[troq] = m_sel
+
+            # Asignar OT y actualizar carga en horas
+            cap_sel = capacidad_pliegos_h("Troquelado", m_sel, cfg) or 5000
+            horas_estimadas = cant / cap_sel
+            carga_manual[m_sel] += horas_estimadas
+            tasks.at[i, "Maquina"] = m_sel
 
     # ---------- Construcción de colas ----------
     # Para troqueladoras: agrupar por troquel y ordenar los GRUPOS por DueDate mínima del grupo,
@@ -365,7 +437,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         "Impresión Offset": "Guillotina",
         "Barnizado": "Impresión Offset",
         "OPP": "Encapado",
-        "Troquelado": "OPP",
+        "Encapado": "OPP",
+        "Troquelado": "Encapado",
         "Descartonado": "Troquelado",
         "Ventana": "Descartonado",
         "Pegado": "Ventana",
@@ -464,6 +537,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 "OT_id": t["OT_id"],
                 "CodigoProducto": t["CodigoProducto"],
                 "Subcodigo": t["Subcodigo"],
+                "CantidadPliegos": t["CantidadPliegos"],
+                "Bocas": t["Bocas"],
+                "Poses": t["Poses"],
                 "Cliente": t["Cliente"],
                 "Proceso": t["Proceso"],
                 "Maquina": t["Maquina"],
