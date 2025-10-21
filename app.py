@@ -66,7 +66,7 @@ if archivo is not None:
         return pd.Series(False, index=df.index)
 
     df["_PEN_Guillotina"]   = to_bool_series(["GuillotinadoSNDpd"])
-    df["_PEN_Barnizado"]    = to_bool_series(["Barnizado.1"])  # la segunda "Barnizado" (pendiente)
+    df["_PEN_Barnizado"]    = to_bool_series(["Barnizado.1"])
     df["_PEN_Encapado"]     = to_bool_series(["EncapadoSNDpd", "EncapadoSND"])
     df["_PEN_OPP"]          = to_bool_series(["OPPSNDpd", "OPPSND"])
     df["_PEN_Troquelado"]   = to_bool_series(["TroqueladoSNDpd", "TroqueladoSND"])
@@ -86,24 +86,12 @@ if archivo is not None:
     df["_PEN_ImpresionFlexo"]  = imp_pend & mat.str.contains("micro", na=False)
     df["_PEN_ImpresionOffset"] = imp_pend & mat.str.contains("cartulina", na=False)
 
-    # OT_id para identificar la orden (si aún no existe)
+    # OT_id
     if "OT_id" not in df.columns:
         df["OT_id"] = (
             df["CodigoProducto"].astype(str).str.strip() + "-" +
             df["Subcodigo"].astype(str).str.strip()
         )
-
-    # Listar OTs con impresión pendiente
-    ot_flexo = df.loc[df["_PEN_ImpresionFlexo"], "OT_id"].tolist()
-    ot_offset = df.loc[df["_PEN_ImpresionOffset"], "OT_id"].tolist()
-   
-    # Verificación mínima
-    if "CantidadPliegos" not in df.columns:
-        st.error("⚠️ Falta 'CANT/DDP' / 'CantidadPliegos' en el Excel.")
-        st.stop()
-    if "FechaEntrega" not in df.columns:
-        st.error("⚠️ Falta columna de fecha ('FECH/ENT.' / 'FechaEntrega').")
-        st.stop()
 
     st.info("🧠 Generando programa…")
     schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=date.today())
@@ -121,88 +109,105 @@ if archivo is not None:
     col3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
     col4.metric("Jornada (h/día)", f"{horas_por_dia(cfg):.1f}")
 
-
     # ==========================
     # Seguimiento visual (OT / Máquina)
     # ==========================
     st.subheader("📊 Seguimiento (Gantt)")
-
     if not schedule.empty and _HAS_PLOTLY:
         vista = st.radio(
-        "Seleccioná el tipo de seguimiento:",
-        ["Por Orden de Trabajo (OT)", "Por Máquina"],
-        horizontal=True
-    )
+            "Seleccioná el tipo de seguimiento:",
+            ["Por Orden de Trabajo (OT)", "Por Máquina"],
+            horizontal=True
+        )
 
-    fig = None
-    try:
-        if vista == "Por Orden de Trabajo (OT)":
-            fig = px.timeline(
-                schedule,
-                x_start="Inicio", x_end="Fin",
-                y="OT_id", color="Proceso",
-                hover_data=["Maquina", "Cliente", "Atraso_h", "DueDate"],
-                title="Procesos por Orden de Trabajo",
-            )
-            fig.update_yaxes(autorange="reversed")
+        fig = None
+        try:
+            if vista == "Por Orden de Trabajo (OT)":
+                fig = px.timeline(
+                    schedule,
+                    x_start="Inicio", x_end="Fin",
+                    y="OT_id", color="Proceso",
+                    hover_data=["Maquina", "Cliente", "Atraso_h", "DueDate"],
+                    title="Procesos por Orden de Trabajo",
+                )
+                fig.update_yaxes(autorange="reversed")
 
-        elif vista == "Por Máquina":
-            fig = px.timeline(
-                schedule,
-                x_start="Inicio", x_end="Fin",
-                y="Maquina", color="Proceso",
-                hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
-                title="Procesos por Máquina",
-            )
-            fig.update_yaxes(autorange="reversed")
+            elif vista == "Por Máquina":
+                fig = px.timeline(
+                    schedule,
+                    x_start="Inicio", x_end="Fin",
+                    y="Maquina", color="Proceso",
+                    hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
+                    title="Procesos por Máquina",
+                )
+                fig.update_yaxes(autorange="reversed")
 
-    except Exception as e:
-        st.warning(f"No se pudo renderizar el gráfico: {e}")
+        except Exception as e:
+            st.warning(f"No se pudo renderizar el gráfico: {e}")
 
-    if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
-
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
     elif not _HAS_PLOTLY:
         st.info("Para ver el Gantt instalá Plotly: `pip install plotly`")
     else:
         st.info("No hay tareas planificadas para mostrar el seguimiento.")
 
     # ==========================
-    # Filtro por OT
+    # 📋 Detalle (OT / Máquina)
     # ==========================
-    st.subheader("🔎 Detalle por OT")
-    if not schedule.empty:
-        opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist())
-        elegido = st.selectbox("Elegí OT:", opciones)
-        df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido]
-        st.dataframe(df_show, use_container_width=True)
+    st.subheader("🔎 Detalle interactivo")
+    modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina"], horizontal=True)
+
+    if modo == "Orden de Trabajo (OT)":
+        if not schedule.empty:
+            opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist())
+            elegido = st.selectbox("Elegí OT:", opciones)
+            df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido]
+            st.dataframe(df_show, use_container_width=True)
+        else:
+            st.info("No hay tareas planificadas (verificá pendientes o MPPlanta).")
+
     else:
-        st.info("No hay tareas planificadas (verificá pendientes o MPPlanta).")
+        if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
+            maquinas_disponibles = sorted(detalle_maquina["Maquina"].unique().tolist())
+            maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
 
-    # ==========================
-    # 📋 Detalle por máquina
-    # ==========================
-    st.subheader("📋 Detalle por máquina")
-    if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
-        maquinas_disponibles = sorted(detalle_maquina["Maquina"].unique().tolist())
-        maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
+            # Reunir detalle completo para esa máquina
+            df_maquina = schedule[schedule["Maquina"] == maquina_sel].copy()
 
-        df_maquina = detalle_maquina[detalle_maquina["Maquina"] == maquina_sel].copy()
-        df_maquina.sort_values(by="Inicio", inplace=True)
+            # Agregar CodigoTroquel y Colores desde el dataset original si no estaban
+            if "CodigoTroquel" not in df_maquina.columns and "CodigoTroquel" in df.columns:
+                df_maquina = df_maquina.merge(
+                    df[["CodigoProducto", "Subcodigo", "CodigoTroquel"]],
+                    how="left",
+                    left_on=["CodigoProducto", "Subcodigo"],
+                    right_on=["CodigoProducto", "Subcodigo"]
+                )
 
-        st.dataframe(
-            df_maquina[["OT_id", "Proceso", "Inicio", "Fin"]]
-            .rename(columns={
-                "OT_id": "Orden de Trabajo",
-                "Proceso": "Proceso",
-                "Inicio": "Inicio (fecha y hora)",
-                "Fin": "Fin (fecha y hora)"
-            }),
-            hide_index=True,
-            use_container_width=True
-        )
-    else:
-        st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
+            if "Colores" not in df_maquina.columns and "Colores" in df.columns:
+                df_maquina = df_maquina.merge(
+                    df[["CodigoProducto", "Subcodigo", "Colores"]],
+                    how="left",
+                    left_on=["CodigoProducto", "Subcodigo"],
+                    right_on=["CodigoProducto", "Subcodigo"]
+                )
+
+            df_maquina.sort_values(by="Inicio", inplace=True)
+
+            # Columnas dinámicas según tipo de máquina
+            if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
+                st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
+                cols = ["OT_id", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
+            elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
+                st.write("🎨 Mostrando colores del trabajo de impresión.")
+                cols = ["OT_id", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
+            else:
+                cols = ["OT_id", "Proceso", "Inicio", "Fin", "DueDate"]
+
+            cols_exist = [c for c in cols if c in df_maquina.columns]
+            st.dataframe(df_maquina[cols_exist], use_container_width=True)
+        else:
+            st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
 
     # ==========================
     # Carga por máquina / día
@@ -214,7 +219,7 @@ if archivo is not None:
         st.info("No hay carga registrada (puede que no haya tareas planificadas).")
 
     # ==========================
-    # Resumen por OT (Fin vs Entrega)
+    # Resumen por OT
     # ==========================
     st.subheader("📦 Resumen por OT (Fin vs Entrega)")
     if not resumen_ot.empty:

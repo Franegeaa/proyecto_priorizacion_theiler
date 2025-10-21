@@ -224,12 +224,31 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     }
 
     colas = {}
+
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
         if q.empty:
             colas[m] = deque()
             continue
-        q.sort_values(by=["DueDate", "GroupKey", "CantidadPliegos"], ascending=[True, True, False], inplace=True)
+
+        # 🧠 Si la máquina es una troqueladora (manual o automática),
+        # agrupa internamente por Código de Troquel para reducir setups.
+        if "troquel" in m.lower() or "manual" in m.lower() or "autom" in m.lower():
+            if "CodigoTroquel" in q.columns:
+                # Ordena por troquel, luego por fecha, luego por cantidad
+                q.sort_values(by=["CodigoTroquel", "DueDate", "CantidadPliegos"],
+                            ascending=[True, True, False],
+                            inplace=True)
+            else:
+                q.sort_values(by=["DueDate", "CantidadPliegos"],
+                            ascending=[True, False],
+                            inplace=True)
+        else:
+            # Ordenamiento normal para el resto de procesos
+            q.sort_values(by=["DueDate", "GroupKey", "CantidadPliegos"],
+                        ascending=[True, True, False],
+                        inplace=True)
+
         colas[m] = deque(q.to_dict("records"))
 
     pendientes_por_ot = defaultdict(set)
