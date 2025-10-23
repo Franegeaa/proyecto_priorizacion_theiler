@@ -24,20 +24,22 @@ if archivo is not None:
     cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
 
     st.subheader("⚙️ Parámetros de jornada")
-    st.write(f"Jornada laboral: {horas_por_dia(cfg)} h/día")
 
     # ---------------------------------------------------
     # Normalización de columnas (mantener segunda si hay duplicadas)
     # ---------------------------------------------------
-    col_counts = Counter(df.columns)
-    cols_final, seen = [], Counter()
-    for c in df.columns:
-        seen[c] += 1
-        if col_counts[c] > 1 and seen[c] == 1:
-            continue
-        cols_final.append(c)
-    df = df[cols_final]
+    # col_counts = Counter(df.columns)
+    # cols_final, seen = [], Counter()
 
+    # for c in df.columns:
+    #     seen[c] += 1
+    #     if col_counts[c] > 1 and seen[c] == 1:
+    #         continue
+    #     cols_final.append(c)
+    # df = df[cols_final]
+
+    # ---------------------------------------------------
+    
     # Renombres base
     df.rename(columns={
         "ORDEN": "CodigoProducto",
@@ -67,12 +69,14 @@ if archivo is not None:
 
     df["_PEN_Guillotina"]   = to_bool_series(["GuillotinadoSNDpd"])
     df["_PEN_Barnizado"]    = to_bool_series(["Barnizado.1"])
-    df["_PEN_Encapado"]     = to_bool_series(["EncapadoSNDpd", "EncapadoSND"])
+    df["_PEN_Encapado"]     = to_bool_series(["Encapado", "EncapadoSND"])
     df["_PEN_OPP"]          = to_bool_series(["OPPSNDpd", "OPPSND"])
     df["_PEN_Troquelado"]   = to_bool_series(["TroqueladoSNDpd", "TroqueladoSND"])
     df["_PEN_Descartonado"] = to_bool_series(["DescartonadoSNDpd", "DescartonadoSND"])
     df["_PEN_Ventana"]      = to_bool_series(["PegadoVSNDpd", "PegadoVSND"])
     df["_PEN_Pegado"]       = to_bool_series(["PegadoSNDpd", "PegadoSND"])
+    df["_IMP_Dorso"]      = to_bool_series(["Dorso"])         # Flexo → doble pasada
+    df["_IMP_FreyDorDpd"] = to_bool_series(["FreyDorDpd"])    # Offset → doble pasada
 
     # Troquel preferido
     for c in ["CodigoTroquel", "CodigoTroquelTapa", "CodigoTroquelCuerpo", "CodTroTapa", "CodTroCuerpo"]:

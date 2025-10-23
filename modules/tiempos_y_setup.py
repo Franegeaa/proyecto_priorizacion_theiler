@@ -72,7 +72,6 @@ def tiempo_operacion_h(orden, proceso, maquina, cfg):
 
     # Si no hay capacidad definida, saltar
     if not cap or cap <= 0:
-        print(f"⚠️ Sin capacidad definida para {proceso} ({maquina}) en config.")
         return (0.0, 0.0)
 
     # Pliegos base
