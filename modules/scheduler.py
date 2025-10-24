@@ -52,9 +52,6 @@ def _procesos_pendientes_de_orden(orden: pd.Series):
         "Impresión Flexo",
         "Impresión Offset",
         "Barnizado",
-        "Cuño",
-        "Encapado",
-        "OPP",
         "Troquelado",
         "Descartonado",
         "Ventana",
@@ -195,12 +192,13 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
     # Registro incremental de asignaciones tentativas por máquina
     # clave: nombre de máquina -> lista de dicts con al menos {CodigoTroquel, horas}
     plan_actual = defaultdict(list)
+
     for idx, row in df.iterrows():
         ot = f"{row['CodigoProducto']}-{row['Subcodigo']}"
         colores = row.get("Colores", "")
         pendientes = _procesos_pendientes_de_orden(row)
+
         for proceso in pendientes:
-            # Pasamos plan_actual para que Troquelado pueda agrupar/contar carga
             maquina = elegir_maquina(proceso, row, cfg, plan_actual)
             if not maquina:
                 continue
@@ -219,12 +217,12 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             tareas.append({
                 "idx": idx,
                 "OT_id": ot,
-                "CodigoProducto": row.get("CodigoProducto"),
-                "Subcodigo": row.get("Subcodigo"),
-                "Cliente": row.get("Cliente"),
+                "CodigoProducto": row["CodigoProducto"],
+                "Subcodigo": row["Subcodigo"],
+                "Cliente": row["Cliente"],
                 "Proceso": proceso,
                 "Maquina": maquina,
-                "DueDate": row.get("FechaEntrega"),
+                "DueDate": row["FechaEntrega"],
                 "GroupKey": _clave_prioridad_maquina(proceso, row),
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
                 "CodigoTroquel": row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "",
@@ -234,54 +232,9 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "Poses": poses,
             })
 
-            # Actualizar plan_actual solo para Troquelado (para agrupar y medir carga aproximada)
-            if proceso == "Troquelado":
-                try:
-                    troq = (row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "")
-                    troq = str(troq).strip().lower()
-                    cap = capacidad_pliegos_h("Troquelado", maquina, cfg)
-                    horas_est = (pliegos / cap) if (cap and cap > 0) else 0.0
-                    plan_actual[maquina].append({"CodigoTroquel": troq, "horas": float(horas_est)})
-                except Exception:
-                    # En caso de error, igualmente registrar presencia para agrupar por troquel
-                    troq = str(row.get("CodigoTroquel") or "").strip().lower()
-                    plan_actual[maquina].append({"CodigoTroquel": troq, "horas": 0.0})
-
-            # 🟦 Barnizado (solo si hay impresión offset pendiente)
-            if es_si(row.get("_PEN_Barnizado")) and es_si(row.get("_PEN_ImpresionOffset")):
-                tareas.append({
-                    "idx": idx,
-                    "OT_id": ot,
-                    "CodigoProducto": row["CodigoProducto"],
-                    "Subcodigo": row["Subcodigo"],
-                    "Cliente": row["Cliente"],
-                    "Proceso": "Barnizado",
-                    "Maquina": "Offset",
-                    "DueDate": row["FechaEntrega"],
-                    "GroupKey": ("barnizado",),
-                    "CantidadPliegos": row.get("CantidadPliegos", 0),
-                    "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
-                })
-
-            # # 🟩 Encapado (tercerizado, demora fija)
-            # if es_si(row.get("_PEN_Encapado")):
-            #     tareas.append({
-            #         "idx": idx,
-            #         "OT_id": ot,
-            #         "CodigoProducto": row["CodigoProducto"],
-            #         "Subcodigo": row["Subcodigo"],
-            #         "Cliente": row["Cliente"],
-            #         "Proceso": "Encapado",
-            #         "Maquina": "EXTERNO",
-            #         "DueDate": row[fecha_col],
-            #         "GroupKey": ("encapado",),
-            #         "CantidadPliegos": row.get("CantidadPliegos", 0),
-            #         "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
-            #         "DuracionDias": 3,
-            #     })
-
     tasks = pd.DataFrame(tareas)
-
+    tasks.drop_duplicates(subset=["OT_id", "Proceso"], inplace=True)
+    
     if not tasks.empty:
         tasks["DueDate"] = pd.to_datetime(tasks["DueDate"], dayfirst=True, errors="coerce")
     
@@ -343,6 +296,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         troq_df = tasks.loc[mask_troq].copy()
 
         if not troq_df.empty:
+            # Añadir columna clave de troquel
             troq_df["_troq_key"] = troq_df["CodigoTroquel"]
 
             # Agrupar por troquel y ordenar por fecha de entrega
@@ -352,7 +306,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 if pd.isna(due_min):
                     due_min = pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].fillna(0).sum())
-                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 3000).any())
+                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 2500).any())
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande))
 
             grupos.sort(key=lambda x: x[0])  # por fecha de entrega más próxima
@@ -365,7 +319,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 if not candidatas:
                     continue
 
-                # Regla fija: si cualquier OT del grupo supera 3000 pliegos, y existe automática → automática
+                # Regla fija: si cualquier OT del grupo supera 2500 pliegos, y existe automática → automática
                 if alguna_grande and auto_name:
                     m_sel = auto_name
                 else:
@@ -395,13 +349,31 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     colas = {}
 
     def _cola_impresora(q: pd.DataFrame) -> deque:
-        """Agrupa OTs con la misma combinación de colores en impresoras
-        (Offset / Flexo), priorizando por DueDate mínima del grupo."""
+        """Agrupa OTs en impresoras (Offset/Flexo) priorizando por:
+        1) DueDate (fecha entrega más próxima primero)
+        2) Cliente (marca, para agrupar por cliente)
+        3) Colores (combinación de colores, para minimizar setup)"""
+
         if q.empty:
             return deque()
 
         q = q.copy()
         
+        # Normalizar Cliente
+        if "Cliente" in q.columns:
+            cliente = q["Cliente"]
+        else:
+            cliente = pd.Series("", index=q.index)
+        
+        q["_cliente_key"] = (
+            cliente
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+        
+        # Normalizar Colores
         if "Colores" in q.columns:
             colores = q["Colores"]
         else:
@@ -415,21 +387,22 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
             .str.lower()
         )
 
+        # Agrupar por (Cliente, Colores)
         grupos = []
-        for color_key, g in q.groupby("_color_key", dropna=False):
+        for (cliente_key, color_key), g in q.groupby(["_cliente_key", "_color_key"], dropna=False):
             due_min = pd.to_datetime(g["DueDate"], errors="coerce").min()
             if pd.isna(due_min):
                 due_min = pd.Timestamp.max
 
-            # Orden interno dentro del grupo
+            # Orden interno dentro del grupo: por fecha y luego cantidad
             g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
-            grupos.append((due_min, color_key, g_sorted.to_dict("records")))
+            grupos.append((due_min, cliente_key, color_key, g_sorted.to_dict("records")))
 
-        # Priorizar los grupos por DueDate más próxima
-        grupos.sort(key=lambda x: x[0])
+        # Priorizar grupos por: DueDate -> Cliente -> Colores
+        grupos.sort(key=lambda x: (x[0], x[1], x[2]))
 
         lista_final = []
-        for _, _, recs in grupos:
+        for _, _, _, recs in grupos:
             lista_final.extend(recs)
 
         return deque(lista_final)
@@ -473,7 +446,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
 
         return deque(lista)
 
-
+    
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
         if q.empty:
@@ -491,18 +464,24 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                         ascending=[True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
+    # ---------- Orden estándar de procesos ----------
+    flujo_estandar = [
+        "Guillotina",
+        "Impresión Flexo",
+        "Impresión Offset",
+        "Barnizado",
+        "Troquelado",
+        "Descartonado",
+        "Ventana",
+        "Pegado",
+    ]
+
     # ---------- Precedencias ----------
-    anterior = {
-        "Impresión Flexo": "Guillotina",
-        "Impresión Offset": "Guillotina",
-        "Barnizado": "Impresión Offset",
-        "OPP": "Encapado",
-        "Encapado": "OPP",
-        "Troquelado": "Encapado",
-        "Descartonado": "Troquelado",
-        "Ventana": "Descartonado",
-        "Pegado": "Ventana",
-    }
+    anterior = {}
+    for i, proceso in enumerate(flujo_estandar):
+        if i > 0:
+            anterior[flujo_estandar[i]] = flujo_estandar[i-1]
+
 
     pendientes_por_ot = defaultdict(set)
     for _, t in tasks.iterrows():
@@ -517,10 +496,20 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         return any(len(q) > 0 for q in colas.values())
 
     def lista_para_ejecutar(t):
-        proc = t["Proceso"]; ot = t["OT_id"]; prev = anterior.get(proc)
-        if prev and prev in pendientes_por_ot[ot]:
-            return prev in completado[ot]
-        return True
+        proc = t["Proceso"]
+        ot = t["OT_id"]
+        prev = anterior.get(proc)
+
+        # Si no tiene proceso anterior (por ejemplo Guillotina), puede ejecutarse
+        if not prev:
+            return True
+
+        # Si la OT no tiene ese proceso anterior entre sus pendientes, lo ignora
+        if prev not in pendientes_por_ot[ot]:
+            return True
+
+        # Solo puede ejecutarse si el proceso anterior fue completado
+        return prev in completado[ot]
 
     # ---------- Bucle de planificación ----------
     progreso = True

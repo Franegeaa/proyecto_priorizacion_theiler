@@ -204,7 +204,7 @@ if archivo is not None:
                 cols = ["OT_id", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
-                cols = ["OT_id", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = ["OT_id", "Cliente", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
             else:
                 cols = ["OT_id", "Proceso", "Inicio", "Fin", "DueDate"]
 
