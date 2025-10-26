@@ -503,7 +503,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         # Si no tiene proceso anterior (por ejemplo Guillotina), puede ejecutarse
         if not prev:
             return True
-
+        
         # Si la OT no tiene ese proceso anterior entre sus pendientes, lo ignora
         if prev not in pendientes_por_ot[ot]:
             return True
@@ -634,6 +634,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         .apply(lambda x: x.reset_index(drop=True))
         .reset_index(level=0)
     )
-    
+
     return schedule, carga_md, resumen_ot, detalle_maquina
 
