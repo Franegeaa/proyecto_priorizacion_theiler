@@ -119,6 +119,11 @@ def elegir_maquina(proceso, orden, cfg, plan_actual=None):
         pegs = [m for m in candidatos if "peg" in m.lower() or "pegad" in m.lower()]
         return pegs[0] if pegs else candidatos[0] # Fallback
 
+    if "descartonad in" in proc_lower:
+        descs = [m for m in candidatos if "descartonad" in m.lower()]
+        if descs:
+            return descs[0]
+    
     # Fallback general: Devuelve la primera máquina candidata
     return candidatos[0]
 
@@ -222,12 +227,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
         return 999
 
     maquinas = sorted(cfg["maquinas"]["Maquina"].unique(), key=_orden_proceso)
-    print("\n🧭 Orden lógico de planificación por máquina:")
-    for m in maquinas: print(f"   - {m}")  
-    
+   
     # =================================================================
     # 3. REASIGNACIÓN TROQUELADO (Balanceo de Carga - de "buena distribucion")
     # =================================================================
+    
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().eq("troquelado")]
     manuales = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower()]
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower()]
@@ -265,6 +269,48 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 )
                 tasks.loc[idxs, "Maquina"] = m_sel # Sobreescribe la máquina asignada
                 load_h[m_sel] += total_pliegos / cap[m]
+
+    # =====================================================================
+    # 3.1 REASIGNACIÓN DESCARTONADO (Balanceo de Carga - NUEVO BLOQUE)
+    # =====================================================================
+    desc_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("descartonado")]
+    desc_maquinas = desc_cfg["Maquina"].tolist()
+
+    if not tasks.empty and len(desc_maquinas) > 1: # Solo si hay más de una descartonadora
+        
+        # Calcula capacidades (asume un valor fallback si no está definido)
+        cap_desc = {} 
+        for m in desc_maquinas:
+            c = capacidad_pliegos_h("Descartonado", m, cfg) 
+            cap_desc[m] = float(c) if c and c > 0 else 5000.0 # Ajusta fallback si es necesario
+        
+        load_h_desc = {m: 0.0 for m in desc_maquinas} # Carga acumulada en horas
+
+        # Filtra solo tareas de Descartonado
+        mask_desc = tasks["Proceso"].eq("Descartonado")
+        desc_df = tasks.loc[mask_desc].copy()
+
+        if not desc_df.empty:
+            # Ordena las tareas de descartonado por DueDate para priorizar
+            desc_df.sort_values(by=["DueDate", "_orden_proceso"], inplace=True)
+            
+            # Itera por cada tarea y la asigna a la máquina que termine antes
+            for idx, tarea in desc_df.iterrows():
+                pliegos_tarea = float(tarea.get("CantidadPliegos", 0))
+                if pliegos_tarea <= 0: continue
+
+                # Elige la máquina con menor tiempo de finalización proyectado
+                m_sel = min(
+                    desc_maquinas,
+                    key=lambda m: load_h_desc[m] + (pliegos_tarea / cap_desc[m])
+                )
+                
+                # Sobreescribe la máquina en el DataFrame 'tasks' original
+                tasks.loc[idx, "Maquina"] = m_sel
+                # Acumula la carga en la máquina seleccionada
+                load_h_desc[m_sel] += pliegos_tarea / cap_desc[m]
+
+            print(f"\n📊 Balanceo Descartonadoras: Carga final (horas) -> {load_h_desc}")
 
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES (de "buena distribucion")
@@ -409,7 +455,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     resumen_ot = pd.DataFrame()
     if not schedule.empty:
         resumen_ot = schedule.groupby("OT_id").agg(Fin_OT=('Fin', 'max'), DueDate=('DueDate', 'max')).reset_index()
-        resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - resumen_ot["DueDate"]).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2)
+        due_date_deadline = pd.to_datetime(resumen_ot["DueDate"].dt.date) + timedelta(hours=18)
+        resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - due_date_deadline).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2) # clip(lower=0) asegura que no haya atrasos negativos
         resumen_ot["EnRiesgo"] = resumen_ot["Atraso_h"] > 0
         schedule = schedule.merge(resumen_ot[["OT_id", "Atraso_h"]], on="OT_id", how="left")
     else:
@@ -423,35 +470,5 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
             .apply(lambda x: x.reset_index(drop=True))
             .reset_index(level=0)
         )
-
-    # --- DEBUG FINAL --- (Mantenido para verificación)
-    try:
-        orden_idx = {p: i for i, p in enumerate(flujo_estandar)}
-        print("\n==================== DEBUG ORDEN DE PROCESOS ====================")
-        # (El resto del bloque de debug se mantiene igual)
-        # ... [código de debug omitido para brevedad] ...
-        if schedule.empty:
-             print("No hay tareas planificadas para verificar.")
-        else:
-            for ot_id, g in schedule.groupby("OT_id"):
-                g_sorted = g.sort_values("Inicio")
-                procesos = g_sorted["Proceso"].tolist()
-                indices = [orden_idx.get(p.strip(), 999) for p in procesos]
-                desordenes = []
-                for i in range(1, len(indices)):
-                    if indices[i] < indices[i - 1]: 
-                        if indices[i] != 999 and indices[i-1] != 999:
-                            desordenes.append((procesos[i].strip(), procesos[i-1].strip()))
-                if desordenes:
-                    print(f"⚠️  OT {ot_id} tiene procesos fuera de orden:")
-                    for post, prev in desordenes:
-                        print(f"   → {post} (idx {orden_idx.get(post)}) fue agendado ANTES que {prev} (idx {orden_idx.get(prev)})")
-                else:
-                    procesos_limpios = [p.strip() for p in procesos if p.strip() in orden_idx]
-                    if len(procesos_limpios) > 1: print(f"✅ OT {ot_id} respeta el orden estándar ({' → '.join(procesos_limpios)})")
-                    elif len(procesos_limpios) == 1: print(f"✅ OT {ot_id} OK ({procesos_limpios[0]})")
-        print("=================================================================\n")
-
-    except Exception as e: print(f"[DEBUG ERROR]: {e}")
 
     return schedule, carga_md, resumen_ot, detalle_maquina
