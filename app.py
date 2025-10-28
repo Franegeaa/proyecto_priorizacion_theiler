@@ -19,6 +19,24 @@ st.title("📦 Planificador de Producción – Theiler Packaging")
 
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
+color_map_procesos = {
+    "Guillotina": "dimgray",         # Gris oscuro
+    "Impresión Offset": "mediumseagreen", # Verde mar
+    "Impresión Flexo": "darkorange",    # Naranja oscuro
+    "Barnizado": "gold",              # Dorado (o "Barniz" si se llama así)
+    "Barniz": "gold",                 # Añade variantes si es necesario
+    "OPP": "slateblue",             # Azul pizarra
+    "Stamping": "firebrick",          # Rojo ladrillo
+    "Cuño": "darkcyan",             # Cian oscuro (Añade si es un proceso)
+    "Encapado": "sandybrown",         # Marrón arena (Añade si es un proceso)
+    "Troquelado": "lightcoral",       # Coral claro
+    "Descartonado": "dodgerblue",     # Azul brillante
+    "Ventana": "skyblue",             # Azul cielo
+    "Pegado": "mediumpurple",         # Púrpura medio
+    # --- Añade aquí cualquier otro proceso que pueda aparecer ---
+    # "Otro Proceso": "#FF5733", # Ejemplo con Hex
+}
+
 if archivo is not None:
     df = pd.read_excel(archivo)
     cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
@@ -127,20 +145,39 @@ if archivo is not None:
         fig = None
         try:
             if vista == "Por Orden de Trabajo (OT)":
-                fig = px.timeline(
-                    schedule,
-                    x_start="Inicio", x_end="Fin",
-                    y="OT_id", color="Proceso",
-                    hover_data=["Maquina", "Cliente", "Atraso_h", "DueDate"],
-                    title="Procesos por Orden de Trabajo",
+                opciones_ot = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist())
+                ot_seleccionada = st.selectbox(
+                    "Seguimiento por OT:",
+                    opciones_ot,
+                    key="gantt_ot_select"
                 )
-                fig.update_yaxes(autorange="reversed")
+                data_gantt = schedule if ot_seleccionada == "(Todas)" else schedule[schedule["OT_id"] == ot_seleccionada]
+
+                if data_gantt.empty:
+                    st.info("La OT seleccionada no tiene tareas planificadas.")
+                else:
+                    fig = px.timeline(
+                        data_gantt,
+                        x_start="Inicio", x_end="Fin",
+                        y="OT_id", color="Proceso",
+                        color_discrete_map=color_map_procesos,
+                        hover_data=["Maquina", "Cliente", "Atraso_h", "DueDate"],
+                        title="Procesos por Orden de Trabajo",
+                    )
+                    fig.update_yaxes(autorange="reversed")
 
             elif vista == "Por Máquina":
+                maquinas_ordenadas = sorted(
+                    schedule["Maquina"].dropna().unique().tolist(),
+                    key=lambda v: str(v).lower(),
+                    reverse=True
+                )
                 fig = px.timeline(
                     schedule,
                     x_start="Inicio", x_end="Fin",
                     y="Maquina", color="Proceso",
+                    color_discrete_map=color_map_procesos,
+                    category_orders={"Maquina": maquinas_ordenadas},
                     hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
                     title="Procesos por Máquina",
                 )

@@ -310,8 +310,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 # Acumula la carga en la máquina seleccionada
                 load_h_desc[m_sel] += pliegos_tarea / cap_desc[m]
 
-            print(f"\n📊 Balanceo Descartonadoras: Carga final (horas) -> {load_h_desc}")
-
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES (de "buena distribucion")
     # =================================================================

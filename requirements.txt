@@ -1,3 +1,7 @@
+pandas
+openpyxl
+plotly
+numpy
+datetime
 streamlit>=1.36
-pandas>=2.0
-openpyxl>=3.1
+collections
