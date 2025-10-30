@@ -264,7 +264,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 if not candidatas: continue
                 m_sel = auto_name if (alguna_grande and auto_name) else min(
                     candidatas, 
-                    key=lambda m: (load_h[m] + (total_pliegos / cap[m])) * (1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0)) if "autom" in m.lower() else 1.0)
+                    key=lambda m: (load_h[m] + (total_pliegos / cap[m])) * (0.8 if "autom" in str(m).lower() else 1.0)
                 )
                 tasks.loc[idxs, "Maquina"] = m_sel # Sobreescribe la máquina asignada
                 load_h[m_sel] += total_pliegos / cap[m]

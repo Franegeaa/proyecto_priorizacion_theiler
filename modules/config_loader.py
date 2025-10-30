@@ -40,7 +40,7 @@ def es_feriado(d, cfg):
     return d.strftime("%Y-%m-%d") in cfg["feriados"]
 
 def proximo_dia_habil(d, cfg):
-    while d.weekday() >= 5 or es_feriado(d, cfg):
+    while d.weekday() == 5 or d.weekday() == 6 or es_feriado(d, cfg):
         d += timedelta(days=1)
     return d
 
@@ -49,7 +49,7 @@ def construir_calendario(cfg, start=None):
         start = date.today()
     start = proximo_dia_habil(start, cfg)
     h_dia = horas_por_dia(cfg)
-    inicio_hora = time(8, 0)
+    inicio_hora = time(7, 0)
     agenda = {}
     for m in cfg["maquinas"]["Maquina"].unique():
         agenda[m] = {"fecha": start, "hora": inicio_hora, "resto_horas": h_dia}
