@@ -65,7 +65,6 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     
     flujo = [p.strip() for p in flujo] 
     orden_idx = {p: i for i, p in enumerate(flujo)}
-    
     pendientes = []
     
     # Crea la lista de pendientes basado en los flags _PEN_
@@ -84,7 +83,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(set(pendientes_limpios)) # Quitar duplicados
     pendientes_limpios.sort(key=lambda p: orden_idx.get(p, 999)) # Ordena según el flujo
-    
+
     return pendientes_limpios
 
 # =======================================================
@@ -179,7 +178,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
                 "CodigoTroquel": row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "",
                 "Colores": row.get("Colores", ""), "CantidadPliegos": pliegos, "Bocas": bocas, "Poses": poses,
-            })
+            })  
 
     tasks = pd.DataFrame(tareas)
     tasks.drop_duplicates(subset=["OT_id", "Proceso"], inplace=True)
@@ -255,7 +254,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
             for troq_key, g in troq_df.groupby("_troq_key", dropna=False):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].fillna(0).sum())
-                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 2500).any())
+                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 2000).any())
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande))
             grupos.sort() # Ordena grupos por DueDate
 

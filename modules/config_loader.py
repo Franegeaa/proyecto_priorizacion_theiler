@@ -22,6 +22,12 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
     cfg["orden_std"] = pd.read_excel(path, sheet_name="OrdenEstandar").sort_values("Secuencia")["Proceso"].tolist() # Lista ordenada de procesos estándar
     cfg["maquinas"] = pd.read_excel(path, sheet_name="Maquinas")
     cfg["reglas"] = pd.read_excel(path, sheet_name="ReglasCambio")
+    df_abbr = pd.read_excel(path, sheet_name="Abreviaturas")
+    mapa = pd.Series(
+            df_abbr["NombreProceso"].values, 
+            index=df_abbr["Abbr"]
+        ).to_dict()
+    cfg["mapa_abreviaturas"] = mapa
     return cfg
 
 def horas_por_dia(cfg):
