@@ -131,7 +131,7 @@ if archivo is not None:
 
         tipo_filtro = st.radio(
             "Seleccionar Rango de Fechas:",
-            ["Ver todo", "Día"], # "Semana", "Mes", "Rango personalizado"],
+            ["Ver todo", "Día", "Semana",  "Mes"], # "Rango personalizado"],
             index=0,
             horizontal=True,
             key="filtro_fecha_radio"
@@ -148,14 +148,14 @@ if archivo is not None:
         elif tipo_filtro == "Semana":
             fecha_semana = st.date_input("Seleccioná un día de la semana:", value=date.today(), min_value=min_plan_date, max_value=max_plan_date, key="filtro_semana")
             start_of_week = fecha_semana - pd.Timedelta(days=fecha_semana.weekday())
-            range_start_dt = pd.to_datetime(start_of_week) # CORREGIDO: Asignar a variable correcta y convertir a datetime
-            range_end_dt = range_start_dt + pd.Timedelta(days=7) # CORREGIDO: Asignar a variable correcta
+            range_start_dt = pd.to_datetime(start_of_week) + pd.Timedelta(hours=7) # CORREGIDO: Asignar a variable correcta y convertir a datetime
+            range_end_dt = range_start_dt + pd.Timedelta(days=7) + pd.Timedelta(hours=9) # CORREGIDO: Asignar a variable correcta
 
         elif tipo_filtro == "Mes":
             fecha_mes = st.date_input("Seleccioná un día del mes:", value=date.today(), min_value=min_plan_date, max_value=max_plan_date, key="filtro_mes")
-            range_start_dt = pd.to_datetime(fecha_mes.replace(day=1))
+            range_start_dt = pd.to_datetime(fecha_mes.replace(day=1)) + pd.Timedelta(hours=7)
             next_month = (fecha_mes.replace(day=28) + pd.Timedelta(days=4))
-            range_end_dt = pd.to_datetime(next_month.replace(day=1))
+            range_end_dt = pd.to_datetime(next_month.replace(day=1)) + pd.Timedelta(hours=9)
 
         elif tipo_filtro == "Rango personalizado":
             col_f1, col_f2 = st.columns(2)
@@ -238,7 +238,7 @@ if archivo is not None:
                                 bargroupgap=1,
                             )
                             fig.update_traces(selector=dict(type="bar"), width=0.5)
-                        if tipo_filtro != "Ver todo" and opciones_ot != "(Todas)":
+                        if tipo_filtro != "Ver todo" and opciones_ot != "(Todas)" and tipo_filtro != "Semana" and tipo_filtro != "Mes":
                             fig.update_layout(
                                 height=max(300, 30 * len(categorias_ot)),
                             )
