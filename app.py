@@ -141,18 +141,18 @@ if archivo is not None:
         range_end_dt = None   # CORREGIDO: renombrado
 
         if tipo_filtro == "Día":
-            fecha_dia = st.date_input("Seleccioná el día:", value=date.today(), min_value=min_plan_date, max_value=max_plan_date, key="filtro_dia")
+            fecha_dia = st.date_input("Seleccioná el día:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_dia")
             range_start_dt = pd.to_datetime(fecha_dia) + pd.Timedelta(hours=7) # CORREGIDO: Asignar a variable correcta
             range_end_dt = range_start_dt + pd.Timedelta(hours=9) # CORREGIDO: Asignar a variable correcta
 
         elif tipo_filtro == "Semana":
-            fecha_semana = st.date_input("Seleccioná un día de la semana:", value=date.today(), min_value=min_plan_date, max_value=max_plan_date, key="filtro_semana")
+            fecha_semana = st.date_input("Seleccioná un día de la semana:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_semana")
             start_of_week = fecha_semana - pd.Timedelta(days=fecha_semana.weekday())
             range_start_dt = pd.to_datetime(start_of_week) + pd.Timedelta(hours=7) # CORREGIDO: Asignar a variable correcta y convertir a datetime
             range_end_dt = range_start_dt + pd.Timedelta(days=7) + pd.Timedelta(hours=9) # CORREGIDO: Asignar a variable correcta
 
         elif tipo_filtro == "Mes":
-            fecha_mes = st.date_input("Seleccioná un día del mes:", value=date.today(), min_value=min_plan_date, max_value=max_plan_date, key="filtro_mes")
+            fecha_mes = st.date_input("Seleccioná un día del mes:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_mes")
             range_start_dt = pd.to_datetime(fecha_mes.replace(day=1)) + pd.Timedelta(hours=7)
             next_month = (fecha_mes.replace(day=28) + pd.Timedelta(days=4))
             range_end_dt = pd.to_datetime(next_month.replace(day=1)) + pd.Timedelta(hours=9)
