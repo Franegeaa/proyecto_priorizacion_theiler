@@ -373,12 +373,22 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 h_used = (last_end - datetime.combine(last_end.date(), time(8, 0))).total_seconds() / 3600.0
                 agenda[maq]["resto_horas"] = max(0, h_dia - h_used)
         return True 
+    
+    #--- Bucle principal de planificación ---
+    troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().eq("troquelado")]
+    # manuales_troq = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower()]
+    # auto_names_troq = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower()]
+
+    # MAQUINA_CRITICA_TROQ = auto_names_troq[0] if auto_names_troq else None
+
+    # MAQUINAS_CRITICAS = {MAQUINA_CRITICA_TROQ}
 
     progreso = True
     while quedan_tareas() and progreso:
         progreso = False
         for maquina in maquinas: # Itera en orden de flujo
             if not colas.get(maquina): continue
+
             tareas_agendadas = True
             while tareas_agendadas: # Vacía la cola de la máquina actual
                 tareas_agendadas = False
@@ -391,7 +401,43 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                     if mp_ok and lista_para_ejecutar(t_cand):
                         idx_cand = i
                         break
-                        
+                
+                tarea_robada = False
+
+                # #---- Lógica de "robo" de tarea ----
+                # if idx_cand == -1 and maquina in MAQUINAS_CRITICAS:
+                #     # La automatica esta al pedo, roba la primera tarea troquelada lista de otra maquina
+                #     tarea_encontrada = None
+                #     fuente_maquina = None
+                #     idx_robado = -1
+        
+                #     for m_manual in manuales_troq:
+
+                #         if not colas.get(m_manual): continue
+
+                #         for i in range(len(colas[m_manual])):
+                #             t_cand = colas[m_manual][i]
+
+                #             if t_cand["Proceso"].strip() != "Troquelado": continue
+                #             mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                #             mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+
+                #             if mp_ok and lista_para_ejecutar(t_cand):
+                #                 tarea_encontrada = t_cand
+                #                 fuente_maquina = m_manual
+                #                 idx_robado = i
+                #                 break
+                #         if tarea_encontrada: break
+
+                #     if tarea_encontrada:
+                #         tarea_para_mover = colas[fuente_maquina][idx_robado]
+                #         del colas[fuente_maquina][idx_robado]
+
+                #         colas[maquina].appendleft(tarea_para_mover)
+                #         idx_cand = 0
+                #         tarea_robada = True
+                #----------------------------------
+
                 if idx_cand == -1: break # No hay nada listo en esta máquina
 
                 # Mueve el candidato al frente (si no es el primero)
@@ -404,15 +450,18 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 _, proc_h = tiempo_operacion_h(orden, t["Proceso"], maquina, cfg)
                 setup_min = setup_base_min(t["Proceso"], maquina, cfg)
                 motivo = "Setup base"
-                last_task = ultimo_en_maquina.get(maquina) # Es un dict 't'
-                if last_task:
-                    last_orden_data = df_ordenes.loc[last_task["idx"]] # Recupera datos completos
-                    if (t["Proceso"] == "Troquelado" and 
-                        str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
-                        setup_min = 0; motivo = "Mismo troquel (sin setup)"
-                    elif usa_setup_menor(last_orden_data, orden, t["Proceso"]): # Usa df_ordenes para comparar
-                        setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
+
+                if not tarea_robada:
+                    last_task = ultimo_en_maquina.get(maquina) # Es un dict 't'
+                    if last_task:
+                        last_orden_data = df_ordenes.loc[last_task["idx"]] # Recupera datos completos
+                        if (t["Proceso"] == "Troquelado" and 
+                            str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
+                            setup_min = 0; motivo = "Mismo troquel (sin setup)"
+                        elif usa_setup_menor(last_orden_data, orden, t["Proceso"]): # Usa df_ordenes para comparar
+                            setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
                 
+                    
                 total_h = proc_h + setup_min / 60.0
                 if pd.isna(total_h) or total_h <= 0: continue    
 
@@ -435,6 +484,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
                 completado[t["OT_id"]].add(t["Proceso"])
                 ultimo_en_maquina[maquina] = t # Guarda la tarea actual (dict)
                 progreso = True; tareas_agendadas = True
+
+                # if tarea_robada:
+                #     if ultimo_en_maquina.get(fuente_maquina) == t:
+                #         ultimo_en_maquina[fuente_maquina] = None
+                #         pass
     
     # =================================================================
     # 6. SALIDAS (Combinadas y limpias)
