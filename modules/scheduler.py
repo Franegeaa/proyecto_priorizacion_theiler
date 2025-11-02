@@ -99,14 +99,14 @@ def elegir_maquina(proceso, orden, cfg, plan_actual=None):
     candidatos = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains(proc_lower.split()[0])]["Maquina"].tolist()
     if not candidatos:
         return None
-
+    
     # Reglas específicas (pueden simplificarse si se manejan en config)
     if "impresión" in proc_lower:
         mat = str(orden.get("MateriaPrima", "")).lower()
-        if "flexo" in proc_lower or "micro" in mat:
+        if "flexo" in proc_lower and ("micro" in mat or "carton" in mat):
             flexos = [m for m in candidatos if "flexo" in m.lower()]
             return flexos[0] if flexos else candidatos[0] # Fallback
-        if "offset" in proc_lower or "cartulin" in mat:
+        if "offset" in proc_lower and ("cartulin" in mat or "papel" in mat):
             offsets = [m for m in candidatos if "offset" in m.lower()]
             return offsets[0] if offsets else candidatos[0] # Fallback
 
