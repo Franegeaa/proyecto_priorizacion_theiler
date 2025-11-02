@@ -89,8 +89,8 @@ if archivo is not None:
     # ... (Impresión: separar Offset/Flexo) ...
     mat = df.get("MateriaPrima", "").astype(str).str.lower()
     imp_pend = to_bool_series(["ImpresionSNDpd", "ImpresionSND"])
-    df["_PEN_ImpresionFlexo"]  = imp_pend & mat.str.contains("micro", na=False)
-    df["_PEN_ImpresionOffset"] = imp_pend & mat.str.contains("cartulina", na=False)
+    df["_PEN_ImpresionFlexo"]  = imp_pend & (mat.str.contains("micro", na=False) | mat.str.contains("carton", na=False))
+    df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False) | mat.str.contains("papel", na=False))
 
     # ... (OT_id) ...
     if "OT_id" not in df.columns:
