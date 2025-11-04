@@ -36,22 +36,21 @@ def horas_por_dia(cfg):
     extra = float(j.loc[j["Parametro"]=="Horas_extra_por_dia","Valor"].iloc[0]) if (j["Parametro"]=="Horas_extra_por_dia").any() else 0.0
     return base + extra
 
-def es_feriado(d, cfg, feriados_lista=None):
-    if feriados_lista is None:
-        feriados_lista = cfg["feriados"]
-    return d.strftime("%Y-%m-%d") in feriados_lista
+def es_feriado(d, cfg):
+    return d.strftime("%Y-%m-%d") in cfg["feriados"]
 
-def proximo_dia_habil(d, cfg, feriados_lista=None):
-    while d.weekday() == 5 or d.weekday() == 6 or es_feriado(d, cfg, feriados_lista):
+def proximo_dia_habil(d, cfg):
+    print("Checking next business day for:", d)
+    while d.weekday() == 5 or d.weekday() == 6 or es_feriado(d, cfg):
         d += timedelta(days=1)
     return d
 
-def construir_calendario(cfg, start=None, start_time=None, feriados_lista=None):
+def construir_calendario(cfg, start=None):
     if start is None:
         start = date.today()
-    start = proximo_dia_habil(start, cfg, feriados_lista)
+    start = proximo_dia_habil(start, cfg)
     h_dia = horas_por_dia(cfg)
-    inicio_hora = start_time or time(7, 0)
+    inicio_hora = time(7, 0)
     agenda = {}
     for m in cfg["maquinas"]["Maquina"].unique():
         agenda[m] = {"fecha": start, "hora": inicio_hora, "resto_horas": h_dia}
