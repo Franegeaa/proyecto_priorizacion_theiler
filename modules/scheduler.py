@@ -245,6 +245,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
             if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 5000.0)
         load_h = {m: 0.0 for m in cap.keys()} # Carga en horas
 
+        agenda_m = {}
+        for m in cap.keys():
+            agenda_m[m] = {
+                "fecha": datetime.combine(datetime.today().date(), time(8, 0)),
+                "hora": time(8, 0),
+                "resto_horas": 8.5
+            }
+
         mask_troq = tasks["Proceso"].eq("Troquelado")
         troq_df = tasks.loc[mask_troq].copy()
 
@@ -261,13 +269,57 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
             # Asigna cada GRUPO a la máquina que termine antes
             for _, troq_key, idxs, total_pliegos, alguna_grande in grupos:
                 candidatas = manuales + ([auto_name] if auto_name else [])
+
                 if not candidatas: continue
-                m_sel = auto_name if (alguna_grande and auto_name) else min(
-                    candidatas, 
-                    key=lambda m: (load_h[m] + (total_pliegos / cap[m])) * (0.8 if "autom" in str(m).lower() else 1.0)
-                )
-                tasks.loc[idxs, "Maquina"] = m_sel # Sobreescribe la máquina asignada
-                load_h[m_sel] += total_pliegos / cap[m]
+
+                def criterio_balanceo(m):
+                    fecha_disp = agenda_m[m]["fecha"]
+                    carga_proj = load_h[m] + (total_pliegos / cap[m])
+                    penalizacion_auto = (
+                        1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
+                        if "autom" in m.lower() else 1.0
+                    )
+                    # Combinamos prioridad temporal + carga total ponderada
+                    return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
+                
+                if alguna_grande and auto_name:
+                    m_sel = auto_name
+                else:
+                    m_sel = min(candidatas, key=criterio_balanceo)
+                
+                # --- Asignación ---
+                tasks.loc[idxs, "Maquina"] = m_sel
+                load_h[m_sel] += total_pliegos / cap[m_sel]
+
+                # --- Actualización de agenda --- 
+                duracion_h = total_pliegos / cap[m_sel]
+                fecha_actual = agenda_m[m_sel]["fecha"]
+                nueva_fecha = fecha_actual + timedelta(hours=duracion_h)
+
+                # Si supera la jornada laboral (8.5h -> hasta las 16:30), salta al día siguiente
+                if nueva_fecha.hour >= 16:
+                    exceso = (nueva_fecha.hour + nueva_fecha.minute / 60) - 16
+                    nueva_fecha = datetime.combine(fecha_actual.date() + timedelta(days=1), time(8, 0)) + timedelta(hours=exceso)
+
+                agenda_m[m_sel]["fecha"] = nueva_fecha
+                agenda_m[m_sel]["resto_horas"] = max(0, 8.5 - (nueva_fecha.hour - 8))
+
+                # --- DEBUG opcional (podés dejarlo para entender qué hace) ---
+                # print(f"\n🟩 TROQUELADO DEBUG → Troquel: {troq_key or 'Sin troquel'}")
+                # print(f"   OT(s): {tasks.loc[idxs, 'OT_id'].tolist()}")
+                # print(f"   Total pliegos: {total_pliegos}")
+                # print(f"   Grande: {alguna_grande}")
+                # print(f"   Máquina seleccionada: {m_sel}")
+                # print(f"   Carga actual (h): {[f'{k}: {v:.2f}' for k, v in load_h.items()]}")
+                # print(f"   Agenda actualizada: {m_sel} disponible desde {agenda_m[m_sel]['fecha']}")
+                # # Combinamos prioridad temporal + carga total ponderada
+                # return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
+                # m_sel = auto_name if (alguna_grande and auto_name) else min(
+                #     candidatas, 
+                #     key=lambda m: (load_h[m] + (total_pliegos / cap[m])) * (0.8 if "autom" in str(m).lower() else 1.0)
+                # )
+                # tasks.loc[idxs, "Maquina"] = m_sel # Sobreescribe la máquina asignada
+                # load_h[m_sel] += total_pliegos / cap[m]
 
     # =====================================================================
     # 3.1 REASIGNACIÓN DESCARTONADO (Balanceo de Carga - NUEVO BLOQUE)
@@ -493,6 +545,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     # =================================================================
     # 6. SALIDAS (Combinadas y limpias)
     # =================================================================
+
     schedule = pd.DataFrame(filas)
     if not schedule.empty:
         schedule["DueDate"] = pd.to_datetime(schedule["DueDate"]) # Asegura tipo
@@ -505,7 +558,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
 
     resumen_ot = pd.DataFrame()
     if not schedule.empty:
-        resumen_ot = schedule.groupby("OT_id").agg(Fin_OT=('Fin', 'max'), DueDate=('DueDate', 'max')).reset_index()
+        resumen_ot = (
+            schedule.groupby("OT_id").agg(
+                Cliente=('Cliente', 'first'),
+                Fin_OT=('Fin', 'max'),
+                DueDate=('DueDate', 'max')
+            )
+            .reset_index()
+        )
         due_date_deadline = pd.to_datetime(resumen_ot["DueDate"].dt.date) + timedelta(hours=18)
         resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - due_date_deadline).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2) # clip(lower=0) asegura que no haya atrasos negativos
         resumen_ot["EnRiesgo"] = resumen_ot["Atraso_h"] > 0
