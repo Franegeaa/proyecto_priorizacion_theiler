@@ -35,6 +35,30 @@ color_map_procesos = {
     "Pegado": "mediumpurple",         # Púrpura medio
 }
 
+def ordenar_maquinas_personalizado(lista_maquinas):
+    """Ordena máquinas según prioridad operativa definida por el usuario."""
+    prioridades = [
+        (1, ["guillotina"]),
+        (2, ["offset"]),
+        (3, ["flexo"]),
+        (4, ["automat", "automát"]),
+        (5, ["manual 1", "manual-1", "manual1"]),
+        (6, ["manual 2", "manual-2", "manual2"]),
+        (7, ["descartonadora 1"]),
+        (8, ["descartonadora 2"]),
+        (9, ["ventana"]),
+        (10, ["pegadora", "pegado"]),
+    ]
+
+    def clave(nombre):
+        nombre_str = str(nombre).lower()
+        for prioridad, patrones in prioridades:
+            if any(pat in nombre_str for pat in patrones):
+                return (prioridad, nombre_str)
+        return (len(prioridades) + 1, nombre_str)
+
+    return sorted(lista_maquinas, key=clave, reverse=True)
+
 if archivo is not None:
     df = pd.read_excel(archivo)
     cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
@@ -157,6 +181,10 @@ if archivo is not None:
             next_month = (fecha_mes.replace(day=28) + pd.Timedelta(days=4))
             range_end_dt = pd.to_datetime(next_month.replace(day=1)) + pd.Timedelta(hours=9)
 
+        elif tipo_filtro == "Ver todo":
+            range_start_dt = pd.to_datetime(min_plan_date) + pd.Timedelta(hours=7)
+            range_end_dt = pd.to_datetime(min_plan_date) + pd.Timedelta(days=10) + pd.Timedelta(hours=9)
+
         elif tipo_filtro == "Rango personalizado":
             col_f1, col_f2 = st.columns(2)
             with col_f1:
@@ -191,6 +219,44 @@ if archivo is not None:
                 (schedule_gantt["Inicio"] < range_end_dt)
             ]
         # --- FIN DE LA CORRECCIÓN ---
+
+        def configurar_eje_x(fig_obj):
+            """Ajusta el eje X segun el filtro activo."""
+            if fig_obj is None:
+                return
+
+            if range_start_dt is not None and range_end_dt is not None:
+                fig_obj.update_xaxes(range=[range_start_dt, range_end_dt])
+
+            if tipo_filtro == "Día":
+                fig_obj.update_xaxes(
+                    dtick=3600000,  # 1 hora en milisegundos
+                    tickformat="%H:%M",
+                    tickangle=0,
+                    showgrid=True,
+                    gridcolor="rgba(128, 128, 128, 0.3)",
+                    gridwidth=1.2,
+                    layer="below traces",
+                    tickfont=dict(size=11, color="#666666"),
+                )
+            else:
+                fig_obj.update_xaxes(
+                    dtick=86400000,  # 1 día en milisegundos
+                    tickformat="%d %b",  # Día y mes
+                    tickangle=0,
+                    showgrid=True,
+                    gridcolor="rgba(128, 128, 128, 0.3)",
+                    gridwidth=1.5,
+                    layer="below traces",
+                    tickfont=dict(size=11, color="#666666"),
+                )
+
+                if range_start_dt is not None and range_end_dt is not None:
+                    dias_es = {0: "Lun", 1: "Mar", 2: "Mié", 3: "Jue", 4: "Vie", 5: "Sáb", 6: "Dom"}
+                    fechas = pd.date_range(start=range_start_dt.date(), end=range_end_dt.date(), freq="D")
+                    ticktext = [f"{f.strftime('%d %b')}<br>{dias_es[f.weekday()]}" for f in fechas]
+                    tickvals = [pd.Timestamp(f) for f in fechas]
+                    fig_obj.update_xaxes(ticktext=ticktext, tickvals=tickvals)
 
 
         vista = st.radio(
@@ -243,16 +309,11 @@ if archivo is not None:
                                 height=max(300, 30 * len(categorias_ot)),
                             )
                         fig.update_yaxes(autorange="reversed")
-
-                        if range_start_dt is not None and range_end_dt is not None:
-                            fig.update_xaxes(range=[range_start_dt, range_end_dt])
+                        configurar_eje_x(fig)
 
                 elif vista == "Por Máquina":
-                    maquinas_ordenadas = sorted(
-                        schedule_gantt["Maquina"].dropna().unique().tolist(),
-                        key=lambda v: str(v).lower(),
-                        reverse=True
-                    )
+                    maquinas_unicas = schedule_gantt["Maquina"].dropna().unique().tolist()
+                    maquinas_ordenadas = ordenar_maquinas_personalizado(maquinas_unicas)
                     fig = px.timeline(
                         schedule_gantt,
                         x_start="Inicio", x_end="Fin",
@@ -262,7 +323,7 @@ if archivo is not None:
                         hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
                         title="Procesos por Máquina", # Título corregido
                     )
-                    categorias_maquinas = sorted(schedule_gantt["Maquina"].dropna().unique().tolist())
+                    categorias_maquinas = maquinas_ordenadas
                     fig.update_layout(
                         bargap=0.35,
                         bargroupgap=0.0,
@@ -270,8 +331,7 @@ if archivo is not None:
                     )
                     fig.update_traces(selector=dict(type="bar"), width=0.5)
                     fig.update_yaxes(autorange="reversed")
-                    if range_start_dt is not None and range_end_dt is not None:
-                        fig.update_xaxes(range=[range_start_dt, range_end_dt])
+                    configurar_eje_x(fig)
 
             except Exception as e:
                 st.warning(f"No se pudo renderizar el gráfico: {e}")
@@ -287,6 +347,7 @@ if archivo is not None:
     # ==========================
     # 📋 Detalle (OT / Máquina)
     # ==========================
+
     st.subheader("🔎 Detalle interactivo")
     modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina"], horizontal=True)
 
@@ -296,13 +357,14 @@ if archivo is not None:
             opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist()) # Usar 'schedule'
             elegido = st.selectbox("Elegí OT:", opciones)
             df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido] # Usar 'schedule'
+            df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
             st.dataframe(df_show, use_container_width=True)
         else:
             st.info("No hay tareas planificadas (verificá pendientes o MPPlanta).")
 
     else:
         if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty: # Usar 'schedule'
-            maquinas_disponibles = sorted(detalle_maquina["Maquina"].unique().tolist())
+            maquinas_disponibles = ordenar_maquinas_personalizado(detalle_maquina["Maquina"].unique().tolist())
             maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
 
             # Reunir detalle completo para esa máquina
@@ -335,18 +397,19 @@ if archivo is not None:
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
                 cols = ["OT_id", "Cliente", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
             else:
-                cols = ["OT_id", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = ["OT_id", "Cliente", "Proceso", "Inicio", "Fin", "DueDate"]
 
             cols_exist = [c for c in cols if c in df_maquina.columns]
-            st.dataframe(df_maquina[cols_exist], use_container_width=True)
+            df_maquina_display = df_maquina[cols_exist].drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
+            st.dataframe(df_maquina_display, use_container_width=True)
         else:
             st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
     # --- FIN DE LA CORRECCIÓN ---
 
-
     # ==========================
     # Carga por máquina / día
     # ==========================
+
     st.subheader("⚙️ Carga por máquina y día")
     if not carga_md.empty:
         st.dataframe(carga_md.sort_values(["Fecha","Maquina"]), use_container_width=True)
@@ -358,14 +421,15 @@ if archivo is not None:
     # ==========================
     st.subheader("📦 Resumen por OT (Fin vs Entrega)")
     if not resumen_ot.empty:
-        st.dataframe(resumen_ot.sort_values(["EnRiesgo","Atraso_h","Fin_OT"], ascending=[False, False, True]),
-                     use_container_width=True)
+        resumen_display = resumen_ot.sort_values(["EnRiesgo","Atraso_h","Fin_OT"], ascending=[False, False, True]).copy()
+        st.dataframe(resumen_display, use_container_width=True)
     else:
         st.info("Sin resumen disponible.")
 
     # ==========================
     # Exportación a Excel
     # ==========================
+
     st.subheader("💾 Exportar")
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
