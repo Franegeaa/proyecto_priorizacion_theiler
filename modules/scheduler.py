@@ -151,7 +151,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
 # Programador principal (Versión Combinada)
 # =======================================================
 
-def programar(df_ordenes: pd.DataFrame, cfg, start=None):
+def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None, feriados_lista=None):
     """
     Planifica respetando dependencias, orden de máquinas,
     balanceo de carga (Troquelado) y optimización de setups.
@@ -159,7 +159,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None):
     if df_ordenes.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df_ordenes["OT_id"] = df_ordenes["CodigoProducto"].astype(str) + "-" + df_ordenes["Subcodigo"].astype(str)
-    agenda = construir_calendario(cfg, start=start)
+    agenda = construir_calendario(cfg, start=start, start_time=start_time, feriados_lista=feriados_lista)
 
     # 1. Expande OTs en tareas individuales
     tasks = _expandir_tareas(df_ordenes, cfg)

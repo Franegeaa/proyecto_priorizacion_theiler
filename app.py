@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from io import BytesIO
 from collections import Counter
 
@@ -67,10 +67,53 @@ if archivo is not None:
 
     # --- INICIO DE LA MODIFICACIÓN ---
     # 1. Añadimos el selector de fecha
+    hoy = date.today()
     fecha_inicio_plan = st.date_input(
-        "📅 Fecha de inicio de la planificación:", 
-        value=date.today()
+        "📅 Fecha de inicio de la planificación:",
+        value=hoy,
+        min_value=hoy
     )
+
+    # --- FIN DE LA MODIFICACIÓN ---
+
+    hora_inicio_plan = st.time_input(
+        "⏰ Hora de inicio de la planificación:", 
+        value=pd.to_datetime("07:00").time()
+    )
+
+    # # --- NUEVO: Input de Feriados ---
+    # feriados_texto = st.date_input(
+    #     "Días feriados (opcional):",
+    #     value=""
+    # )
+    
+    # feriados_lista = []
+    # if feriados_texto and feriados_texto.strip() != "Pega una lista de fechas (ej. 2024-12-25), una por línea o separadas por coma.":
+    #     # Limpia el texto, reemplaza comas por saltos de línea
+    #     texto_limpio = feriados_texto.replace(",", "\n")
+    #     fechas_str = [f.strip() for f in texto_limpio.split("\n") if f.strip()]
+        
+    #     for f_str in fechas_str:
+    #         try:
+    #             # Intenta parsear la fecha (acepta varios formatos)
+    #             feriados_lista.append(pd.to_datetime(f_str).date())
+    #         except Exception as e:
+    #             st.warning(f"No se pudo entender la fecha feriado: '{f_str}'. Ignorando.")
+    
+    # # Inyectamos los feriados en la configuración
+    # if feriados_lista:
+    #     st.info(f"Se registrarán {len(feriados_lista)} días feriados que no se planificarán.")
+    # --- FIN NUEVO ---
+
+
+    # 3. Combinamos fecha y hora
+    start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
+
+    # 4. Validación para no planificar en el pasado
+    if start_datetime < datetime.now():
+        st.error(f"Error: La fecha y hora de inicio ({start_datetime.strftime('%Y-%m-%d %H:%M')}) no puede ser anterior al momento actual.")
+        st.stop() # Detenemos la app si la validación falla
+    
     # --- FIN DE LA MODIFICACIÓN ---
 
 
@@ -136,9 +179,8 @@ if archivo is not None:
     
     # --- INICIO DE LA MODIFICACIÓN ---
     # 2. Usamos la fecha seleccionada 'fecha_inicio_plan'
-    schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan)
+    schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan) #, feriados_lista=feriados_lista)
     # --- FIN DE LA MODIFICACIÓN ---
-
 
     # ==========================
     # Métricas principales
