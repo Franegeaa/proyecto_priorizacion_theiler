@@ -66,11 +66,10 @@ if archivo is not None:
     st.subheader("⚙️ Parámetros de jornada")
 
     # --- INICIO DE LA MODIFICACIÓN ---
-    # 1. Añadimos el selector de fecha con 'min_value'
+    # 1. Añadimos el selector de fecha
     fecha_inicio_plan = st.date_input(
         "📅 Fecha de inicio de la planificación:", 
-        value=date.today(),
-        min_value=date.today()  # <-- ¡CAMBIO AÑADIDO!
+        value=date.today()
     )
     # --- FIN DE LA MODIFICACIÓN ---
 
@@ -135,13 +134,16 @@ if archivo is not None:
 
     st.info("🧠 Generando programa…")
     
+    # --- INICIO DE LA MODIFICACIÓN ---
     # 2. Usamos la fecha seleccionada 'fecha_inicio_plan'
     schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan)
+    # --- FIN DE LA MODIFICACIÓN ---
 
 
     # ==========================
     # Métricas principales
     # ==========================
+    # ... (tus métricas no cambian) ...
     col1, col2, col3, col4 = st.columns(4)
     total_ots = resumen_ot["OT_id"].nunique() if not resumen_ot.empty else 0
     atrasadas = int(resumen_ot["EnRiesgo"].sum()) if not resumen_ot.empty else 0
@@ -157,12 +159,13 @@ if archivo is not None:
     # ==========================
     st.subheader("📊 Seguimiento (Gantt)")
     if not schedule.empty and _HAS_PLOTLY:
-        schedule_gantt = schedule.copy() 
+        schedule_gantt = schedule.copy() # Copiamos el original
 
+        # Asegurarnos que las fechas no sean nulas
         min_plan_date = schedule_gantt["Inicio"].min().date() if not schedule_gantt["Inicio"].isnull().all() else date.today()
         max_plan_date = schedule_gantt["Fin"].max().date() if not schedule_gantt["Fin"].isnull().all() else date.today()
 
-        st.markdown("##### 📅 Filtros de Fecha para el Gantt") 
+        st.markdown("##### 📅 Filtros de Fecha para el Gantt") # Título corregido
 
         tipo_filtro = st.radio(
             "Seleccionar Rango de Fechas:",
@@ -172,19 +175,19 @@ if archivo is not None:
             key="filtro_fecha_radio"
             )
         
-        range_start_dt = None 
-        range_end_dt = None   
+        range_start_dt = None # CORREGIDO: renombrado
+        range_end_dt = None   # CORREGIDO: renombrado
 
         if tipo_filtro == "Día":
             fecha_dia = st.date_input("Seleccioná el día:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_dia")
-            range_start_dt = pd.to_datetime(fecha_dia) + pd.Timedelta(hours=7) 
-            range_end_dt = range_start_dt + pd.Timedelta(hours=9) 
+            range_start_dt = pd.to_datetime(fecha_dia) + pd.Timedelta(hours=7) # CORREGIDO: Asignar a variable correcta
+            range_end_dt = range_start_dt + pd.Timedelta(hours=9) # CORREGIDO: Asignar a variable correcta
 
         elif tipo_filtro == "Semana":
             fecha_semana = st.date_input("Seleccioná un día de la semana:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_semana")
             start_of_week = fecha_semana - pd.Timedelta(days=fecha_semana.weekday())
-            range_start_dt = pd.to_datetime(start_of_week) + pd.Timedelta(hours=7) 
-            range_end_dt = range_start_dt + pd.Timedelta(days=7) + pd.Timedelta(hours=9) 
+            range_start_dt = pd.to_datetime(start_of_week) + pd.Timedelta(hours=7) # CORREGIDO: Asignar a variable correcta y convertir a datetime
+            range_end_dt = range_start_dt + pd.Timedelta(days=7) + pd.Timedelta(hours=9) # CORREGIDO: Asignar a variable correcta
 
         elif tipo_filtro == "Mes":
             fecha_mes = st.date_input("Seleccioná un día del mes:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_mes")
@@ -199,6 +202,7 @@ if archivo is not None:
         elif tipo_filtro == "Rango personalizado":
             col_f1, col_f2 = st.columns(2)
             with col_f1:
+                # CORREGIDO: Usar st.date_input (tu código tenía st.date.input)
                 fecha_inicio_filtro = st.date_input( 
                     "Desde:",
                     value=min_plan_date,
@@ -216,11 +220,19 @@ if archivo is not None:
             range_start_dt = pd.to_datetime(fecha_inicio_filtro)
             range_end_dt = pd.to_datetime(fecha_fin_filtro) + pd.Timedelta(days=1)
         
+        # --- BLOQUE DE FILTRADO CORREGIDO ---
+        # 1. Movido FUERA del 'elif'
+        # 2. Lógica de solapamiento ARREGLADA
         if range_start_dt is not None and range_end_dt is not None:
+            
+            # Lógica de solapamiento correcta:
+            # La tarea termina DESPUÉS de que el rango empieza Y
+            # la tarea empieza ANTES de que el rango termine.
             schedule_gantt = schedule_gantt[
                 (schedule_gantt["Fin"] > range_start_dt) &
                 (schedule_gantt["Inicio"] < range_end_dt)
             ]
+        # --- FIN DE LA CORRECCIÓN ---
 
         def configurar_eje_x(fig_obj):
             """Ajusta el eje X segun el filtro activo."""
@@ -283,6 +295,7 @@ if archivo is not None:
                     data_gantt = schedule_gantt if ot_seleccionada == "(Todas)" else schedule_gantt[schedule_gantt["OT_id"] == ot_seleccionada]
 
                     if data_gantt.empty:
+                        # CORREGIDO: Mensaje más claro
                         st.info("La OT seleccionada no tiene tareas planificadas (o fue filtrada por fecha).")
                     else:
                         categorias_ot = sorted(data_gantt["OT_id"].dropna().unique().tolist())
@@ -322,7 +335,7 @@ if archivo is not None:
                         color_discrete_map=color_map_procesos,
                         category_orders={"Maquina": maquinas_ordenadas},
                         hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
-                        title="Procesos por Máquina", 
+                        title="Procesos por Máquina", # Título corregido
                     )
                     categorias_maquinas = maquinas_ordenadas
                     fig.update_layout(
@@ -352,23 +365,26 @@ if archivo is not None:
     st.subheader("🔎 Detalle interactivo")
     modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina"], horizontal=True)
 
+    # --- CORRECCIÓN: Usar 'schedule' (el DF completo) para las tablas de detalle ---
     if modo == "Orden de Trabajo (OT)":
-        if not schedule.empty: 
-            opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist()) 
+        if not schedule.empty: # Usar 'schedule'
+            opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist()) # Usar 'schedule'
             elegido = st.selectbox("Elegí OT:", opciones)
-            df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido] 
+            df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido] # Usar 'schedule'
             df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
             st.dataframe(df_show, use_container_width=True)
         else:
             st.info("No hay tareas planificadas (verificá pendientes o MPPlanta).")
 
     else:
-        if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty: 
+        if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty: # Usar 'schedule'
             maquinas_disponibles = ordenar_maquinas_personalizado(detalle_maquina["Maquina"].unique().tolist())
             maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
 
-            df_maquina = schedule[schedule["Maquina"] == maquina_sel].copy() 
+            # Reunir detalle completo para esa máquina
+            df_maquina = schedule[schedule["Maquina"] == maquina_sel].copy() # Usar 'schedule'
 
+            # ... (Lógica para agregar CodigoTroquel y Colores) ...
             if "CodigoTroquel" not in df_maquina.columns and "CodigoTroquel" in df.columns:
                  df_maquina = df_maquina.merge(
                      df[["CodigoProducto", "Subcodigo", "CodigoTroquel"]],
@@ -387,6 +403,7 @@ if archivo is not None:
             
             df_maquina.sort_values(by="Inicio", inplace=True)
 
+            # ... (Lógica de columnas dinámicas) ...
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
                 cols = ["OT_id", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
@@ -401,6 +418,7 @@ if archivo is not None:
             st.dataframe(df_maquina_display, use_container_width=True)
         else:
             st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
+    # --- FIN DE LA CORRECCIÓN ---
 
     # ==========================
     # Carga por máquina / día
