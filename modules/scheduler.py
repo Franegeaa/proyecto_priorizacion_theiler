@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 
 # Importaciones de tus módulos auxiliares
 from modules.config_loader import (
-    es_si, horas_por_dia, proximo_dia_habil, construir_calendario
+    es_si, horas_por_dia, proximo_dia_habil, construir_calendario, es_dia_habil
 )
 from modules.tiempos_y_setup import (
     capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
@@ -215,12 +215,19 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         load_h = {m: 0.0 for m in cap.keys()} 
 
         agenda_m = {}
+        # --- MODIFICADO: La agenda simulada debe empezar en la fecha/hora real ---
+        # Usamos la agenda "General" que creó construir_calendario
+        fecha_inicio_real = agenda["General"]["fecha"]
+        hora_inicio_real = agenda["General"]["hora"]
+        resto_inicio_real = agenda["General"]["resto_horas"]
+        
         for m in cap.keys():
             agenda_m[m] = {
-                "fecha": datetime.combine(datetime.today().date(), time(8, 0)),
-                "hora": time(8, 0),
-                "resto_horas": 8.5
+                "fecha": fecha_inicio_real,
+                "hora": hora_inicio_real,
+                "resto_horas": resto_inicio_real
             }
+        # --- FIN MODIFICADO ---
 
         mask_troq = tasks["Proceso"].eq("Troquelado")
         troq_df = tasks.loc[mask_troq].copy()
@@ -258,18 +265,18 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 load_h[m_sel] += total_pliegos / cap[m_sel]
 
                 duracion_h = total_pliegos / cap[m_sel]
-                fecha_actual = agenda_m[m_sel]["fecha"]
-                nueva_fecha = fecha_actual + timedelta(hours=duracion_h)
-
-                if nueva_fecha.hour >= 16:
-                    exceso = (nueva_fecha.hour + nueva_fecha.minute / 60) - 16
-                    nueva_fecha = datetime.combine(fecha_actual.date() + timedelta(days=1), time(8, 0)) + timedelta(hours=exceso)
-
-                agenda_m[m_sel]["fecha"] = nueva_fecha
-                agenda_m[m_sel]["resto_horas"] = max(0, 8.5 - (nueva_fecha.hour - 8))
+                
+                # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
+                # Esta función SÍ respeta los feriados de config_loader
+                _reservar_en_agenda(agenda_m[m_sel], duracion_h, cfg)
+                # agenda_m[m_sel] se actualiza por referencia
+                # --- FIN MODIFICADO ---
 
     # =====================================================================
     # 3.1 REASIGNACIÓN DESCARTONADO
+    # =====================================================================
+    # =====================================================================
+    # 3.1 REASIGNACIÓN DESCARTONADO (MODIFICADO PARA USAR AGENDA)
     # =====================================================================
     desc_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("descartonado")]
     desc_maquinas = desc_cfg["Maquina"].tolist()
@@ -280,22 +287,42 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             c = capacidad_pliegos_h("Descartonado", m, cfg) 
             cap_desc[m] = float(c) if c and c > 0 else 5000.0
         
-        load_h_desc = {m: 0.0 for m in desc_maquinas} 
+        # --- NUEVO: Creamos una agenda simulada para Descartonado ---
+        agenda_m_desc = {}
+        fecha_inicio_real = agenda["General"]["fecha"]
+        hora_inicio_real = agenda["General"]["hora"]
+        resto_inicio_real = agenda["General"]["resto_horas"]
+        
+        for m in desc_maquinas:
+            agenda_m_desc[m] = {
+                "fecha": fecha_inicio_real,
+                "hora": hora_inicio_real,
+                "resto_horas": resto_inicio_real
+            }
+        # --- FIN NUEVO ---
+
         mask_desc = tasks["Proceso"].eq("Descartonado")
         desc_df = tasks.loc[mask_desc].copy()
 
         if not desc_df.empty:
             desc_df.sort_values(by=["DueDate", "_orden_proceso"], inplace=True)
+            
             for idx, tarea in desc_df.iterrows():
                 pliegos_tarea = float(tarea.get("CantidadPliegos", 0)) 
                 if pliegos_tarea <= 0: continue
 
+                # --- MODIFICADO: Elige por fecha de fin, no por carga simple ---
                 m_sel = min(
                     desc_maquinas,
-                    key=lambda m: load_h_desc[m] + (pliegos_tarea / cap_desc[m])
+                    key=lambda m: agenda_m_desc[m]["fecha"]
                 )
+                
                 tasks.loc[idx, "Maquina"] = m_sel
-                load_h_desc[m_sel] += pliegos_tarea / cap_desc[m]
+                
+                # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
+                duracion_h = pliegos_tarea / cap_desc[m_sel]
+                _reservar_en_agenda(agenda_m_desc[m_sel], duracion_h, cfg)
+                # --- FIN MODIFICADO ---
 
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
@@ -358,10 +385,26 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         if last_end:
             maq = t["Maquina"]; current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
             if current_agenda < last_end:
-                agenda[maq]["fecha"] = last_end.date(); agenda[maq]["hora"] = last_end.time()
-                h_used = (last_end - datetime.combine(last_end.date(), time(8, 0))).total_seconds() / 3600.0
-                agenda[maq]["resto_horas"] = max(0, h_dia - h_used)
-        return True 
+                
+                # --- MODIFICADO: Salto de tiempo debe respetar feriados ---
+                fecha_destino = last_end.date()
+                hora_destino = last_end.time()
+
+                # Si el proceso anterior terminó en un día no hábil...
+                if not es_dia_habil(fecha_destino, cfg):
+                    # ...saltamos al próximo día hábil...
+                    fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg) # -1 para que la lógica de 'proximo' incluya 'hoy'
+                    # ...y empezamos a las 8 AM.
+                    hora_destino = time(8, 0) 
+                
+                agenda[maq]["fecha"] = fecha_destino
+                agenda[maq]["hora"] = hora_destino
+                
+                h_usadas = (hora_destino.hour - 8) + (hora_destino.minute / 60.0)
+                agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
+                # --- FIN MODIFICADO ---
+
+        return True
     
     #--- Bucle principal de planificación ---
     

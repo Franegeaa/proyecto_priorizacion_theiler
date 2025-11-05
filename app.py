@@ -77,6 +77,34 @@ if archivo is not None:
         value=pd.to_datetime("07:00").time()
     )
 
+    # --- NUEVO: Input de Feriados ---
+    placeholder_feriados = "Pega una lista de fechas (ej. 2024-12-25), una por línea o separadas por coma."
+    feriados_texto = st.text_area(
+        "Días feriados (opcional):",
+        placeholder_feriados,
+        height=100
+    )
+    
+    feriados_lista = []
+    # Revisa que el texto no esté vacío y no sea el placeholder
+    if feriados_texto and feriados_texto.strip() != placeholder_feriados:
+        # Limpia el texto, reemplaza comas por saltos de línea
+        texto_limpio = feriados_texto.replace(",", "\n")
+        fechas_str = [f.strip() for f in texto_limpio.split("\n") if f.strip()]
+        
+        for f_str in fechas_str:
+            try:
+                # Intenta parsear la fecha (acepta varios formatos como AAAA-MM-DD o DD/MM/AAAA)
+                feriados_lista.append(pd.to_datetime(f_str, dayfirst=True, errors='raise').date())
+            except Exception as e:
+                st.warning(f"No se pudo entender la fecha feriado: '{f_str}'. Ignorando.")
+    
+    # Inyectamos los feriados en la configuración
+    cfg["feriados"] = feriados_lista
+    if feriados_lista:
+        st.info(f"Se registrarán {len(feriados_lista)} días feriados que no se planificarán.")
+    # --- FIN NUEVO ---
+
     start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
     # if start_datetime < datetime.now():
     #     st.warning("⚠️ La planificación no puede iniciar en el pasado. Ajustá la fecha u hora.")
