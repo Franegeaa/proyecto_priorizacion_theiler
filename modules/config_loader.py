@@ -40,7 +40,6 @@ def es_feriado(d, cfg):
     return d.strftime("%Y-%m-%d") in cfg["feriados"]
 
 def proximo_dia_habil(d, cfg):
-    print("Checking next business day for:", d)
     while d.weekday() == 5 or d.weekday() == 6 or es_feriado(d, cfg):
         d += timedelta(days=1)
     return d
