@@ -73,6 +73,11 @@ if archivo is not None:
     )
     # --- FIN DE LA MODIFICACIÓN ---
 
+    hora_inicio_plan = st.time_input(
+        "⏰ Hora de inicio de la planificación:", 
+        value=pd.to_datetime("07:00").time()
+    )
+
 
     # ... (toda tu lógica de renombrado y limpieza de 'df' va aquí) ...
     # ... (Renombres base) ...
@@ -136,7 +141,7 @@ if archivo is not None:
     
     # --- INICIO DE LA MODIFICACIÓN ---
     # 2. Usamos la fecha seleccionada 'fecha_inicio_plan'
-    schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan)
+    schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
     # --- FIN DE LA MODIFICACIÓN ---
 
 

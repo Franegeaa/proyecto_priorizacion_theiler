@@ -44,12 +44,12 @@ def proximo_dia_habil(d, cfg):
         d += timedelta(days=1)
     return d
 
-def construir_calendario(cfg, start=None):
+def construir_calendario(cfg, start=None, start_time=None):
     if start is None:
         start = date.today()
     start = proximo_dia_habil(start, cfg)
     h_dia = horas_por_dia(cfg)
-    inicio_hora = time(7, 0)
+    inicio_hora = start_time or time(7, 0)
     agenda = {}
     for m in cfg["maquinas"]["Maquina"].unique():
         agenda[m] = {"fecha": start, "hora": inicio_hora, "resto_horas": h_dia}
