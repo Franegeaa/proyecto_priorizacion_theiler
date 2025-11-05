@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
 from io import BytesIO
 from collections import Counter
 
@@ -65,18 +65,22 @@ if archivo is not None:
 
     st.subheader("⚙️ Parámetros de jornada")
 
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # 1. Añadimos el selector de fecha
+    hoy = date.today()
     fecha_inicio_plan = st.date_input(
-        "📅 Fecha de inicio de la planificación:", 
-        value=date.today()
+        "📅 Fecha de inicio de la planificación:",
+        value=hoy,
+        min_value=hoy,
     )
-    # --- FIN DE LA MODIFICACIÓN ---
 
     hora_inicio_plan = st.time_input(
-        "⏰ Hora de inicio de la planificación:", 
+        "⏰ Hora de inicio de la planificación:",
         value=pd.to_datetime("07:00").time()
     )
+
+    start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
+    if start_datetime < datetime.now():
+        st.warning("⚠️ La planificación no puede iniciar en el pasado. Ajustá la fecha u hora.")
+        st.stop()
 
 
     # ... (toda tu lógica de renombrado y limpieza de 'df' va aquí) ...
@@ -139,10 +143,7 @@ if archivo is not None:
 
     st.info("🧠 Generando programa…")
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # 2. Usamos la fecha seleccionada 'fecha_inicio_plan'
     schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
-    # --- FIN DE LA MODIFICACIÓN ---
 
 
     # ==========================

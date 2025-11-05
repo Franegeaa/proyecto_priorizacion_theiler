@@ -44,6 +44,7 @@ def proximo_dia_habil(d, cfg):
         d += timedelta(days=1)
     return d
 
+
 def construir_calendario(cfg, start=None, start_time=None):
     if start is None:
         start = date.today()
