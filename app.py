@@ -78,9 +78,9 @@ if archivo is not None:
     )
 
     start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
-    if start_datetime < datetime.now():
-        st.warning("⚠️ La planificación no puede iniciar en el pasado. Ajustá la fecha u hora.")
-        st.stop()
+    # if start_datetime < datetime.now():
+    #     st.warning("⚠️ La planificación no puede iniciar en el pasado. Ajustá la fecha u hora.")
+    #     st.stop()
 
 
     # ... (toda tu lógica de renombrado y limpieza de 'df' va aquí) ...
