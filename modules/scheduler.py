@@ -248,7 +248,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 if not candidatas: continue
 
                 def criterio_balanceo(m):
-                    fecha_disp = agenda_m[m]["fecha"]
+                    fecha_disp = agenda_m[m]["fecha"] 
                     carga_proj = load_h[m] + (total_pliegos / cap[m])
                     penalizacion_auto = (
                         1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
