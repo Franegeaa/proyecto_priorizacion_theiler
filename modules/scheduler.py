@@ -50,13 +50,13 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     pendientes = []
     if es_si(orden.get("_PEN_Guillotina")): pendientes.append("Guillotina")
     if es_si(orden.get("_PEN_ImpresionFlexo")): pendientes.append("Impresión Flexo")
-    if es_si(orden.get("_PEN_ImpresionOffset")): pendientes.append("Impresión Offset") 
-    if es_si(orden.get("_PEN_Barnizado")): pendientes.append("Barnizado")
+    if es_si(orden.get("_PEN_ImpresionOffset")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Offset") 
+    if es_si(orden.get("_PEN_Barnizado"))and not es_si(orden.get("PeliculaArt")): pendientes.append("Barnizado")
     if es_si(orden.get("_PEN_OPP")): pendientes.append("OPP")
-    if es_si(orden.get("_PEN_Troquelado")): pendientes.append("Troquelado")
-    if es_si(orden.get("_PEN_Descartonado")): pendientes.append("Descartonado")
-    if es_si(orden.get("_PEN_Ventana")): pendientes.append("Ventana")
-    if es_si(orden.get("_PEN_Pegado")): pendientes.append("Pegado")
+    if es_si(orden.get("_PEN_Troquelado")) and not es_si(orden.get("TroquelArt")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Troquelado")
+    if es_si(orden.get("_PEN_Descartonado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Descartonado")
+    if es_si(orden.get("_PEN_Ventana"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Ventana")
+    if es_si(orden.get("_PEN_Pegado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Pegado")
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(set(pendientes_limpios))
     pendientes_limpios.sort(key=lambda p: orden_idx.get(p, 999))
@@ -102,6 +102,7 @@ def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
 # =======================================================
 # Expandir tareas (CON LA CORRECCIÓN DE "CantidadPliegos")
 # =======================================================
+
 def _expandir_tareas(df: pd.DataFrame, cfg):
     """Expande OTs en tareas individuales (una fila por proceso pendiente)."""
     tareas = []
@@ -132,6 +133,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "Colores": row.get("Colores", ""), 
                 "CantidadPliegos": pliegos, # <<<--- CORREGIDO
                 "Bocas": bocas, "Poses": poses,
+                "TroquelArt": row.get("TroquelArt", ""),
+                "PeliculaArt": row.get("PeliculaArt", ""),
             })  
 
     tasks = pd.DataFrame(tareas)
@@ -173,6 +176,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     ### ---------------------------------------------------------------- ###
     ### MODIFICADO: _orden_proceso ahora prioriza Manuales
     ### ---------------------------------------------------------------- ###
+
     def _orden_proceso(maquina):
         proc_name = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Proceso"]
         if proc_name.empty: return (999, 0) # Devuelve tupla
@@ -275,9 +279,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =====================================================================
     # 3.1 REASIGNACIÓN DESCARTONADO
     # =====================================================================
-    # =====================================================================
-    # 3.1 REASIGNACIÓN DESCARTONADO (MODIFICADO PARA USAR AGENDA)
-    # =====================================================================
+
     desc_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("descartonado")]
     desc_maquinas = desc_cfg["Maquina"].tolist()
 
@@ -380,6 +382,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         idx = orden_std.index(proc); prev_procs = [p for p in orden_std[:idx] if p in pendientes_por_ot[ot]]
         if not prev_procs: return True
         if not all(p in completado[ot] for p in prev_procs): return False
+        # if proc == "Troquelado":
+
         
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs if fin_proceso[ot].get(p)), default=None)
         if last_end:
@@ -427,6 +431,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     
+                    # if t_cand["Proceso"].strip() == "Troquelado":
+                    #     if str(t_cand["TroquelArt"]).strip().lower() in ("verdadero", "1", "si", "true", ""):
+                    #         break
+                        
+                    # elif t_cand["Proceso"].strip() == "Impresion Offset":
+                    #     if str(t_cand["PeliculaArt"]).strip().lower() in ("verdadero", "1", "si", "true", ""):
+                    #         break
+
                     if mp_ok and lista_para_ejecutar(t_cand):
                         idx_cand = i
                         break
@@ -436,6 +448,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # ==========================================================
                 # --- BLOQUE DE ROBO ---
                 # ==========================================================
+
                 if idx_cand == -1:
                     if maquina in auto_names: 
                         
@@ -487,10 +500,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             colas[maquina].appendleft(tarea_para_mover)
                             idx_cand = 0
                             tarea_robada = True
-                            print(f"🚨 ROBO: {maquina} tomó {tarea_para_mover['OT_id']} ({tarea_para_mover.get('CodigoTroquel','')}) desde {fuente_maquina}")
                         else:
                             # (Este print solo saldrá si NO encontró nada robable)
-                            print(f"  -> {maquina} no encontró tareas robables. Queda ociosa.")
                             break 
                     else:
                         break 
@@ -548,6 +559,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =================================================================
     # 6. SALIDAS 
     # =================================================================
+
     schedule = pd.DataFrame(filas)
     if not schedule.empty:
         schedule["DueDate"] = pd.to_datetime(schedule["DueDate"]) 

@@ -440,7 +440,7 @@ if archivo is not None:
             # ... (Lógica de columnas dinámicas) ...
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
-                cols = ["OT_id", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = ["OT_id", "Cliente" ,"CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
                 cols = ["OT_id", "Cliente", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
