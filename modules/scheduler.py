@@ -112,9 +112,15 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
         ot = f"{row['CodigoProducto']}-{row['Subcodigo']}"
         pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio)
 
+        if not pendientes:
+            continue
+
         for proceso in pendientes:
             maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
-            if not maquina: continue
+
+            if not maquina: 
+                print(f"ALERTA: OT {ot} se detiene en '{proceso}'. No hay máquina activa. Procesos posteriores no se planificarán.")
+                break
 
             # Cálculo de pliegos
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
