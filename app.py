@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from io import BytesIO
 from collections import Counter
 
@@ -44,10 +44,11 @@ def ordenar_maquinas_personalizado(lista_maquinas):
         (4, ["automat", "automát"]),
         (5, ["manual 1", "manual-1", "manual1"]),
         (6, ["manual 2", "manual-2", "manual2"]),
-        (7, ["descartonadora 1"]),
-        (8, ["descartonadora 2"]),
-        (9, ["ventana"]),
-        (10, ["pegadora", "pegado"]),
+        (7, ["manual 3", "manual-3", "manual3"]),
+        (8, ["descartonadora 1"]),
+        (9, ["descartonadora 2"]),
+        (10, ["ventana"]),
+        (11, ["pegadora", "pegado"]),
     ]
 
     def clave(nombre):
@@ -103,6 +104,76 @@ if archivo is not None:
     cfg["feriados"] = feriados_lista
     if feriados_lista:
         st.info(f"Se registrarán {len(feriados_lista)} días feriados que no se planificarán.")
+    # --- FIN NUEVO ---
+
+    # --- NUEVO: SELECCIÓN DE MÁQUINAS ACTIVAS ---
+    st.subheader("🏭 Máquinas Disponibles")
+    maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
+    maquinas_activas = st.multiselect(
+        "Seleccioná las máquinas que se usarán en esta planificación:",
+        options=maquinas_todas,
+        default=[m for m in maquinas_todas if "Manual 3" not in m]
+    )
+    
+    # Filtramos la configuración ANTES de pasarla al scheduler
+    cfg["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
+    
+    if len(maquinas_activas) < len(maquinas_todas):
+        st.warning(f"Planificando solo con {len(maquinas_activas)} de {len(maquinas_todas)} máquinas.")
+    # --- FIN NUEVO ---
+
+    # --- NUEVO: TIEMPO FUERA DE SERVICIO (DOWNTIME) ---
+    st.subheader("🔧 Tiempo Fuera de Servicio (Paros Programados)")
+
+    # Usamos st.session_state para guardar la lista de paros
+    if "downtimes" not in st.session_state:
+        st.session_state.downtimes = []
+
+    # UI para agregar un paro
+    with st.expander("Añadir un paro de máquina (opcional)"):
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            d_maquina = st.selectbox(
+                "Máquina", 
+                options=maquinas_activas, # Solo máquinas activas
+                key="d_maquina"
+            )
+        with col2:
+            d_fecha_inicio = st.date_input("Fecha Inicio", value=fecha_inicio_plan, key="d_fecha_inicio")
+        with col3:
+            d_hora_inicio = st.time_input("Hora Inicio", value=time(8, 0), key="d_hora_inicio")
+        
+        col4, col5, col6 = st.columns([2, 1, 1])
+        with col4:
+            st.write("") # Espaciador
+        with col5:
+            d_fecha_fin = st.date_input("Fecha Fin", value=d_fecha_inicio, key="d_fecha_fin")
+        with col6:
+            d_hora_fin = st.time_input("Hora Fin", value=time(12, 0), key="d_hora_fin")
+
+        if st.button("Añadir Paro"):
+            dt_inicio = datetime.combine(d_fecha_inicio, d_hora_inicio)
+            dt_fin = datetime.combine(d_fecha_fin, d_hora_fin)
+            
+            if dt_fin <= dt_inicio:
+                st.error("Error: La fecha/hora de fin debe ser posterior a la de inicio.")
+            else:
+                st.session_state.downtimes.append({
+                    "maquina": d_maquina,
+                    "start": dt_inicio,
+                    "end": dt_fin
+                })
+                st.success(f"Paro añadido para {d_maquina} de {dt_inicio} a {dt_fin}")
+
+        st.session_state.downtimes = pd.DataFrame(st.session_state.downtimes).drop_duplicates().to_dict(orient="records")
+    # Mostrar paros añadidos
+    if st.session_state.downtimes:
+        st.write("Paros programados:")
+        for i, dt in enumerate(st.session_state.downtimes):
+            st.info(f"{i+1}: **{dt['maquina']}** fuera de servicio desde {dt['start']} hasta {dt['end']}")
+    
+    # Inyectamos la lista de paros en la configuración
+    cfg["downtimes"] = st.session_state.downtimes
     # --- FIN NUEVO ---
 
     start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
@@ -177,7 +248,7 @@ if archivo is not None:
     # ==========================
     # Métricas principales
     # ==========================
-    # ... (tus métricas no cambian) ...
+
     col1, col2, col3, col4 = st.columns(4)
     total_ots = resumen_ot["OT_id"].nunique() if not resumen_ot.empty else 0
     atrasadas = int(resumen_ot["EnRiesgo"].sum()) if not resumen_ot.empty else 0
@@ -191,6 +262,7 @@ if archivo is not None:
     # ==========================
     # Seguimiento visual (Gantt)
     # ==========================
+
     st.subheader("📊 Seguimiento (Gantt)")
     if not schedule.empty and _HAS_PLOTLY:
         schedule_gantt = schedule.copy() # Copiamos el original
@@ -306,6 +378,30 @@ if archivo is not None:
                     tickvals = [pd.Timestamp(f) for f in fechas]
                     fig_obj.update_xaxes(ticktext=ticktext, tickvals=tickvals)
 
+                for f in fechas:
+                        tickvals.append(f) # f ya es un Timestamp
+                        
+                        # Chequea si es fin de semana (Sábado=5, Domingo=6)
+                        es_finde = f.weekday() >= 5
+                        
+                        if es_finde:
+                            # 1. Añade el sombreado rojo para el fin de semana
+                            fig_obj.add_vrect(
+                                x0=f,
+                                x1=f + pd.Timedelta(days=1),
+                                fillcolor="rgba(255, 0, 0, 0.15)", # Rojo translúcido
+                                layer="below", # Detrás de las barras del gantt
+                                line_width=0,
+                            )
+                            # 2. Pone el texto de la etiqueta en rojo
+                            ticktext.append(f"<b><span style='color:red'>{f.strftime('%d %b')}<br>{dias_es[f.weekday()]}</span></b>")
+                        else:
+                            # 3. Etiqueta normal para días de semana
+                            ticktext.append(f"{f.strftime('%d %b')}<br>{dias_es[f.weekday()]}")
+                    
+                # Aplica las nuevas etiquetas
+                fig_obj.update_xaxes(ticktext=ticktext, tickvals=tickvals)
+                # --- FIN DE LA MODIFICACIÓN ---
 
         vista = st.radio(
             "Seleccioná el tipo de seguimiento:",
@@ -440,7 +536,7 @@ if archivo is not None:
             # ... (Lógica de columnas dinámicas) ...
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
-                cols = ["OT_id", "Cliente" ,"CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = ["OT_id", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
                 cols = ["OT_id", "Cliente", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
