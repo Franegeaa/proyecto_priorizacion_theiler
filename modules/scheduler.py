@@ -15,6 +15,46 @@ from modules.tiempos_y_setup import (
 # elegir_maquina, y _clave_prioridad_maquina permanecen igual)
 # =======================================================
 
+def _chequear_saltar_paros(maquina, hora_actual_dt, cfg):
+
+    hora_salto = hora_actual_dt
+    paros_maquina = [p for p in cfg.get("downtimes", []) if p.get("Maquina") == maquina]
+
+    if not paros_maquina:
+        return hora_salto
+    
+    paro_encontrado = True
+    while paro_encontrado:
+        paro_encontrado = False
+        for paro in paros_maquina:
+            inicio_paro = paro.get("start")
+            fin_paro = paro.get("end")
+            if not inicio_paro or not fin_paro:
+                continue
+            
+            if inicio_paro <= hora_salto < fin_paro:
+                hora_salto = fin_paro
+                paro_encontrado = True
+        
+    return hora_salto
+
+def _buscar_proximo_paro(maquina, hora_actual_dt, cfg):
+
+    paros_maquina = [p for p in cfg.get("downtimes", []) if p.get("Maquina") == maquina]
+
+    if not paros_maquina:
+        return None
+    
+    proximo_paro_start = None
+    for paro in paros_maquina:
+        paro_start = paro.get("start")
+
+        if paro_start > hora_actual_dt:
+            if proximo_paro_start is None or paro_start < proximo_paro_start:
+                proximo_paro_start = paro_start
+                
+    return proximo_paro_start
+
 def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
     fecha = agenda_m["fecha"]
     hora_actual = datetime.combine(fecha, agenda_m["hora"])
@@ -141,6 +181,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "Bocas": bocas, "Poses": poses,
                 "TroquelArt": row.get("TroquelArt", ""),
                 "PeliculaArt": row.get("PeliculaArt", ""),
+                "PliAnc": row.get("PliAnc", 0),
+                "PliLar": row.get("PliLar", 0),
             })  
 
     tasks = pd.DataFrame(tareas)
@@ -248,7 +290,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             for troq_key, g in troq_df.groupby("_troq_key", dropna=False):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].fillna(0).sum()) 
-                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 3000).any())
+                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 3000).any()) or bool((g["PliAnc"].fillna(0) > 80).any()) or bool((g["PliLar"].fillna(0) > 80).any())
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande))
             grupos.sort() 
 
