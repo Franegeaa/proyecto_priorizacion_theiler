@@ -47,8 +47,9 @@ def ordenar_maquinas_personalizado(lista_maquinas):
         (7, ["manual 3", "manual-3", "manual3"]),
         (8, ["descartonadora 1"]),
         (9, ["descartonadora 2"]),
-        (10, ["ventana"]),
-        (11, ["pegadora", "pegado"]),
+        (10, ["descartonadora 3"]),
+        (11, ["ventana"]),
+        (12, ["pegadora", "pegado"]),
     ]
 
     def clave(nombre):
@@ -112,7 +113,7 @@ if archivo is not None:
     maquinas_activas = st.multiselect(
         "Seleccioná las máquinas que se usarán en esta planificación:",
         options=maquinas_todas,
-        default=[m for m in maquinas_todas if "Manual 3" not in m]
+        default=[m for m in maquinas_todas if "Manual 3" not in m and "Descartonadora 3" not in m]
     )
     
     # Filtramos la configuración ANTES de pasarla al scheduler
@@ -536,10 +537,10 @@ if archivo is not None:
             # ... (Lógica de columnas dinámicas) ...
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
-                cols = ["OT_id", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = ["OT_id","Cliente", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
-                cols = ["OT_id", "Cliente", "Colores", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = ["OT_id", "Cliente", "Colores", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
             else:
                 cols = ["OT_id", "Cliente", "Proceso", "Inicio", "Fin", "DueDate"]
 

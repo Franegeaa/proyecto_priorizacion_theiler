@@ -335,7 +335,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
     # =================================================================
-    def _cola_impresora(q): 
+    def _cola_impresora_flexo(q): 
         if q.empty: return deque()
         q = q.copy()
         q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
@@ -347,6 +347,47 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             grupos.append((due_min, keys[0], keys[1], g_sorted.to_dict("records")))
         grupos.sort()
         return deque([item for _, _, _, recs in grupos for item in recs])
+    
+    def _cola_impresora_offset(q): # NUEVA LÓGICA (para Offset)
+        if q.empty: return deque()
+        q = q.copy()
+
+        # 1. Añadir claves de agrupación
+        q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
+        q["_color_key"] = q.get("Colores", "").fillna("").astype(str).str.strip().str.lower()
+        q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
+
+        # 2. Dividir: Tareas sin pantone vs. con pantone
+        # Asumimos que "pantone" o "pms" identifica un pantone.
+        colores_upper = q["_color_key"].str.upper()
+        mask_con_pantone = colores_upper.str.contains(r'[^CMYK\-]', na=False)
+        
+        q_sin_pantone = q[~mask_con_pantone]
+        q_con_pantone = q[mask_con_pantone]
+
+        grupos_todos = []
+
+        # 3. Procesar SIN PANTONE (Prioridad: Marca -> Troquel)
+        if not q_sin_pantone.empty:
+            for keys, g in q_sin_pantone.groupby(["_cliente_key", "_troq_key"], dropna=False):
+                due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
+                g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
+                # Añadimos clave de desempate (0)
+                grupos_todos.append((due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+
+        # 4. Procesar CON PANTONE (Prioridad: Marca -> Colores)
+        if not q_con_pantone.empty:
+            for keys, g in q_con_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
+                due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
+                g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
+                # Añadimos clave de desempate (1)
+                grupos_todos.append((due_min, 1, keys[0], keys[1], g_sorted.to_dict("records")))
+        
+        # 5. Ordenar todos los grupos juntos por DueDate
+        grupos_todos.sort() 
+
+        # 6. Crear la cola final
+        return deque([item for _, _, _, _, recs in grupos_todos for item in recs])
 
     def _cola_troquelada(q): 
         if q.empty: return deque()
@@ -364,9 +405,13 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
         m_lower = m.lower()
+
         if q.empty: colas[m] = deque()
         elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower): colas[m] = _cola_troquelada(q)
-        elif ("offset" in m_lower) or ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora(q)
+        elif "offset" in m_lower:
+            colas[m] = _cola_impresora_offset(q) # Nueva función para Offset
+        elif ("flexo" in m_lower) or ("impres" in m_lower): # 'impres' genérico usa la de flexo
+            colas[m] = _cola_impresora_flexo(q) # Antigua función para Flexo
         else: 
             q.sort_values(by=["DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
