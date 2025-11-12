@@ -243,8 +243,14 @@ if archivo is not None:
 
     st.info("🧠 Generando programa…")
     
-    schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
+    # schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
+    @st.cache_data(show_spinner="🧠 Calculando planificación…")
+    def generar_planificacion(df, cfg, fecha_inicio_plan, hora_inicio_plan):
+        # Ejecuta solo una vez mientras los parámetros no cambien
+        return programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
 
+    # 🧩 Llamada cacheada
+    schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg, fecha_inicio_plan, hora_inicio_plan)
 
     # ==========================
     # Métricas principales
