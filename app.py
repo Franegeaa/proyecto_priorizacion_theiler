@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, date, time, timedelta
 from io import BytesIO
 from collections import Counter
-
+import plotly.graph_objects as go
 from modules.config_loader import cargar_config, horas_por_dia
 from modules.scheduler import programar
 
@@ -482,6 +482,37 @@ if archivo is not None:
                 st.warning(f"No se pudo renderizar el gráfico: {e}")
 
         if fig is not None:
+            df_downtimes = pd.DataFrame(cfg.get("downtimes", []))
+
+            if not df_downtimes.empty and vista == "Por Máquina":
+                df_downtimes["start"] = pd.to_datetime(df_downtimes["start"], errors="coerce")
+                df_downtimes["end"] = pd.to_datetime(df_downtimes["end"], errors="coerce")
+                df_downtimes["Proceso"] = "🔧 Paro programado"
+
+                # Agregamos un trace adicional con Plotly Express
+                fig_paros = px.timeline(
+                    df_downtimes,
+                    x_start="start", x_end="end",
+                    y="maquina",
+                    color="Proceso",
+                    color_discrete_map={"🔧 Paro programado": "red"},
+                    opacity=0.8,
+                    hover_data={"start": True, "end": True},
+                )
+
+                # Hacemos las barras más finas y las ponemos encima
+                fig_paros.update_traces(marker=dict(line_width=0), width=0.2)
+                for trace in fig_paros.data:
+                    fig.add_trace(trace)
+
+                # Agregamos leyenda si no existe
+                fig.add_annotation(
+                    text="🔧 Paros programados",
+                    xref="paper", yref="paper",
+                    x=1.03, y=1,
+                    showarrow=False,
+                    font=dict(color="red", size=12)
+                )
             st.plotly_chart(fig, use_container_width=True)
             
     elif not _HAS_PLOTLY:

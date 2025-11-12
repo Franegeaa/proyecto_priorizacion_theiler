@@ -16,13 +16,24 @@ from modules.tiempos_y_setup import (
 # =======================================================
 
 def _chequear_saltar_paros(maquina, hora_actual_dt, cfg):
-
+    """
+    Si la hora actual cae dentro de un paro, salta al fin del mismo.
+    Devuelve la hora resultante (sin modificar si no hay paro activo).
+    """
     hora_salto = hora_actual_dt
-    paros_maquina = [p for p in cfg.get("downtimes", []) if p.get("Maquina") == maquina]
+    if not maquina:
+        return hora_salto
+
+    # Asegurar consistencia de claves: a veces es "maquina", a veces "Maquina"
+    paros_maquina = [
+        p for p in cfg.get("downtimes", [])
+        if str(p.get("maquina") or p.get("Maquina", "")).strip().lower() == str(maquina).strip().lower()
+    ]
 
     if not paros_maquina:
         return hora_salto
-    
+
+    # Puede haber paros consecutivos → saltamos hasta el último que nos afecte
     paro_encontrado = True
     while paro_encontrado:
         paro_encontrado = False
@@ -31,11 +42,12 @@ def _chequear_saltar_paros(maquina, hora_actual_dt, cfg):
             fin_paro = paro.get("end")
             if not inicio_paro or not fin_paro:
                 continue
-            
+
             if inicio_paro <= hora_salto < fin_paro:
                 hora_salto = fin_paro
                 paro_encontrado = True
-        
+                break
+
     return hora_salto
 
 def _buscar_proximo_paro(maquina, hora_actual_dt, cfg):
@@ -56,27 +68,97 @@ def _buscar_proximo_paro(maquina, hora_actual_dt, cfg):
     return proximo_paro_start
 
 def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
+    """
+    Reserva 'horas_necesarias' en la agenda de una máquina,
+    respetando paros programados (downtimes) y feriados.
+    Si un bloque se superpone con un paro, lo corta antes del paro.
+    """
     fecha = agenda_m["fecha"]
     hora_actual = datetime.combine(fecha, agenda_m["hora"])
     resto = agenda_m["resto_horas"]
     h_dia = horas_por_dia(cfg)
     bloques = []
     h = horas_necesarias
+
+    nombre_maquina = agenda_m.get("nombre") or agenda_m.get("Maquina") or agenda_m.get("maquina")
+
+    # Obtener todos los paros relevantes de la máquina
+    paros_maquina = [
+        (p["start"], p["end"])
+        for p in cfg.get("downtimes", [])
+        if str(p.get("maquina") or p.get("Maquina", "")).strip().lower() == str(nombre_maquina).strip().lower()
+    ]
+    paros_maquina.sort(key=lambda x: x[0])
+
     while h > 1e-9:
+        # Saltar feriados o días sin horas
         if resto <= 1e-9:
             fecha = proximo_dia_habil(fecha + timedelta(days=1), cfg)
             hora_actual = datetime.combine(fecha, time(8, 0))
             resto = h_dia
-        usar = min(h, resto)
-        inicio = hora_actual
-        fin = inicio + timedelta(hours=usar)
-        bloques.append((inicio, fin))
-        hora_actual = fin
-        resto -= usar
-        h -= usar
+            continue
+
+        # Verificar si estamos dentro de un paro → saltar al final
+        dentro_paro = False
+        for inicio, fin in paros_maquina:
+            if inicio <= hora_actual < fin:
+                hora_actual = fin
+                dentro_paro = True
+                break
+        if dentro_paro:
+            continue
+
+        fin_turno = datetime.combine(fecha, time(16, 0))
+        limite_fin_dia = min(fin_turno, hora_actual + timedelta(hours=h, minutes=1))
+
+        # Buscar el próximo paro que interfiere con el bloque actual
+        proximo_paro = None
+        for inicio, fin in paros_maquina:
+            if inicio >= hora_actual and inicio < limite_fin_dia:
+                proximo_paro = inicio
+                break
+
+        # Si hay un paro próximo antes de terminar el bloque → cortar antes del paro
+        if proximo_paro:
+            fin_bloque = min(proximo_paro, hora_actual + timedelta(hours=min(h, resto)))
+        else:
+            fin_bloque = min(limite_fin_dia, hora_actual + timedelta(hours=min(h, resto)))
+
+        # Calcular duración efectiva
+        duracion_h = (fin_bloque - hora_actual).total_seconds() / 3600.0
+        if duracion_h <= 0:
+            # No hay tiempo útil → pasar al siguiente día
+            fecha = proximo_dia_habil(fecha + timedelta(days=1), cfg)
+            hora_actual = datetime.combine(fecha, time(8, 0))
+            resto = h_dia
+            continue
+
+        # Registrar bloque válido
+        bloques.append((hora_actual, fin_bloque))
+
+        # Actualizar contadores
+        hora_actual = fin_bloque
+        resto -= duracion_h
+        h -= duracion_h
+
+        # Si justo terminamos en el inicio de un paro → saltarlo
+        for inicio, fin in paros_maquina:
+            if abs((hora_actual - inicio).total_seconds()) < 1e-6:
+                hora_actual = fin
+                break
+
+        # Si se acaba el turno, saltar al siguiente día hábil
+        if hora_actual.time() >= time(18, 0):
+            fecha = proximo_dia_habil(hora_actual.date() + timedelta(days=1), cfg)
+            hora_actual = datetime.combine(fecha, time(8, 0))
+            resto = h_dia
+
+    # Guardar estado final
     agenda_m["fecha"] = hora_actual.date()
     agenda_m["hora"] = hora_actual.time()
     agenda_m["resto_horas"] = resto
+    agenda_m["nombre"] = nombre_maquina
+
     return bloques
 
 def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
@@ -157,10 +239,6 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
 
         for proceso in pendientes:
             maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
-
-            if not maquina: 
-                print(f"ALERTA: OT {ot} se detiene en '{proceso}'. No hay máquina activa. Procesos posteriores no se planificarán.")
-                break
 
             # Cálculo de pliegos
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
@@ -545,10 +623,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 if idx_cand == -1:
                     if maquina in auto_names: 
                         
-                        ### PRINT DE DEBUG 1 ###
                         # (Nos dice la hora a la que la Automática empieza a buscar)
-                        print(f"\n🕵️‍♂️ {maquina} buscando robo a las {hora_actual_maquina_dt.time()}...")
-                        
                         tarea_encontrada = None
                         fuente_maquina = None
                         idx_robado = -1
@@ -594,7 +669,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             idx_cand = 0
                             tarea_robada = True
                         else:
-                            # (Este print solo saldrá si NO encontró nada robable)
                             break 
                     else:
                         break 

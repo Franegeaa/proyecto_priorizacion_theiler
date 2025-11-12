@@ -90,14 +90,14 @@ def construir_calendario(cfg, start=None, start_time=None):
     agenda = {}
     for m in cfg["maquinas"]["Maquina"].unique():
         agenda[m] = {
+            "nombre": m,
             "fecha": fecha_inicio_real, 
             "hora": hora_base, 
             "resto_horas": resto_horas_inicial
         }
 
-    # 5. --- AÑADIR ESTA CLAVE "GENERAL" ---
-    # Esta es la clave que faltaba y que causa el error
     agenda["General"] = {
+        "nombre": "General",
         "fecha": fecha_inicio_real,
         "hora": hora_base,
         "resto_horas": resto_horas_inicial
