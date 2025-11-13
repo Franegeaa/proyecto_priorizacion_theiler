@@ -6,6 +6,7 @@ from collections import Counter
 import plotly.graph_objects as go
 from modules.config_loader import cargar_config, horas_por_dia
 from modules.scheduler import programar
+import streamlit.components.v1 as components
 
 # Opcional: Plotly para Gantt
 try:
@@ -63,8 +64,44 @@ def ordenar_maquinas_personalizado(lista_maquinas):
 
 if archivo is not None:
     df = pd.read_excel(archivo)
-    cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
+    if "cfg" not in st.session_state:
+        st.session_state.cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
 
+    cfg = st.session_state.cfg   # <- SIEMPRE usar el mismo cfg    
+    maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
+    
+    with st.expander("Añadir un velocidades de máquina (opcional)"):
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        with col1:
+            d_maquina_s = st.selectbox(
+                "Máquina", 
+                options=maquinas_todas, # Solo máquinas activas
+                key="d_maquina_s"
+            )
+
+        maquina = d_maquina_s
+
+        vel_valor = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Capacidad_pliegos_hora"].values[0]
+        setup_valor = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_base_min"].values[0]
+        setup_min_valor = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"].values[0]
+
+        with col2:
+            vel_valor = st.text_input("Velocidad de máquina", value=str(vel_valor), key=f"vel_{maquina}")
+            cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Capacidad_pliegos_hora"] = float(vel_valor)
+        with col3:
+            setup_valor = st.text_input("Setup base", value=str(setup_valor), key=f"setup_{maquina}")
+            cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_base_min"] = float(setup_valor)
+        with col4:
+            setup_min_valor = st.text_input("Setup menor", value=str(setup_min_valor), key=f"setup_menor_{maquina}")        
+            cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"] = float(setup_min_valor)
+        # col4, col5, col6 = st.columns([2, 1, 1])
+        # with col4:
+        #     st.write("") # Espaciador
+        # with col5:
+        #     d_fecha_fin = st.date_input("Fecha Fin", value=d_fecha_inicio, key="d_fecha_fin")
+        # with col6:
+        #     d_hora_fin = st.time_input("Hora Fin", value=time(12, 0), key="d_hora_fin")
+            
     st.subheader("⚙️ Parámetros de jornada")
 
     hoy = date.today()
@@ -109,7 +146,6 @@ if archivo is not None:
 
     # --- NUEVO: SELECCIÓN DE MÁQUINAS ACTIVAS ---
     st.subheader("🏭 Máquinas Disponibles")
-    maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
     maquinas_activas = st.multiselect(
         "Seleccioná las máquinas que se usarán en esta planificación:",
         options=maquinas_todas,
