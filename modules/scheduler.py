@@ -15,58 +15,6 @@ from modules.tiempos_y_setup import (
 # elegir_maquina, y _clave_prioridad_maquina permanecen igual)
 # =======================================================
 
-def _chequear_saltar_paros(maquina, hora_actual_dt, cfg):
-    """
-    Si la hora actual cae dentro de un paro, salta al fin del mismo.
-    Devuelve la hora resultante (sin modificar si no hay paro activo).
-    """
-    hora_salto = hora_actual_dt
-    if not maquina:
-        return hora_salto
-
-    # Asegurar consistencia de claves: a veces es "maquina", a veces "Maquina"
-    paros_maquina = [
-        p for p in cfg.get("downtimes", [])
-        if str(p.get("maquina") or p.get("Maquina", "")).strip().lower() == str(maquina).strip().lower()
-    ]
-
-    if not paros_maquina:
-        return hora_salto
-
-    # Puede haber paros consecutivos → saltamos hasta el último que nos afecte
-    paro_encontrado = True
-    while paro_encontrado:
-        paro_encontrado = False
-        for paro in paros_maquina:
-            inicio_paro = paro.get("start")
-            fin_paro = paro.get("end")
-            if not inicio_paro or not fin_paro:
-                continue
-
-            if inicio_paro <= hora_salto < fin_paro:
-                hora_salto = fin_paro
-                paro_encontrado = True
-                break
-
-    return hora_salto
-
-def _buscar_proximo_paro(maquina, hora_actual_dt, cfg):
-
-    paros_maquina = [p for p in cfg.get("downtimes", []) if p.get("Maquina") == maquina]
-
-    if not paros_maquina:
-        return None
-    
-    proximo_paro_start = None
-    for paro in paros_maquina:
-        paro_start = paro.get("start")
-
-        if paro_start > hora_actual_dt:
-            if proximo_paro_start is None or paro_start < proximo_paro_start:
-                proximo_paro_start = paro_start
-                
-    return proximo_paro_start
-
 def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
     """
     Reserva 'horas_necesarias' en la agenda de una máquina,
