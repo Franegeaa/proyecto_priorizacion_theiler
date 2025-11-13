@@ -86,21 +86,23 @@ if archivo is not None:
         setup_min_valor = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"].values[0]
 
         with col2:
-            vel_valor = st.text_input("Velocidad de máquina", value=str(vel_valor), key=f"vel_{maquina}")
-            cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Capacidad_pliegos_hora"] = float(vel_valor)
+            vel_valor = st.number_input("Velocidad de máquina", value=int(vel_valor), key=f"vel_{maquina}")
+            if vel_valor > 0:
+                cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Capacidad_pliegos_hora"] = int(vel_valor)
+            else:
+                st.warning("La velocidad debe ser mayor que 0.")
         with col3:
-            setup_valor = st.text_input("Setup base", value=str(setup_valor), key=f"setup_{maquina}")
-            cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_base_min"] = float(setup_valor)
+            setup_valor = st.number_input("Setup base", value=int(setup_valor), key=f"setup_{maquina}")
+            if setup_valor > 0:
+                cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_base_min"] = int(setup_valor)
+            else:
+                st.warning("El setup base debe ser mayor que 0.")
         with col4:
-            setup_min_valor = st.text_input("Setup menor", value=str(setup_min_valor), key=f"setup_menor_{maquina}")        
-            cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"] = float(setup_min_valor)
-        # col4, col5, col6 = st.columns([2, 1, 1])
-        # with col4:
-        #     st.write("") # Espaciador
-        # with col5:
-        #     d_fecha_fin = st.date_input("Fecha Fin", value=d_fecha_inicio, key="d_fecha_fin")
-        # with col6:
-        #     d_hora_fin = st.time_input("Hora Fin", value=time(12, 0), key="d_hora_fin")
+            setup_min_valor = st.number_input("Setup menor", value=int(setup_min_valor), key=f"setup_menor_{maquina}")
+            if setup_min_valor > 0:
+                cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"] = int(setup_min_valor)
+            else:
+                st.warning("El setup menor debe ser mayor que 0.")
             
     st.subheader("⚙️ Parámetros de jornada")
 
