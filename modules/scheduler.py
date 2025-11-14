@@ -118,6 +118,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     flujo = [p.strip() for p in flujo] 
     orden_idx = {p: i for i, p in enumerate(flujo)}
     pendientes = []
+    
     if es_si(orden.get("_PEN_Guillotina")): pendientes.append("Guillotina")
     if es_si(orden.get("_PEN_ImpresionFlexo")): pendientes.append("Impresión Flexo")
     if es_si(orden.get("_PEN_ImpresionOffset")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Offset") 
@@ -127,8 +128,9 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     if es_si(orden.get("_PEN_Descartonado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Descartonado")
     if es_si(orden.get("_PEN_Ventana"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Ventana")
     if es_si(orden.get("_PEN_Pegado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Pegado")
+    
     pendientes_limpios = [p.strip() for p in pendientes]
-    pendientes_limpios = list(set(pendientes_limpios))
+    pendientes_limpios = list(dict.fromkeys(pendientes))
     pendientes_limpios.sort(key=lambda p: orden_idx.get(p, 999))
     return pendientes_limpios
 
@@ -502,8 +504,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         if not prev_procs: return True
         if not all(p in completado[ot] for p in prev_procs): return False
         # if proc == "Troquelado":
-
-        
+ 
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs if fin_proceso[ot].get(p)), default=None)
         if last_end:
             maq = t["Maquina"]; current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
