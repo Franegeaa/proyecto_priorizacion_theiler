@@ -32,9 +32,9 @@ def usa_setup_menor(prev, curr, proceso):
     proceso_lower = proceso.lower()
 
     # 🔹 Troquelado: mismo código de troquel
-    if "troquel" in proceso_lower:
-        if str(prev.get("CodigoTroquel", "")).strip().lower() == str(curr.get("CodigoTroquel", "")).strip().lower():
-            return True
+    # if "troquel" in proceso_lower:
+    #     if str(prev.get("CodigoTroquel", "")).strip().lower() == str(curr.get("CodigoTroquel", "")).strip().lower():
+    #         return True
 
     # 🔹 Impresión: mismo cliente y colores o tamaño
     if "impres" in proceso_lower:

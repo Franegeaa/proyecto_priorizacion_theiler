@@ -222,7 +222,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
 
             tareas.append({
                 "idx": idx, "OT_id": ot, "CodigoProducto": row["CodigoProducto"], "Subcodigo": row["Subcodigo"],
-                "Cliente": row["Cliente"], "Proceso": proceso, "Maquina": maquina,
+                "Cliente": row["Cliente"], "Cliente-articulo": row.get("Cliente-articulo", ""),
+                "Proceso": proceso, "Maquina": maquina,
                 "DueDate": row["FechaEntrega"], "GroupKey": _clave_prioridad_maquina(proceso, row),
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
                 "CodigoTroquel": row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "",
@@ -674,9 +675,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     last_orden_data = df_ordenes.loc[last_task["idx"]] 
                     if (t["Proceso"] == "Troquelado" and 
                         str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
-                        setup_min = 0; motivo = "Mismo troquel (sin setup)"
-                    elif usa_setup_menor(last_orden_data, orden, t["Proceso"]): 
-                        setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
+                        setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Mismo troquel (sin setup)"
+                    # elif usa_setup_menor(last_orden_data, orden, t["Proceso"]): 
+                    #     setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
                 
                 total_h = proc_h + setup_min / 60.0
                 if pd.isna(total_h) or total_h <= 0: continue    
@@ -684,6 +685,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
                 if not bloques: colas[maquina].appendleft(t); break 
                 inicio, fin = bloques[0][0], bloques[-1][1]
+                duracion_h = round((fin - inicio).total_seconds() / 3600.0, 3)
 
                 fin_proceso[t["OT_id"]][t["Proceso"]] = fin
                 for b_ini, b_fin in bloques:
@@ -692,9 +694,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         "CapacidadDia": h_dia})
 
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", 
-                                                    "Bocas", "Poses", "Cliente", "Proceso", "Maquina", "DueDate"]} |
+                                                    "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate"]} |
                              {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
-                              "Inicio": inicio, "Fin": fin, "Motivo": motivo})
+                              "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
 
                 completado[t["OT_id"]].add(t["Proceso"])
                 ultimo_en_maquina[maquina] = t 

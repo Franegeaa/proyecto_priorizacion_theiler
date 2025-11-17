@@ -230,6 +230,7 @@ if archivo is not None:
         "ORDEN": "CodigoProducto",
         "Ped.": "Subcodigo",
         "CLIENTE": "Cliente",
+        "ART/DDP": "Cliente-articulo",
         "Razon Social": "RazonSocial",
         "CANT/DDP": "CantidadPliegos",
         "FECH/ENT.": "FechaEntrega",
@@ -619,12 +620,21 @@ if archivo is not None:
             # ... (Lógica de columnas dinámicas) ...
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
-                cols = ["OT_id","Cliente", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = [
+                    "OT_id", "Cliente-articulo", "CantidadPliegos", "CodigoTroquel",
+                    "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
+                ]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
-                cols = ["OT_id", "Cliente", "Colores", "CodigoTroquel", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = [
+                    "OT_id", "Cliente-articulo", "CantidadPliegos", "Colores",
+                    "CodigoTroquel", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
+                ]
             else:
-                cols = ["OT_id", "Cliente", "Proceso", "Inicio", "Fin", "DueDate"]
+                cols = [
+                    "OT_id", "Cliente-articulo", "CantidadPliegos", "Proceso",
+                    "Inicio", "Fin", "Duracion_h", "DueDate"
+                ]
 
             cols_exist = [c for c in cols if c in df_maquina.columns]
             df_maquina_display = df_maquina[cols_exist].drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
