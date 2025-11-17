@@ -64,10 +64,12 @@ def ordenar_maquinas_personalizado(lista_maquinas):
 
 if archivo is not None:
     df = pd.read_excel(archivo)
+
     if "cfg" not in st.session_state:
         st.session_state.cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
 
     cfg = st.session_state.cfg   # <- SIEMPRE usar el mismo cfg    
+
     maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
     
     with st.expander("Añadir un velocidades de máquina (opcional)"):
@@ -155,7 +157,8 @@ if archivo is not None:
     )
     
     # Filtramos la configuración ANTES de pasarla al scheduler
-    cfg["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
+    cfg_plan = cfg.copy()
+    cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
     
     if len(maquinas_activas) < len(maquinas_todas):
         st.warning(f"Planificando solo con {len(maquinas_activas)} de {len(maquinas_todas)} máquinas.")
@@ -280,15 +283,19 @@ if archivo is not None:
         )
 
     st.info("🧠 Generando programa…")
+
+    def _cfg_hash(cfg):
+        return hash(pd.util.hash_pandas_object(cfg["maquinas"], index=True).sum())
     
     # schedule, carga_md, resumen_ot, detalle_maquina = programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
     @st.cache_data(show_spinner="🧠 Calculando planificación…")
     def generar_planificacion(df, cfg, fecha_inicio_plan, hora_inicio_plan):
         # Ejecuta solo una vez mientras los parámetros no cambien
+        cfg_hash = _cfg_hash(cfg)  # Forzar recálculo si cfg cambia
         return programar(df, cfg, start=fecha_inicio_plan, start_time=hora_inicio_plan)
 
     # 🧩 Llamada cacheada
-    schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg, fecha_inicio_plan, hora_inicio_plan)
+    schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
 
     # ==========================
     # Métricas principales
