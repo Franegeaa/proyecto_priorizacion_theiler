@@ -533,47 +533,22 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     #--- Bucle principal de planificación ---
     
     def _prioridad_dinamica(m):
-        """
-        Orden dinámico:
-        1) Si la máquina está libre, priorizarla (pero no siempre a la Automática)
-        2) Balancear según la carga restante de la cola
-        3) Mantener automático por encima solo si está muy vacía
-        """
+    # Si es automática → darle prioridad cuando está libre
+        if "autom" in m.lower():
+            fecha = agenda[m]["fecha"]
+            hora = agenda[m]["hora"]
+            return (0, fecha, hora)   # prioridad alta
 
-        # Datos de agenda
+        # Manuales después
         fecha = agenda[m]["fecha"]
         hora = agenda[m]["hora"]
-
-        # Carga restante (en horas) según la cola
-        cola = colas.get(m, [])
-        carga_restante = 0
-        for t in cola:
-            # tiempos aproximados (sin setup)
-            orden = df_ordenes.loc[t["idx"]]
-            _, h_op = tiempo_operacion_h(orden, t["Proceso"], m, cfg)
-            carga_restante += h_op
-
-        # BONUS: penalización menor si es automática (para que no se coma todo)
-        penalizacion_auto = 1.2 if "autom" in m.lower() else 1.0
-
-        return (
-            penalizacion_auto,    # primero manuales, luego automática
-            carga_restante,       # máquinas más cargadas van después
-            fecha,                # luego por fecha
-            hora                  # luego por hora
-        )
-    
-    def _prioridad_por_fin(m):
-    # Momento en que la máquina queda libre nuevamente
-        fecha = agenda[m]["fecha"]
-        hora = agenda[m]["hora"]
-        return datetime.combine(fecha, hora)
+        return (1, fecha, hora)
 
     progreso = True
     while quedan_tareas() and progreso:
         progreso = False
         # (Ahora 'maquinas' está ordenada con Manuales primero)
-        for maquina in sorted(maquinas, key=_prioridad_por_fin):
+        for maquina in sorted(maquinas, key=_prioridad_dinamica):
             if not colas.get(maquina): continue
             
             hora_actual_maquina_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
