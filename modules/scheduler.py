@@ -25,57 +25,77 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
     hora_actual = datetime.combine(fecha, agenda_m["hora"])
     resto = agenda_m["resto_horas"]
     h_dia = horas_por_dia(cfg)
+
     bloques = []
     h = horas_necesarias
 
-    nombre_maquina = agenda_m.get("nombre") or agenda_m.get("Maquina") or agenda_m.get("maquina")
+    nombre_maquina = (
+        agenda_m.get("nombre")
+        or agenda_m.get("Maquina")
+        or agenda_m.get("maquina")
+    )
 
     # Obtener todos los paros relevantes de la máquina
     paros_maquina = [
         (p["start"], p["end"])
         for p in cfg.get("downtimes", [])
-        if str(p.get("maquina") or p.get("Maquina", "")).strip().lower() == str(nombre_maquina).strip().lower()
+        if str(p.get("maquina") or p.get("Maquina", ""))
+            .strip()
+            .lower()
+            == str(nombre_maquina).strip().lower()
     ]
     paros_maquina.sort(key=lambda x: x[0])
 
     while h > 1e-9:
-        # Saltar feriados o días sin horas
+
+        # Si no queda resto de día → avanzar al siguiente día hábil
         if resto <= 1e-9:
             fecha = proximo_dia_habil(fecha + timedelta(days=1), cfg)
             hora_actual = datetime.combine(fecha, time(8, 0))
             resto = h_dia
             continue
 
-        # Verificar si estamos dentro de un paro → saltar al final
+        # Si estamos dentro de un paro → avanzar al final del paro
         dentro_paro = False
         for inicio, fin in paros_maquina:
             if inicio <= hora_actual < fin:
                 hora_actual = fin
                 dentro_paro = True
                 break
+
         if dentro_paro:
             continue
 
         fin_turno = datetime.combine(fecha, time(16, 0))
-        limite_fin_dia = min(fin_turno, hora_actual + timedelta(hours=h, minutes=1))
+        limite_fin_dia = min(
+            fin_turno,
+            hora_actual + timedelta(hours=h, minutes=1)
+        )
 
-        # Buscar el próximo paro que interfiere con el bloque actual
+        # Buscar el próximo paro que interfiera
         proximo_paro = None
         for inicio, fin in paros_maquina:
             if inicio >= hora_actual and inicio < limite_fin_dia:
                 proximo_paro = inicio
                 break
 
-        # Si hay un paro próximo antes de terminar el bloque → cortar antes del paro
+        # Determinar fin del bloque a reservar
         if proximo_paro:
-            fin_bloque = min(proximo_paro, hora_actual + timedelta(hours=min(h, resto)))
+            fin_bloque = min(
+                proximo_paro,
+                hora_actual + timedelta(hours=min(h, resto))
+            )
         else:
-            fin_bloque = min(limite_fin_dia, hora_actual + timedelta(hours=min(h, resto)))
+            fin_bloque = min(
+                limite_fin_dia,
+                hora_actual + timedelta(hours=min(h, resto))
+            )
 
-        # Calcular duración efectiva
+        # Duración efectiva del bloque
         duracion_h = (fin_bloque - hora_actual).total_seconds() / 3600.0
+
         if duracion_h <= 0:
-            # No hay tiempo útil → pasar al siguiente día
+            # No hay tiempo útil → saltar al siguiente día
             fecha = proximo_dia_habil(fecha + timedelta(days=1), cfg)
             hora_actual = datetime.combine(fecha, time(8, 0))
             resto = h_dia
@@ -89,19 +109,21 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
         resto -= duracion_h
         h -= duracion_h
 
-        # Si justo terminamos en el inicio de un paro → saltarlo
+        # Si terminamos justo en el inicio de un paro → saltarlo
         for inicio, fin in paros_maquina:
             if abs((hora_actual - inicio).total_seconds()) < 1e-6:
                 hora_actual = fin
                 break
 
-        # Si se acaba el turno, saltar al siguiente día hábil
+        # Fin del turno → siguiente día hábil
         if hora_actual.time() >= time(18, 0):
-            fecha = proximo_dia_habil(hora_actual.date() + timedelta(days=1), cfg)
+            fecha = proximo_dia_habil(
+                hora_actual.date() + timedelta(days=1), cfg
+            )
             hora_actual = datetime.combine(fecha, time(8, 0))
             resto = h_dia
 
-    # Guardar estado final
+    # Guardar estado final de agenda
     agenda_m["fecha"] = hora_actual.date()
     agenda_m["hora"] = hora_actual.time()
     agenda_m["resto_horas"] = resto
