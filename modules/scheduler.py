@@ -46,6 +46,14 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
     ]
     paros_maquina.sort(key=lambda x: x[0])
 
+    # PAUSA FIJA DE ALMUERZO (13:30 → 14:00)
+    fecha_actual = fecha  # fecha del día que estamos procesando
+    almuerzo_inicio = datetime.combine(fecha_actual, time(13, 30))
+    almuerzo_fin = datetime.combine(fecha_actual, time(14, 0))
+
+    paros_maquina.append((almuerzo_inicio, almuerzo_fin))
+    paros_maquina.sort(key=lambda x: x[0])
+
     while h > 1e-9:
 
         # Si no queda resto de día → avanzar al siguiente día hábil
@@ -340,6 +348,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 "hora": agenda[m]["hora"],
                 "resto_horas": agenda[m]["resto_horas"]
             }
+
         # --- FIN MODIFICADO ---
 
         mask_troq = tasks["Proceso"].eq("Troquelado")
