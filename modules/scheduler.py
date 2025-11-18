@@ -202,6 +202,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
     tareas = []
     orden_std_limpio = [p.strip() for p in cfg.get("orden_std", [])]
 
+
+
     for idx, row in df.iterrows():
         ot = f"{row['CodigoProducto']}-{row['Subcodigo']}"
         pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio)
@@ -216,9 +218,16 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
             poses = float(row.get("Poses", 1) or 1)
             bocas = float(row.get("BocasTroquel", row.get("Boca1_ddp", 1)) or 1)
-            pliegos = cant_prod / poses if proceso.lower().startswith("impres") and poses > 0 else \
-                        cant_prod / bocas if proceso.lower().startswith("troquel") and bocas > 0 else \
-                        float(row.get("CantidadPliegos", cant_prod))
+            if proceso.lower().startswith("impres"):
+                # Impresión: usa poses
+                pliegos = cant_prod / poses if poses > 0 else cant_prod
+
+            elif "troquel" in proceso.lower():
+                # TROQUELADO: SIEMPRE dividir cantidad por bocas
+                pliegos = cant_prod / bocas if bocas > 0 else cant_prod
+            else:
+                # Procesos restantes
+                pliegos = float(row.get("CantidadPliegos", cant_prod))
 
             tareas.append({
                 "idx": idx, "OT_id": ot, "CodigoProducto": row["CodigoProducto"], "Subcodigo": row["Subcodigo"],
@@ -270,6 +279,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =======================================================
     # 2. ORDEN LÓGICO DE PLANIFICACIÓN
     # =======================================================
+
     flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])] 
 
     ### ---------------------------------------------------------------- ###
@@ -314,7 +324,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         cap = {} 
         for m in manuales + ([auto_name] if auto_name else []):
-            if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 5000.0)
+            if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 2500.0)
         load_h = {m: 0.0 for m in cap.keys()} 
 
         agenda_m = {}
@@ -326,9 +336,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         for m in cap.keys():
             agenda_m[m] = {
-                "fecha": fecha_inicio_real,
-                "hora": hora_inicio_real,
-                "resto_horas": resto_inicio_real
+                "fecha": agenda[m]["fecha"],
+                "hora": agenda[m]["hora"],
+                "resto_horas": agenda[m]["resto_horas"]
             }
         # --- FIN MODIFICADO ---
 
@@ -341,7 +351,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             for troq_key, g in troq_df.groupby("_troq_key", dropna=False):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].fillna(0).sum()) 
-                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 3000).any()) or bool((g["PliAnc"].fillna(0) > 80).any()) or bool((g["PliLar"].fillna(0) > 80).any())
+                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 2500).any()) or bool((g["PliAnc"].fillna(0) > 80).any()) or bool((g["PliLar"].fillna(0) > 80).any())
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande))
             grupos.sort() 
 
@@ -350,19 +360,57 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                 if not candidatas: continue
 
+                # def criterio_balanceo(m):
+                #     fecha_disp = agenda_m[m]["fecha"] 
+                #     carga_proj = load_h[m] + (total_pliegos / cap[m])
+                #     penalizacion_auto = (
+                #         1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
+                #         if "autom" in m.lower() else 1.0
+                #     )
+                #     return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
+
                 def criterio_balanceo(m):
-                    fecha_disp = agenda_m[m]["fecha"] 
-                    carga_proj = load_h[m] + (total_pliegos / cap[m])
-                    penalizacion_auto = (
-                        1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
-                        if "autom" in m.lower() else 1.0
-                    )
-                    return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
+                    ag = agenda_m[m]
+
+                    # Día en que queda libre la máquina
+                    fecha = ag["fecha"]
+
+                    # Hora en que queda libre la máquina
+                    hora = ag["hora"]
+
+                    # Carga acumulada como desempate final
+                    carga = load_h[m]
+
+                    return (fecha, hora, carga)
                 
+                print("\n===== EVALUACIÓN DE CANDIDATAS =====")
+                print(f"Troquel: {troq_key} | Pliegos: {total_pliegos} | Alguna grande: {alguna_grande}")
+                print("Candidatas:", candidatas)
+
+                for m in candidatas:
+                    ag = agenda_m[m]
+                    print(f"  {m}: libre en → {ag['fecha']} {ag['hora']} | carga={load_h[m]:.2f}h")
+
+                print("\n-- Criterio_balanceo(m) --")
+                for m in candidatas:
+                    print(f"  {m}: criterio → {criterio_balanceo(m)}")
+
                 if alguna_grande and auto_name:
                     m_sel = auto_name
                 else:
                     m_sel = min(candidatas, key=criterio_balanceo)
+                
+                print(">> Máquina elegida:", m_sel)
+
+                # print("\n----- REASIGNACIÓN TROQUELADO -----")
+                # print("Troquel:", troq_key)
+                # print("Pliegos totales:", total_pliegos)
+                # print("Candidatas:", candidatas)
+                # print("Cargas actuales:", load_h)
+                # print("Capacidades:", cap)
+                # print("Alguna grande:", alguna_grande)
+                # print("Máquina elegida:", m_sel)
+                # print("Agenda simulada antes:", agenda_m[m_sel])
                 
                 tasks.loc[idxs, "Maquina"] = m_sel
                 load_h[m_sel] += total_pliegos / cap[m_sel]
@@ -372,6 +420,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
                 # Esta función SÍ respeta los feriados de config_loader
                 _reservar_en_agenda(agenda_m[m_sel], duracion_h, cfg)
+                print("Agenda después:", agenda_m[m_sel])
+                print("====================================\n")
                 # agenda_m[m_sel] se actualiza por referencia
                 # --- FIN MODIFICADO ---
 
@@ -428,6 +478,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
     # =================================================================
+
     def _cola_impresora_flexo(q): 
         if q.empty: return deque()
         q = q.copy()
@@ -492,6 +543,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
             grupos.append((due_min, troq, g_sorted.to_dict("records")))
         grupos.sort()
+
         return deque([item for _, _, recs in grupos for item in recs])
 
     colas = {}
