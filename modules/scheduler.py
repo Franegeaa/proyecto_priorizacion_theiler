@@ -356,60 +356,64 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
         if not troq_df.empty:
             troq_df["_troq_key"] = troq_df["CodigoTroquel"]
+            troq_df["CantidadPliegos"] = pd.to_numeric(troq_df["CantidadPliegos"], errors='coerce').fillna(0)
             grupos = [] 
             for troq_key, g in troq_df.groupby("_troq_key", dropna=False):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
-                total_pliegos = float(g["CantidadPliegos"].fillna(0).sum()) 
-                alguna_grande = bool((g["CantidadPliegos"].fillna(0) > 2500).any()) or bool((g["PliAnc"].fillna(0) > 80).any()) or bool((g["PliLar"].fillna(0) > 80).any())
-                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande))
+                total_pliegos = float(g["CantidadPliegos"].fillna(0).sum())
+
+                alguna_grande = bool((g["CantidadPliegos"] > 2500).any())
+                tamano_grande = bool((g["PliAnc"].fillna(0) > 100).any()) or bool((g["PliLar"].fillna(0) > 140).any())
+
+                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande or tamano_grande))
+
             grupos.sort() 
 
-            for _, troq_key, idxs, total_pliegos, alguna_grande in grupos:
+            # (Ajusta 100 y 140 a tus límites reales de las máquinas manuales)
+            
+            for _, troq_key, idxs, total_pliegos, requiere_auto in grupos: # El último valor ya no lo usamos igual
                 candidatas = manuales + ([auto_name] if auto_name else [])
+
+                if requiere_auto and auto_name:
+                # Si es grande, la ÚNICA candidata es la automática.
+                # Las manuales ni siquiera entran al concurso.
+                    candidatas = [auto_name]
+                else:
+                    # Si es chica, compiten todas (Manuales + Auto)
+                    candidatas = manuales + ([auto_name] if auto_name else [])
 
                 if not candidatas: continue
 
-                # def criterio_balanceo(m):
-                #     fecha_disp = agenda_m[m]["fecha"] 
-                #     carga_proj = load_h[m] + (total_pliegos / cap[m])
-                #     penalizacion_auto = (
-                #         1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
-                #         if "autom" in m.lower() else 1.0
-                #     )
-                #     return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
-
                 def criterio_balanceo(m):
                     ag = agenda_m[m]
+                    return (ag["fecha"], ag["hora"], load_h[m])
+                # ... (definición de criterio_balanceo se mantiene igual) ...
 
-                    # Día en que queda libre la máquina
-                    fecha = ag["fecha"]
+                # 2. CAMBIO: Lógica de selección
+                m_sel = min(candidatas, key=criterio_balanceo)
 
-                    # Hora en que queda libre la máquina
-                    hora = ag["hora"]
+            # for _, troq_key, idxs, total_pliegos, alguna_grande in grupos:
+            #     candidatas = manuales + ([auto_name] if auto_name else [])
 
-                    # Carga acumulada como desempate final
-                    carga = load_h[m]
+            #     if not candidatas: continue
 
-                    return (fecha, hora, carga)
+            #     # def criterio_balanceo(m):
+            #     #     fecha_disp = agenda_m[m]["fecha"] 
+            #     #     carga_proj = load_h[m] + (total_pliegos / cap[m])
+            #     #     penalizacion_auto = (
+            #     #         1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
+            #     #         if "autom" in m.lower() else 1.0
+            #     #     )
+            #     #     return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
+
                 
-                print("\n===== EVALUACIÓN DE CANDIDATAS =====")
-                print(f"Troquel: {troq_key} | Pliegos: {total_pliegos} | Alguna grande: {alguna_grande}")
-                print("Candidatas:", candidatas)
-
-                for m in candidatas:
-                    ag = agenda_m[m]
-                    print(f"  {m}: libre en → {ag['fecha']} {ag['hora']} | carga={load_h[m]:.2f}h")
-
-                print("\n-- Criterio_balanceo(m) --")
-                for m in candidatas:
-                    print(f"  {m}: criterio → {criterio_balanceo(m)}")
-
-                if alguna_grande and auto_name:
-                    m_sel = auto_name
-                else:
-                    m_sel = min(candidatas, key=criterio_balanceo)
+     
+            #     if alguna_grande and auto_name:
+            #         m_sel = auto_name
+            #     else:
+            #         m_sel = min(candidatas, key=criterio_balanceo)
                 
-                print(">> Máquina elegida:", m_sel)
+            #     print(">> Máquina elegida:", m_sel)
 
                 # print("\n----- REASIGNACIÓN TROQUELADO -----")
                 # print("Troquel:", troq_key)
@@ -662,63 +666,112 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 tarea_robada = False
                 
                 # ==========================================================
-                # --- BLOQUE DE ROBO ---
+                # --- BLOQUE DE ROBO "ROBIN HOOD" (TOTALMENTE CONECTADO) ---
                 # ==========================================================
 
                 if idx_cand == -1:
-                    if maquina in auto_names: 
-                        
-                        # (Nos dice la hora a la que la Automática empieza a buscar)
-                        tarea_encontrada = None
-                        fuente_maquina = None
-                        idx_robado = -1
+                    tarea_encontrada = None
+                    fuente_maquina = None
+                    idx_robado = -1
 
+                    # -------------------------------------------------------
+                    # CASO A: La Automática tiene hambre (Roba a Manuales)
+                    # -------------------------------------------------------
+                    if maquina in auto_names:
                         for m_manual in manuales:
-                            if not colas.get(m_manual):
-                                continue
-
+                            if not colas.get(m_manual): continue
+                            
                             for i, t_cand in enumerate(colas[m_manual]):
-                                if t_cand["Proceso"].strip() != "Troquelado":
-                                    continue
-
+                                if t_cand["Proceso"].strip() != "Troquelado": continue
+                                
+                                # Validaciones estándar (MP, Dependencias)
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-
-                                # Dependencia directa
-                                if not mp_ok:
-                                    continue
-
-                                # Calcula si la tarea estará lista dentro de las próximas 3 horas
-                                ot = t_cand["OT_id"]
-                                prevs = [p for p in flujo_estandar[:flujo_estandar.index("Troquelado")] if p in fin_proceso[ot]]
-                                if prevs:
-                                    fin_prev = max(fin_proceso[ot][p] for p in prevs if fin_proceso[ot].get(p))
-                                    tiempo_falta = (fin_prev - datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])).total_seconds() / 3600.0
-                                else:
-                                    tiempo_falta = 0
-
-                                # Si ya está lista o lo estará pronto → robala
-                                if lista_para_ejecutar(t_cand) or (0 < tiempo_falta <= 3):
+                                if not mp_ok: continue
+                                
+                                if lista_para_ejecutar(t_cand):
                                     tarea_encontrada = t_cand
                                     fuente_maquina = m_manual
                                     idx_robado = i
                                     break
-                            if tarea_encontrada:
-                                break
+                            if tarea_encontrada: break
 
-                        if tarea_encontrada:
-                            tarea_para_mover = colas[fuente_maquina][idx_robado]
-                            del colas[fuente_maquina][idx_robado]
-                            tarea_para_mover["Maquina"] = maquina 
-                            colas[maquina].appendleft(tarea_para_mover)
-                            idx_cand = 0
-                            tarea_robada = True
-                        else:
-                            break 
+                    # -------------------------------------------------------
+                    # SI SOY UNA MÁQUINA MANUAL (Manual 1, 2 o 3)
+                    # -------------------------------------------------------
+                    elif any(m in maquina for m in manuales):
+                        
+                        # --- CASO B: Intento robarle a la JEFA (Automática) ---
+                        # Prioridad 1: Descongestionar la automática de tareas chicas
+                        if auto_name and colas.get(auto_name):
+                            for i, t_cand in enumerate(colas[auto_name]):
+                                if t_cand["Proceso"].strip() != "Troquelado": continue
+
+                                # REGLA DE ORO: > 2500 SE QUEDA EN AUTOMÁTICA
+                                cant = float(t_cand.get("CantidadPliegos", 0) or 0)
+                                if cant > 2500: continue 
+
+                                # Validaciones Físicas y MP
+                                anc = float(t_cand.get("PliAnc", 0) or 0)
+                                lar = float(t_cand.get("PliLar", 0) or 0)
+                                if anc > 100 or lar > 140: continue # Ajustar a tus medidas
+                                
+                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                if not mp_ok: continue
+
+                                if lista_para_ejecutar(t_cand):
+                                    tarea_encontrada = t_cand
+                                    fuente_maquina = auto_name
+                                    idx_robado = i
+                                    break
+                        
+                        # --- CASO C: (NUEVO) Intento robarle a mis VECINAS (Otras Manuales) ---
+                        # Prioridad 2: Balancear carga entre manuales
+                        
+                        if not tarea_encontrada:
+                            otras_manuales = [m for m in manuales if m != maquina] # Lista de vecinas
+                            
+                            for vecina in otras_manuales:
+                                if not colas.get(vecina): continue
+                                
+                                for i, t_cand in enumerate(colas[vecina]):
+                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    
+                                    # Validaciones Físicas (Por si las manuales tienen tamaños distintos)
+                                    anc = float(t_cand.get("PliAnc", 0) or 0)
+                                    lar = float(t_cand.get("PliLar", 0) or 0)
+                                    if anc > 100 or lar > 140: continue 
+                                    
+                                    # Validaciones estándar
+                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                    if not mp_ok: continue
+
+                                    # Aquí NO importa la cantidad de pliegos, entre manuales se vale todo
+                                    if lista_para_ejecutar(t_cand):
+                                        tarea_encontrada = t_cand
+                                        fuente_maquina = vecina
+                                        idx_robado = i
+                                        break
+                                
+                                if tarea_encontrada: break
+
+                    # -------------------------------------------------------
+                    # EJECUCIÓN DEL ROBO
+                    # -------------------------------------------------------
+                    if tarea_encontrada:
+                        tarea_para_mover = colas[fuente_maquina][idx_robado]
+                        del colas[fuente_maquina][idx_robado]
+                        
+                        tarea_para_mover["Maquina"] = maquina 
+                        colas[maquina].appendleft(tarea_para_mover)
+                        
+                        idx_cand = 0
+                        tarea_robada = True
                     else:
-                        break 
-                # ==========================================================
-                # --- FIN DEL BLOQUE DE ROBO ---
+                        break
+
                 # ==========================================================
 
                 if idx_cand > 0: colas[maquina].rotate(-idx_cand) 
@@ -767,7 +820,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # no sea demasiado agresiva en un solo turno)
                 if tarea_robada:
                     break 
-
 
     # =================================================================
     # 6. SALIDAS 
