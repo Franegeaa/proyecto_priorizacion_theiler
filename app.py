@@ -4,7 +4,7 @@ from datetime import datetime, date, time, timedelta
 from io import BytesIO
 from collections import Counter
 import plotly.graph_objects as go
-from modules.config_loader import cargar_config, horas_por_dia
+from modules.config_loader import cargar_config, es_dia_habil, horas_por_dia
 from modules.scheduler import programar
 import streamlit.components.v1 as components
 
@@ -436,8 +436,9 @@ if archivo is not None:
                         
                         # Chequea si es fin de semana (Sábado=5, Domingo=6)
                         es_finde = f.weekday() >= 5
-                        
-                        if es_finde:
+                        dia_habil = es_dia_habil(f, cfg)  # NUEVO: chequea si es día hábil
+
+                        if not dia_habil:
                             # 1. Añade el sombreado rojo para el fin de semana
                             fig_obj.add_vrect(
                                 x0=f,
