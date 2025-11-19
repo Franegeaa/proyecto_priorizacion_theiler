@@ -639,8 +639,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         for maquina in sorted(maquinas, key=_prioridad_dinamica):
             if not colas.get(maquina): continue
             
-            hora_actual_maquina_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
-
             tareas_agendadas = True
             while tareas_agendadas: 
                 tareas_agendadas = False
@@ -651,14 +649,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     
-                    # if t_cand["Proceso"].strip() == "Troquelado":
-                    #     if str(t_cand["TroquelArt"]).strip().lower() in ("verdadero", "1", "si", "true", ""):
-                    #         break
-                        
-                    # elif t_cand["Proceso"].strip() == "Impresion Offset":
-                    #     if str(t_cand["PeliculaArt"]).strip().lower() in ("verdadero", "1", "si", "true", ""):
-                    #         break
-
                     if mp_ok and lista_para_ejecutar(t_cand):
                         idx_cand = i
                         break
@@ -707,9 +697,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             for i, t_cand in enumerate(colas[auto_name]):
                                 if t_cand["Proceso"].strip() != "Troquelado": continue
 
-                                # REGLA DE ORO: > 2500 SE QUEDA EN AUTOMÁTICA
+                                # REGLA DE ORO: > 3000 SE QUEDA EN AUTOMÁTICA
                                 cant = float(t_cand.get("CantidadPliegos", 0) or 0)
-                                if cant > 2500: continue 
+                                if cant > 3000: continue 
 
                                 # Validaciones Físicas y MP
                                 anc = float(t_cand.get("PliAnc", 0) or 0)
@@ -739,9 +729,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
                                     
                                     # Validaciones Físicas (Por si las manuales tienen tamaños distintos)
-                                    anc = float(t_cand.get("PliAnc", 0) or 0)
-                                    lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if anc > 100 or lar > 140: continue 
+                                    # anc = float(t_cand.get("PliAnc", 0) or 0)
+                                    # lar = float(t_cand.get("PliLar", 0) or 0)
+                                    # if anc > 100 or lar > 140: continue 
                                     
                                     # Validaciones estándar
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
@@ -756,6 +746,39 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         break
                                 
                                 if tarea_encontrada: break
+                        
+                    # -------------------------------------------------------
+                    # CASO D: ROBO ENTRE DESCARTONADORAS (NUEVO)
+                    # -------------------------------------------------------
+
+                    elif "descartonad" in maquina.lower():
+                        # Identificamos a las vecinas (otras descartonadoras)
+                        # Buscamos en las claves de 'colas' las que tengan nombre similar
+                        vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
+                        
+                        for vecina in vecinas_desc:
+                            if not colas.get(vecina): continue
+                            
+                            # Revisamos la cola de la vecina
+                            for i, t_cand in enumerate(colas[vecina]):
+                                # Solo nos interesan tareas de Descartonado
+                                if "descartonad" not in t_cand["Proceso"].lower(): continue
+                                
+                                # Validar Materia Prima (estándar)
+                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                if not mp_ok: continue
+
+                                # LO MÁS IMPORTANTE: ¿Está lista para hacerse YA?
+                                # (O sea, ¿ya terminó el troquelado anterior?)
+                                if lista_para_ejecutar(t_cand):
+                                    tarea_encontrada = t_cand
+                                    fuente_maquina = vecina
+                                    idx_robado = i
+                                    print(f"♻️ DESCARTONADO: {maquina} le robó la OT {t_cand['OT_id']} a {vecina}")
+                                    break
+                            
+                            if tarea_encontrada: break
 
                     # -------------------------------------------------------
                     # EJECUCIÓN DEL ROBO
