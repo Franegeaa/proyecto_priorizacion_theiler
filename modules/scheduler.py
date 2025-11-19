@@ -434,8 +434,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
                 # Esta función SÍ respeta los feriados de config_loader
                 _reservar_en_agenda(agenda_m[m_sel], duracion_h, cfg)
-                print("Agenda después:", agenda_m[m_sel])
-                print("====================================\n")
                 # agenda_m[m_sel] se actualiza por referencia
                 # --- FIN MODIFICADO ---
 
@@ -561,6 +559,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         return deque([item for _, _, recs in grupos for item in recs])
 
     colas = {}
+    buffer_espera = {m: None for m in maquinas}
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
         m_lower = m.lower()
@@ -777,8 +776,68 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                 if idx_cand > 0: colas[maquina].rotate(-idx_cand) 
                 
-                t = colas[maquina].popleft()
+                # ==========================================================
+                # --- ESTRATEGIA "FRANCOTIRADOR" (LOOK-AHEAD) ---
+                # ==========================================================
                 
+                # Miramos quién es el primero en la fila (sin sacarlo todavía)
+                t_candidata = colas[maquina][0]
+                es_barniz = "barniz" in t_candidata["Proceso"].lower()
+                
+                # CASO 1: VIENE UNA TAREA DE BARNIZADO
+                if es_barniz:
+
+                    print(f"🔍 FRANCOTIRADOR: Evaluando Barniz {t_candidata['OT_id']} en {maquina}...")
+                    
+                    # A) ¿YA TENGO UNA TAREA ESPERANDO EN EL BUFFER?
+                    if buffer_espera[maquina]:
+                        # ¡Llegó el momento! Encontré la segunda tarea (la actual t_candidata).
+                        # Tu regla: "Ejecutar la que acaba de llegar (t_candidata) 
+                        # y DESPUÉS la que estaba esperando".
+                        
+                        # 1. Saco la tarea actual de la cola y la tomo para procesar YA
+                        t = colas[maquina].popleft() 
+                        
+                        # 2. Recupero la vieja tarea del buffer
+                        tarea_vieja = buffer_espera[maquina]
+                        buffer_espera[maquina] = None # Vacío la sala de espera
+                        
+                        # 3. Pongo la vieja tarea AL FRENTE de la cola (Priority Lane)
+                        # para que sea la SIGUIENTE INMEDIATA en la próxima vuelta del bucle.
+                        colas[maquina].appendleft(tarea_vieja)
+                        
+                        print(f"🎯 FRANCOTIRADOR: Ejecutando par Barnizado. 1° {t['OT_id']} -> Siguiente: {tarea_vieja['OT_id']}")
+
+                    # B) NO HAY NADIE ESPERANDO. ¿VALE LA PENA ESPERAR?
+                    else:
+                        # Miro hasta 3 tareas adelante en la cola (índices 1, 2, 3)
+                        encontre_pareja = False
+                        limite_vision = min(len(colas[maquina]), 4) # 0 es la actual, miramos 1, 2, 3
+                        for k in range(1, limite_vision):
+                            
+                            futura = colas[maquina][k]
+                            print(f"   👀 Viendo futura tarea {futura['OT_id']} ({futura['Proceso']})...")
+                            # Chequeo si es barniz y si sus dependencias permitirían ejecutarla
+                            if "barniz" in futura["Proceso"].lower():
+                                encontre_pareja = True
+                                break
+                        
+                        if encontre_pareja:
+                            # Si hay otra viniendo cerca, GUARDAMOS la actual y no la ejecutamos.
+                            buffer_espera[maquina] = colas[maquina].popleft() # La saco de la cola y la guardo
+                            print(f"⏳ HOLD: Guardando Barniz {buffer_espera[maquina]['OT_id']} esperando pareja cercana...")
+                            
+                            # Hacemos 'continue' para saltar esta vuelta. 
+                            # En la próxima vuelta, el algoritmo procesará la tarea que estaba SEGUNDA (ej. Troquel).
+                            continue 
+                        else:
+                            # No hay nada cerca, ejecutar normalmente (no me voy a quedar esperando eternamente)
+                            t = colas[maquina].popleft()
+
+                # CASO 2: NO ES BARNIZ (O es cualquier otra cosa)
+                else:
+                    t = colas[maquina].popleft()
+
                 orden = df_ordenes.loc[t["idx"]].copy()
 
                 # =================================================================
