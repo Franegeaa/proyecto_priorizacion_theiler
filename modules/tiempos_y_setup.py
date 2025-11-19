@@ -25,37 +25,72 @@ def setup_menor_min(proceso, maquina, cfg):
 # =========================================================
 
 def usa_setup_menor(prev, curr, proceso):
-    """Define si puede aplicarse setup menor según similitud entre órdenes."""
+    """Define si puede aplicarse setup menor. Robusta a tipos de datos."""
     if prev is None:
         return False
 
-    proceso_lower = proceso.lower()
+    proceso_lower = proceso.lower().strip()
 
-    # 🔹 Troquelado: mismo código de troquel
-    # if "troquel" in proceso_lower:
-    #     if str(prev.get("CodigoTroquel", "")).strip().lower() == str(curr.get("CodigoTroquel", "")).strip().lower():
-    #         return True
-
-    # 🔹 Impresión: mismo cliente y colores o tamaño
-    if "impres" in proceso_lower:
-        mismo_cliente = str(prev.get("Cliente", "")).lower() == str(curr.get("Cliente", "")).lower()
-        mismos_colores = str(prev.get("Colores", "")).lower() == str(curr.get("Colores", "")).lower()
-        mismo_tamano = (
-            str(prev.get("PliAnc", "")).lower() == str(curr.get("PliAnc", "")).lower()
-            and str(prev.get("PliLar", "")).lower() == str(curr.get("PliLar", "")).lower()
-        )
-        if mismo_cliente and (mismos_colores or mismo_tamano):
+    # ---------------------------------------------------------
+    # 1. TROQUELADO (Mismo código)
+    # ---------------------------------------------------------
+    if "troquel" in proceso_lower:
+        t_prev = str(prev.get("CodigoTroquel", "")).strip().lower()
+        t_curr = str(curr.get("CodigoTroquel", "")).strip().lower()
+        # Evitar coincidencia de vacíos
+        if t_prev and t_curr and t_prev == t_curr:
             return True
 
-    # 🔹 Pegado: mismo tipo de pegado y material
+    # ---------------------------------------------------------
+    # 2. IMPRESIÓN (Mismo Cliente + (Mismo Color O Mismo Tamaño))
+    # ---------------------------------------------------------
+    if "impres" in proceso_lower:
+        # Comparación de Cliente (Texto)
+        c_prev = str(prev.get("Cliente", "")).strip().lower()
+        c_curr = str(curr.get("Cliente", "")).strip().lower()
+        mismo_cliente = (c_prev == c_curr) and (c_prev != "")
+
+        if not mismo_cliente:
+            return False
+
+        # Comparación de Colores (Texto)
+        col_prev = str(prev.get("Colores", "")).strip().lower()
+        col_curr = str(curr.get("Colores", "")).strip().lower()
+        mismos_colores = (col_prev == col_curr) and (col_prev != "")
+
+        # Comparación de Tamaño (Numérica para evitar "80" vs "80.0")
+        try:
+            anc_prev = float(prev.get("PliAnc", 0) or 0)
+            anc_curr = float(curr.get("PliAnc", 0) or 0)
+            lar_prev = float(prev.get("PliLar", 0) or 0)
+            lar_curr = float(curr.get("PliLar", 0) or 0)
+            
+            # Tolerancia pequeña por si hay decimales flotantes
+            mismo_tamano = (abs(anc_prev - anc_curr) < 0.1) and (abs(lar_prev - lar_curr) < 0.1)
+            # Asegurar que no sean cero (tamaños vacíos)
+            if anc_prev == 0 or lar_prev == 0:
+                mismo_tamano = False
+                
+        except (ValueError, TypeError):
+            mismo_tamano = False
+
+        if mismos_colores or mismo_tamano:
+            return True
+
+    # ---------------------------------------------------------
+    # 3. PEGADO (Tipo + Material)
+    # ---------------------------------------------------------
     if "peg" in proceso_lower:
-        mismo_tipo = str(prev.get("PegadoTipo", "")).lower() == str(curr.get("PegadoTipo", "")).lower()
-        mismo_mat = str(prev.get("MateriaPrima", "")).lower() == str(curr.get("MateriaPrima", "")).lower()
-        if mismo_tipo and mismo_mat:
+        tipo_prev = str(prev.get("PegadoTipo", "")).strip().lower()
+        tipo_curr = str(curr.get("PegadoTipo", "")).strip().lower()
+        
+        mat_prev = str(prev.get("MateriaPrima", "")).strip().lower()
+        mat_curr = str(curr.get("MateriaPrima", "")).strip().lower()
+
+        if (tipo_prev == tipo_curr) and (mat_prev == mat_curr) and tipo_prev:
             return True
 
     return False
-
 
 # =========================================================
 # Tiempo de operación
@@ -79,9 +114,8 @@ def tiempo_operacion_h(orden, proceso, maquina, cfg):
     proc_h = pliegos / cap
 
     # Si es impresión con dorso, duplicar tiempo
-    if proceso in ("Impresión Offset Dorso", "Impresión Flexo Dorso"):
-        proc_h *= 1.0  # ya se agregó como proceso separado
-    elif proceso in ("Impresión Offset", "Impresión Flexo"):
+
+    if proceso in ("Impresión Offset", "Impresión Flexo"):
         # Si el dorso está marcado en la OT, multiplicamos por 2
         frey = str(orden.get("FreyDorDpd", "")).lower() in ("sí", "true", "1")
         dorso = str(orden.get("Dorso", "")).lower() in ("sí", "true", "1")

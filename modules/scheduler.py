@@ -226,7 +226,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
             poses = float(row.get("Poses", 1) or 1)
             bocas = float(row.get("BocasTroquel", row.get("Boca1_ddp", 1)) or 1)
-            if proceso.lower().startswith("impres"):
+            if proceso.lower().startswith("impres")or proceso.lower().startswith("barniz"):
                 # Impresión: usa poses
                 pliegos = cant_prod / poses if poses > 0 else cant_prod
 
@@ -796,12 +796,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 
                 last_task = ultimo_en_maquina.get(maquina) 
                 if last_task:
-                    last_orden_data = df_ordenes.loc[last_task["idx"]] 
                     if (t["Proceso"] == "Troquelado" and 
                         str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
                         setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Mismo troquel (sin setup)"
-                    # elif usa_setup_menor(last_orden_data, orden, t["Proceso"]): 
-                    #     setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
+                    elif usa_setup_menor(last_task, orden, t["Proceso"]): 
+                        setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
                 
                 total_h = proc_h + setup_min / 60.0
                 if pd.isna(total_h) or total_h <= 0: continue    
