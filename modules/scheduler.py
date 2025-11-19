@@ -59,7 +59,7 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
         # Si no queda resto de día → avanzar al siguiente día hábil
         if resto <= 1e-9:
             fecha = proximo_dia_habil(fecha + timedelta(days=1), cfg)
-            hora_actual = datetime.combine(fecha, time(8, 0))
+            hora_actual = datetime.combine(fecha, time(7, 0))
             resto = h_dia
             continue
 
@@ -105,7 +105,7 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
         if duracion_h <= 0:
             # No hay tiempo útil → saltar al siguiente día
             fecha = proximo_dia_habil(fecha + timedelta(days=1), cfg)
-            hora_actual = datetime.combine(fecha, time(8, 0))
+            hora_actual = datetime.combine(fecha, time(7, 0))
             resto = h_dia
             continue
 
@@ -124,11 +124,11 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
                 break
 
         # Fin del turno → siguiente día hábil
-        if hora_actual.time() >= time(18, 0):
+        if hora_actual.time() >= time(16, 0):
             fecha = proximo_dia_habil(
                 hora_actual.date() + timedelta(days=1), cfg
             )
-            hora_actual = datetime.combine(fecha, time(8, 0))
+            hora_actual = datetime.combine(fecha, time(7, 0))
             resto = h_dia
 
     # Guardar estado final de agenda
@@ -779,8 +779,17 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 
                 t = colas[maquina].popleft()
                 
-                orden = df_ordenes.loc[t["idx"]]
+                orden = df_ordenes.loc[t["idx"]].copy()
 
+                # =================================================================
+                # --- CORRECCIÓN CRÍTICA: USAR DATOS CALCULADOS (POSES/BOCAS) ---
+                # =================================================================
+                # Sobrescribimos los valores crudos de la OT con los valores
+                # matemáticos que calculamos en _expandir_tareas (que ya tienen poses/bocas)
+                orden["CantidadPliegos"] = float(t["CantidadPliegos"]) 
+                orden["Poses"] = float(t.get("Poses", 1))
+                orden["Bocas"] = float(t.get("Bocas", 1))
+                
                 _, proc_h = tiempo_operacion_h(orden, t["Proceso"], maquina, cfg)
                 setup_min = setup_base_min(t["Proceso"], maquina, cfg)
                 motivo = "Setup base"
@@ -800,7 +809,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
                 if not bloques: colas[maquina].appendleft(t); break 
                 inicio, fin = bloques[0][0], bloques[-1][1]
-                duracion_h = round((fin - inicio).total_seconds() / 3600.0, 3)
+                # duracion_h = round((fin - inicio).total_seconds() / 3600.0, 3)
+                segundos_netos = sum((b_fin - b_ini).total_seconds() for b_ini, b_fin in bloques)
+                duracion_h = round(segundos_netos / 3600.0, 3)
 
                 fin_proceso[t["OT_id"]][t["Proceso"]] = fin
                 for b_ini, b_fin in bloques:

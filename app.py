@@ -642,6 +642,7 @@ if archivo is not None:
             st.dataframe(df_maquina_display, use_container_width=True)
         else:
             st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
+            
     # --- FIN DE LA CORRECCIÓN ---
 
     # ==========================
