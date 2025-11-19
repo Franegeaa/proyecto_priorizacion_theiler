@@ -245,7 +245,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
                 "CodigoTroquel": row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "",
                 "Colores": row.get("Colores", ""), 
-                "CantidadPliegos": pliegos, # <<<--- CORREGIDO
+                "CantidadPliegos": pliegos,
+                "CantidadPliegosNetos": row.get("CantidadPliegos"), 
                 "Bocas": bocas, "Poses": poses,
                 "TroquelArt": row.get("TroquelArt", ""),
                 "PeliculaArt": row.get("PeliculaArt", ""),
@@ -807,7 +808,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         "HorasPlanificadas": (b_fin - b_ini).total_seconds() / 3600.0, 
                                         "CapacidadDia": h_dia})
 
-                filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", 
+                filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                     "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate"]} |
                              {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
                               "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})

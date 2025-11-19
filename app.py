@@ -622,13 +622,13 @@ if archivo is not None:
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
                 cols = [
-                    "OT_id", "Cliente-articulo", "CantidadPliegos", "CodigoTroquel",
+                    "OT_id", "Cliente-articulo", "CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", 
                     "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
                 ]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
                 cols = [
-                    "OT_id", "Cliente-articulo", "CantidadPliegos", "Colores",
+                    "OT_id", "Cliente-articulo", "CantidadPliegosNetos","CantidadPliegos", "Colores",
                     "CodigoTroquel", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
                 ]
             else:
