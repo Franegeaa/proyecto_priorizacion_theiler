@@ -622,7 +622,7 @@ if archivo is not None:
             if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
                 cols = [
-                    "OT_id", "Cliente-articulo", "CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", 
+                    "OT_id", "Cliente-articulo", "PliAnc","PliLar","CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", 
                     "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
                 ]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):

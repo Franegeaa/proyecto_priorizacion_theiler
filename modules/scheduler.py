@@ -998,7 +998,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         "CapacidadDia": h_dia})
 
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                    "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate"]} |
+                                                    "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
                              {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
                               "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
 
