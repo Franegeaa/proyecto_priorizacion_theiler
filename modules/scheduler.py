@@ -364,7 +364,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 total_pliegos = float(g["CantidadPliegos"].fillna(0).sum())
 
                 alguna_grande = bool((g["CantidadPliegos"] > 2500).any())
-                tamano_grande = bool((g["PliAnc"].fillna(0) > 100).any()) or bool((g["PliLar"].fillna(0) > 140).any())
+                tamano_grande = bool((g["PliAnc"].fillna(0) > 60).any()) or bool((g["PliLar"].fillna(0) > 60).any())
 
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande or tamano_grande))
 
@@ -768,7 +768,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 # Validaciones Físicas y MP
                                 anc = float(t_cand.get("PliAnc", 0) or 0)
                                 lar = float(t_cand.get("PliLar", 0) or 0)
-                                if anc > 100 or lar > 140: continue # Ajustar a tus medidas
+                                if anc > 60 or lar > 60: continue # Ajustar a tus medidas
                                 
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
