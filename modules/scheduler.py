@@ -392,43 +392,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                 # 2. CAMBIO: Lógica de selección
                 m_sel = min(candidatas, key=criterio_balanceo)
-
-            # for _, troq_key, idxs, total_pliegos, alguna_grande in grupos:
-            #     candidatas = manuales + ([auto_name] if auto_name else [])
-
-            #     if not candidatas: continue
-
-            #     # def criterio_balanceo(m):
-            #     #     fecha_disp = agenda_m[m]["fecha"] 
-            #     #     carga_proj = load_h[m] + (total_pliegos / cap[m])
-            #     #     penalizacion_auto = (
-            #     #         1.0 + 0.15 * (load_h[m] / (max(load_h.values()) if any(load_h.values()) else 1.0))
-            #     #         if "autom" in m.lower() else 1.0
-            #     #     )
-            #     #     return (fecha_disp.toordinal(), carga_proj * penalizacion_auto)
-
                 
-     
-            #     if alguna_grande and auto_name:
-            #         m_sel = auto_name
-            #     else:
-            #         m_sel = min(candidatas, key=criterio_balanceo)
-                
-            #     print(">> Máquina elegida:", m_sel)
-
-                # print("\n----- REASIGNACIÓN TROQUELADO -----")
-                # print("Troquel:", troq_key)
-                # print("Pliegos totales:", total_pliegos)
-                # print("Candidatas:", candidatas)
-                # print("Cargas actuales:", load_h)
-                # print("Capacidades:", cap)
-                # print("Alguna grande:", alguna_grande)
-                # print("Máquina elegida:", m_sel)
-                # print("Agenda simulada antes:", agenda_m[m_sel])
+                if "E7311" in str(troq_key):
+                    print(f"🚨 ALERTA: La OT E7311 pasó por Reasignación. Maquina elegida: {m_sel}")
+                    # VERIFICA QUE NO HAYA NINGÚN '_reservar_en_agenda' AQUÍ ABAJO ACTIVO
+                # -------------------
                 
                 tasks.loc[idxs, "Maquina"] = m_sel
                 load_h[m_sel] += total_pliegos / cap[m_sel]
-
                 duracion_h = total_pliegos / cap[m_sel]
                 
                 # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
@@ -586,37 +557,96 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     def quedan_tareas(): return any(len(q) > 0 for q in colas.values())
 
     def lista_para_ejecutar(t): 
-        proc = t["Proceso"].strip(); ot = t["OT_id"]; orden_std = flujo_estandar
-        if proc not in orden_std: return True
-        idx = orden_std.index(proc); prev_procs = [p for p in orden_std[:idx] if p in pendientes_por_ot[ot]]
-        if not prev_procs: return True
-        if not all(p in completado[ot] for p in prev_procs): return False
-        # if proc == "Troquelado":
- 
-        last_end = max((fin_proceso[ot].get(p) for p in prev_procs if fin_proceso[ot].get(p)), default=None)
+        # 1. Función auxiliar de limpieza (Normalización)
+        def clean(s):
+            if not s: return ""
+            s = str(s).lower().strip()
+            # Quitar tildes
+            trans = str.maketrans("áéíóúüñ", "aeiouun")
+            s = s.translate(trans)
+            
+            # --- ALIAS AGRESIVOS ---
+            if "flexo" in s: return "impresion flexo"
+            if "offset" in s: return "impresion offset"
+            if "troquel" in s: return "troquelado"
+            # -----------------------
+            return s
+
+        proc_actual_clean = clean(t["Proceso"])
+        ot = t["OT_id"]
+        
+        # Obtenemos el flujo estándar limpio
+        flujo_clean = [clean(p) for p in flujo_estandar]
+        
+        # Si el proceso actual no está en el flujo estándar, asumimos que no tiene trabas
+        if proc_actual_clean not in flujo_clean: 
+            return True
+            
+        idx = flujo_clean.index(proc_actual_clean)
+        
+        # 2. Identificamos qué procesos anteriores REALMENTE tiene esta OT
+        # Comparamos usando las versiones limpias
+        pendientes_clean = {clean(p) for p in pendientes_por_ot[ot]}
+        
+        # Los procesos previos son los que están antes en la lista estándar
+        # Y ADEMÁS existen en la lista de pendientes de esta OT.
+        prev_procs_names = []
+        for p_raw in flujo_estandar[:idx]:
+            if clean(p_raw) in pendientes_clean:
+                prev_procs_names.append(p_raw) # Guardamos el nombre original para buscar en 'completado' y 'fin_proceso'
+
+        # --- BLOQUE DEBUG TEMPORAL (Bórralo cuando lo arregles) ---
+        if "troquel" in proc_actual_clean and "E7311" in str(ot):
+            print(f"\n🕵️ CASO E7311 DETECTADO:")
+            print(f"   1. Proceso actual (limpio): '{proc_actual_clean}'")
+            print(f"   2. ¿Está en el flujo estándar?: {'SÍ' if proc_actual_clean in flujo_clean else 'NO'}")
+            print(f"   3. Flujo Estándar que ve el sistema: {flujo_clean}")
+            print(f"   4. Procesos pendientes de esta OT: {pendientes_clean}")
+            print(f"   5. Padres detectados (prev_procs): {prev_procs_names}")
+            print(f"   -> CONCLUSIÓN: {'⛔ SE FRENA' if prev_procs_names else '🟢 PASA (ERROR)'}\n")
+        # ----------------------------------------------------------        
+
+        # Si no hay predecesores, pase adelante
+        if not prev_procs_names: 
+            return True
+
+        # 3. Verificamos si TODOS los predecesores están completados
+        # Aquí volvemos a limpiar para comparar contra el set 'completado'
+        completados_clean = {clean(c) for c in completado[ot]}
+        
+        for p in prev_procs_names:
+            if clean(p) not in completados_clean:
+                return False # ¡FRENAR! Falta un paso anterior
+
+        # 4. Gestión de Tiempos (Si terminó ayer, o hace un rato)
+        # Buscamos la hora fin más tardía de los procesos previos
+        last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
+        
         if last_end:
-            maq = t["Maquina"]; current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
+            maq = t["Maquina"]
+            current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
+            
+            # Si el proceso anterior termina EN EL FUTURO respecto a la máquina actual
             if current_agenda < last_end:
                 
-                # --- MODIFICADO: Salto de tiempo debe respetar feriados ---
+                # --- MODIFICADO: Salto de tiempo respetando feriados ---
                 fecha_destino = last_end.date()
                 hora_destino = last_end.time()
 
-                # Si el proceso anterior terminó en un día no hábil...
+                # Si cae en día no hábil o feriado...
                 if not es_dia_habil(fecha_destino, cfg):
-                    # ...saltamos al próximo día hábil...
-                    fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg) # -1 para que la lógica de 'proximo' incluya 'hoy'
-                    # ...y empezamos a las 8 AM.
-                    hora_destino = time(8, 0) 
+                    fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg)
+                    hora_destino = time(7, 0) # Ajustado a tu turno de 7 AM
                 
+                # Actualizamos la agenda de la máquina para que espere
                 agenda[maq]["fecha"] = fecha_destino
                 agenda[maq]["hora"] = hora_destino
                 
-                h_usadas = (hora_destino.hour - 8) + (hora_destino.minute / 60.0)
+                h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                 agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
                 # --- FIN MODIFICADO ---
 
-        return True
+        return True    
     
     #--- Bucle principal de planificación ---
     
@@ -648,8 +678,42 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                    if not mp_ok: continue
+
+                    # =========================================================
+                    # LÓGICA ANTI-ESPERA (Para activar el robo)
+                    # =========================================================
+                    ot = t_cand["OT_id"]
                     
-                    if mp_ok and lista_para_ejecutar(t_cand):
+                    # 1. Calculamos cuándo termina el proceso anterior (sin mover el reloj)
+                    # Reconstruimos la lógica de dependencias aquí brevemente
+                    orden_std = flujo_estandar
+                    proc = t_cand["Proceso"].strip()
+                    if proc in orden_std:
+                        idx_proc = orden_std.index(proc)
+                        prev_procs = [p for p in orden_std[:idx_proc] if p in pendientes_por_ot[ot]]
+                        
+                        if not all(p in completado[ot] for p in prev_procs):
+                            continue # Si falta algo anterior, ni la miramos
+                        
+                        # Buscamos la hora fin del proceso anterior más tardío
+                        last_end = max((fin_proceso[ot].get(p) for p in prev_procs if fin_proceso[ot].get(p)), default=None)
+                        
+                        if last_end:
+                            hora_maquina_actual = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                            
+                            # Calculamos la espera en horas
+                            espera_h = (last_end - hora_maquina_actual).total_seconds() / 3600.0
+                            
+                            # EL UMBRAL DE PACIENCIA: 
+                            # Si tengo que esperar más de 0.5 horas (30 min), paso de esta tarea
+                            # y dejo idx_cand en -1 para que se active el robo.
+                            if espera_h > 0.5: 
+                                continue 
+                    # =========================================================
+
+                    # Si la espera es aceptable, entonces sí llamamos a la función que agenda
+                    if lista_para_ejecutar(t_cand):
                         idx_cand = i
                         break
                 
@@ -697,9 +761,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             for i, t_cand in enumerate(colas[auto_name]):
                                 if t_cand["Proceso"].strip() != "Troquelado": continue
 
-                                # REGLA DE ORO: > 3000 SE QUEDA EN AUTOMÁTICA
+                                # REGLA DE ORO: > 2000 SE QUEDA EN AUTOMÁTICA
                                 cant = float(t_cand.get("CantidadPliegos", 0) or 0)
-                                if cant > 3000: continue 
+                                if cant > 2000: continue 
 
                                 # Validaciones Físicas y MP
                                 anc = float(t_cand.get("PliAnc", 0) or 0)
@@ -800,65 +864,98 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 if idx_cand > 0: colas[maquina].rotate(-idx_cand) 
                 
                 # ==========================================================
-                # --- ESTRATEGIA "FRANCOTIRADOR" (LOOK-AHEAD) ---
-                # ==========================================================
+            # PASO 1: BÚSQUEDA DE CANDIDATA (Con Filtro de Paciencia)
+            # ==========================================================
+            idx_cand = -1 
+            
+            for i, t_cand in enumerate(colas[maquina]):
+                # Chequeo básico de Materia Prima
+                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                if not mp_ok: continue
+
+                # VALIDACIÓN CRÍTICA: ¿Se cumplieron las dependencias anteriores (Impresión, etc)?
+                if lista_para_ejecutar(t_cand):
+                    idx_cand = i
+                    break
+            
+            # ==========================================================
+            # PASO 2: INTENTO DE ROBO (Si estoy vacío)
+            # ==========================================================
+            tarea_robada = False
+            
+            if idx_cand == -1:
+                # ... (Aquí va tu código de ROBO existente: Casos A, B, C, D) ...
+                # ... (Asegurate de que dentro del robo también uses lista_para_ejecutar) ...
+                pass 
+
+            # ==========================================================
+            # PASO 3: ESTRATEGIA "FRANCOTIRADOR" Y EJECUCIÓN
+            # ==========================================================
+            
+            # Si encontramos una tarea válida (propia o robada)
+            if idx_cand != -1:
                 
-                # Miramos quién es el primero en la fila (sin sacarlo todavía)
+                # 1. Traemos la tarea al frente de la cola
+                if not tarea_robada and idx_cand > 0:
+                    colas[maquina].rotate(-idx_cand)
+                
+                # Ahora la candidata es la primera de la fila
                 t_candidata = colas[maquina][0]
+                
+                se_ejecuta_ya = True # Por defecto, sí la hacemos
                 es_barniz = "barniz" in t_candidata["Proceso"].lower()
                 
-                # CASO 1: VIENE UNA TAREA DE BARNIZADO
+                # --- LÓGICA DE ESPERA (Solo para Barniz) ---
                 if es_barniz:
-
-                    print(f"🔍 FRANCOTIRADOR: Evaluando Barniz {t_candidata['OT_id']} en {maquina}...")
                     
-                    # A) ¿YA TENGO UNA TAREA ESPERANDO EN EL BUFFER?
+                    # A) ¿HAY ALGUIEN EN LA SALA DE ESPERA?
                     if buffer_espera[maquina]:
-                        # ¡Llegó el momento! Encontré la segunda tarea (la actual t_candidata).
-                        # Tu regla: "Ejecutar la que acaba de llegar (t_candidata) 
-                        # y DESPUÉS la que estaba esperando".
+                        # ¡Pareja encontrada!
+                        # Sacamos la actual para hacerla YA
+                        t = colas[maquina].popleft()
                         
-                        # 1. Saco la tarea actual de la cola y la tomo para procesar YA
-                        t = colas[maquina].popleft() 
-                        
-                        # 2. Recupero la vieja tarea del buffer
+                        # Recuperamos la vieja y la ponemos PRIMERA para la próxima vuelta
                         tarea_vieja = buffer_espera[maquina]
-                        buffer_espera[maquina] = None # Vacío la sala de espera
-                        
-                        # 3. Pongo la vieja tarea AL FRENTE de la cola (Priority Lane)
-                        # para que sea la SIGUIENTE INMEDIATA en la próxima vuelta del bucle.
+                        buffer_espera[maquina] = None
                         colas[maquina].appendleft(tarea_vieja)
                         
-                        print(f"🎯 FRANCOTIRADOR: Ejecutando par Barnizado. 1° {t['OT_id']} -> Siguiente: {tarea_vieja['OT_id']}")
+                        print(f"🎯 FRANCOTIRADOR: Ejecutando par Barnizado {t['OT_id']} + {tarea_vieja['OT_id']}")
+                        # se_ejecuta_ya sigue siendo True, así que procesamos 't' abajo
 
                     # B) NO HAY NADIE ESPERANDO. ¿VALE LA PENA ESPERAR?
                     else:
-                        # Miro hasta 3 tareas adelante en la cola (índices 1, 2, 3)
                         encontre_pareja = False
-                        limite_vision = min(len(colas[maquina]), 4) # 0 es la actual, miramos 1, 2, 3
-                        for k in range(1, limite_vision):
-                            
+                        
+                        # Miramos el futuro (sin sacar nada)
+                        limit = min(len(colas[maquina]), 6) # Miramos 5 adelante
+                        for k in range(1, limit):
                             futura = colas[maquina][k]
-                            print(f"   👀 Viendo futura tarea {futura['OT_id']} ({futura['Proceso']})...")
-                            # Chequeo si es barniz y si sus dependencias permitirían ejecutarla
+                            
+                            # --- CORRECCIÓN CLAVE: VALIDACIÓN LAXA ---
+                            # Solo chequeamos que sea Barniz y tenga MP.
+                            # NO chequeamos lista_para_ejecutar (tiempos/dependencias),
+                            # porque asumimos que estará lista en el futuro cuando llegue su turno.
                             if "barniz" in futura["Proceso"].lower():
-                                encontre_pareja = True
-                                break
+                                mp_fut = str(futura.get("MateriaPrimaPlanta")).strip().lower()
+                                mp_fut_ok = mp_fut in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
+                                
+                                if mp_fut_ok:
+                                    encontre_pareja = True
+                                    break
                         
                         if encontre_pareja:
-                            # Si hay otra viniendo cerca, GUARDAMOS la actual y no la ejecutamos.
-                            buffer_espera[maquina] = colas[maquina].popleft() # La saco de la cola y la guardo
-                            print(f"⏳ HOLD: Guardando Barniz {buffer_espera[maquina]['OT_id']} esperando pareja cercana...")
+                            # GUARDAMOS la actual y pasamos turno
+                            buffer_espera[maquina] = colas[maquina].popleft()
+                            print(f"⏳ HOLD: Guardando Barniz {buffer_espera[maquina]['OT_id']} esperando pareja futura...")
                             
-                            # Hacemos 'continue' para saltar esta vuelta. 
-                            # En la próxima vuelta, el algoritmo procesará la tarea que estaba SEGUNDA (ej. Troquel).
-                            continue 
-                        else:
-                            # No hay nada cerca, ejecutar normalmente (no me voy a quedar esperando eternamente)
-                            t = colas[maquina].popleft()
+                            se_ejecuta_ya = False 
+                            continue # <--- SALTAMOS AL SIGUIENTE CICLO DEL WHILE
 
-                # CASO 2: NO ES BARNIZ (O es cualquier otra cosa)
-                else:
+                # ------------------------------------------------------
+                # EJECUCIÓN FINAL (Si no se quedó esperando en el buffer)
+                # ------------------------------------------------------
+                if se_ejecuta_ya:
                     t = colas[maquina].popleft()
 
                 orden = df_ordenes.loc[t["idx"]].copy()
