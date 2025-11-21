@@ -266,7 +266,6 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
 
     return tasks
 
-
 # =======================================================
 # Programador principal (Versión Combinada)
 # =======================================================
@@ -465,15 +464,56 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     def _cola_impresora_flexo(q): 
         if q.empty: return deque()
         q = q.copy()
+
+        # 1. LIMPIEZA DE DATOS
+        # ------------------------------------------------------------
         q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
-        q["_color_key"] = q.get("Colores", "").fillna("").astype(str).str.strip().str.lower()
+        
+        # Limpiamos el color y quitamos guiones para agrupar bien
+        q["_color_key"] = (
+            q.get("Colores", "")
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.replace("-", "", regex=False)
+            .str.strip()
+        )
+        
+        q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
+        
+        # 2. AGRUPACIÓN POR COLOR (Clustering)
+        # ------------------------------------------------------------
         grupos = []
-        for keys, g in q.groupby(["_cliente_key", "_color_key"], dropna=False):
-            due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
-            g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
-            grupos.append((due_min, keys[0], keys[1], g_sorted.to_dict("records")))
-        grupos.sort()
-        return deque([item for _, _, _, recs in grupos for item in recs])
+        
+        # Iteramos por cada color distinto (Ej: "azul", "k", "knaranja")
+        for color, g in q.groupby("_color_key", dropna=False):
+            
+            # A. Calculamos la "Urgencia del Color"
+            # Buscamos la fecha más próxima dentro de este grupo de color.
+            # Si hay un pedido azul para mañana y otro para el viernes, 
+            # el "bloque azul" tomará la prioridad de mañana.
+            due_min_del_color = g["DueDate"].min()
+            
+            # B. Ordenamos internamente el grupo
+            # Dentro del bloque de color, ordenamos por Fecha y luego Cliente
+            g_sorted = g.sort_values(
+                by=["DueDate", "_cliente_key", "CantidadPliegos"], 
+                ascending=[True, True, False]
+            )
+            
+            # Guardamos el grupo con su fecha de 'ancla'
+            # La tupla es: (Fecha más urgente, Nombre Color, Lista de Tareas)
+            grupos.append((due_min_del_color, color, g_sorted.to_dict("records")))
+        
+        # 3. ORDENAMIENTO DE BLOQUES
+        # ------------------------------------------------------------
+        # Ahora ordenamos los BLOQUES enteros.
+        # El bloque con la tarea más urgente va primero.
+        grupos.sort() 
+        
+        # Aplanamos la lista de listas para devolver una sola cola continua
+        return deque([item for _, _, recs in grupos for item in recs])
+    
     
     def _cola_impresora_offset(q): # NUEVA LÓGICA (para Offset)
         if q.empty: return deque()
