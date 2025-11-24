@@ -290,13 +290,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])] 
 
-    ### ---------------------------------------------------------------- ###
-    ### MODIFICADO: _orden_proceso ahora prioriza Manuales
-    ### ---------------------------------------------------------------- ###
-
     def _orden_proceso(maquina):
         proc_name = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Proceso"]
-        if proc_name.empty: return (999, 0) # Devuelve tupla
+        if proc_name.empty: return (999, 0)
         proc = proc_name.iloc[0]
         
         base_order = 999
@@ -308,17 +304,16 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         # Desempate: Manuales (0) van ANTES que Automáticas (1)
         if "troquel" in proc.lower():
             if "autom" in maquina.lower():
-                return (base_order, 1) # Automática corre DESPUÉS
+                return (base_order, 1)
             else:
-                return (base_order, 0) # Manuales corren ANTES
+                return (base_order, 0)
         
-        return (base_order, 0) # Resto de las máquinas
-    ### ---------------------------------------------------------------- ###
+        return (base_order, 0)
 
     maquinas = sorted(cfg["maquinas"]["Maquina"].unique(), key=_orden_proceso)
     
     # =================================================================
-    # 3. REASIGNACIÓN TROQUELADO
+    # 3. REASIGNACIÓN TROQUELADO (Solo asigna, NO reserva tiempo)
     # =================================================================
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().eq("troquelado")]
@@ -335,21 +330,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 2500.0)
         load_h = {m: 0.0 for m in cap.keys()} 
 
-        agenda_m = {}
-        # --- MODIFICADO: La agenda simulada debe empezar en la fecha/hora real ---
-        # Usamos la agenda "General" que creó construir_calendario
-        fecha_inicio_real = agenda["General"]["fecha"]
-        hora_inicio_real = agenda["General"]["hora"]
-        resto_inicio_real = agenda["General"]["resto_horas"]
-        
-        for m in cap.keys():
-            agenda_m[m] = {
-                "fecha": agenda[m]["fecha"],
-                "hora": agenda[m]["hora"],
-                "resto_horas": agenda[m]["resto_horas"]
-            }
-
-        # --- FIN MODIFICADO ---
+        # Agenda simulada solo para lectura de fechas (no escritura)
+        agenda_m = {m: {"fecha": agenda[m]["fecha"], "hora": agenda[m]["hora"]} for m in cap.keys()}
 
         mask_troq = tasks["Proceso"].eq("Troquelado")
         troq_df = tasks.loc[mask_troq].copy()
@@ -357,58 +339,44 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         if not troq_df.empty:
             troq_df["_troq_key"] = troq_df["CodigoTroquel"]
             troq_df["CantidadPliegos"] = pd.to_numeric(troq_df["CantidadPliegos"], errors='coerce').fillna(0)
+            
             grupos = [] 
             for troq_key, g in troq_df.groupby("_troq_key", dropna=False):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
-                total_pliegos = float(g["CantidadPliegos"].fillna(0).sum())
-
+                total_pliegos = float(g["CantidadPliegos"].sum())
+                
+                # Reglas de Oro para forzar Automática
                 alguna_grande = bool((g["CantidadPliegos"] > 2500).any())
                 tamano_grande = bool((g["PliAnc"].fillna(0) > 60).any()) or bool((g["PliLar"].fillna(0) > 60).any())
 
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande or tamano_grande))
-
             grupos.sort() 
 
-            # (Ajusta 100 y 140 a tus límites reales de las máquinas manuales)
-            
-            for _, troq_key, idxs, total_pliegos, requiere_auto in grupos: # El último valor ya no lo usamos igual
-                candidatas = manuales + ([auto_name] if auto_name else [])
-
+            for _, troq_key, idxs, total_pliegos, requiere_auto in grupos:
                 if requiere_auto and auto_name:
-                # Si es grande, la ÚNICA candidata es la automática.
-                # Las manuales ni siquiera entran al concurso.
                     candidatas = [auto_name]
                 else:
-                    # Si es chica, compiten todas (Manuales + Auto)
                     candidatas = manuales + ([auto_name] if auto_name else [])
 
                 if not candidatas: continue
 
                 def criterio_balanceo(m):
-                    ag = agenda_m[m]
-                    return (ag["fecha"], ag["hora"], load_h[m])
-                # ... (definición de criterio_balanceo se mantiene igual) ...
+                    # Penalización artificial para Manual 3 (Lastre)
+                    penalizacion_dias = 0
+                    if "manual 3" in str(m).lower() or "manual3" in str(m).lower():
+                        penalizacion_dias = 2
+                    
+                    fecha_orden = agenda_m[m]["fecha"] + timedelta(days=penalizacion_dias)
+                    return (fecha_orden, agenda_m[m]["hora"], load_h[m])
 
-                # 2. CAMBIO: Lógica de selección
                 m_sel = min(candidatas, key=criterio_balanceo)
                 
-                if "E7311" in str(troq_key):
-                    print(f"🚨 ALERTA: La OT E7311 pasó por Reasignación. Maquina elegida: {m_sel}")
-                    # VERIFICA QUE NO HAYA NINGÚN '_reservar_en_agenda' AQUÍ ABAJO ACTIVO
-                # -------------------
-                
                 tasks.loc[idxs, "Maquina"] = m_sel
+                # Solo actualizamos carga estimada, NO reservamos tiempo real
                 load_h[m_sel] += total_pliegos / cap[m_sel]
-                duracion_h = total_pliegos / cap[m_sel]
-                
-                # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
-                # Esta función SÍ respeta los feriados de config_loader
-                _reservar_en_agenda(agenda_m[m_sel], duracion_h, cfg)
-                # agenda_m[m_sel] se actualiza por referencia
-                # --- FIN MODIFICADO ---
 
     # =====================================================================
-    # 3.1 REASIGNACIÓN DESCARTONADO
+    # 3.1 REASIGNACIÓN DESCARTONADO (Solo asigna, NO reserva tiempo)
     # =====================================================================
 
     desc_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("descartonado")]
@@ -420,20 +388,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             c = capacidad_pliegos_h("Descartonado", m, cfg) 
             cap_desc[m] = float(c) if c and c > 0 else 5000.0
         
-        # --- NUEVO: Creamos una agenda simulada para Descartonado ---
-        agenda_m_desc = {}
-        fecha_inicio_real = agenda["General"]["fecha"]
-        hora_inicio_real = agenda["General"]["hora"]
-        resto_inicio_real = agenda["General"]["resto_horas"]
-        
-        for m in desc_maquinas:
-            agenda_m_desc[m] = {
-                "fecha": fecha_inicio_real,
-                "hora": hora_inicio_real,
-                "resto_horas": resto_inicio_real
-            }
-        # --- FIN NUEVO ---
-
+        load_desc = {m: 0.0 for m in desc_maquinas} 
         mask_desc = tasks["Proceso"].eq("Descartonado")
         desc_df = tasks.loc[mask_desc].copy()
 
@@ -444,118 +399,104 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 pliegos_tarea = float(tarea.get("CantidadPliegos", 0)) 
                 if pliegos_tarea <= 0: continue
 
-                # --- MODIFICADO: Elige por fecha de fin, no por carga simple ---
-                m_sel = min(
-                    desc_maquinas,
-                    key=lambda m: agenda_m_desc[m]["fecha"]
-                )
-                
+                # Balanceo por Carga Acumulada
+                m_sel = min(desc_maquinas, key=lambda m: load_desc[m])
                 tasks.loc[idx, "Maquina"] = m_sel
-                
-                # --- MODIFICADO: Usamos _reservar_en_agenda para simular el tiempo ---
-                duracion_h = pliegos_tarea / cap_desc[m_sel]
-                _reservar_en_agenda(agenda_m_desc[m_sel], duracion_h, cfg)
-                # --- FIN MODIFICADO ---
+                load_desc[m_sel] += pliegos_tarea / cap_desc[m_sel]
 
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
     # =================================================================
 
     def _cola_impresora_flexo(q): 
+        # Lógica Clustering (Agrupa Color -> Urgencia del Grupo)
+        if q.empty: return deque()
+        q = q.copy()
+        q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
+        q["_color_key"] = (
+            q.get("Colores", "").fillna("").astype(str).str.lower()
+            .str.replace("-", "", regex=False).str.strip()
+        )
+        q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
+        
+        grupos = []
+        for color, g in q.groupby("_color_key", dropna=False):
+            due_min_del_color = g["DueDate"].min()
+            g_sorted = g.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], ascending=[True, True, False])
+            grupos.append((due_min_del_color, color, g_sorted.to_dict("records")))
+        
+        grupos.sort() 
+        return deque([item for _, _, recs in grupos for item in recs])
+    
+    def _cola_impresora_offset(q):
         if q.empty: return deque()
         q = q.copy()
 
-        # 1. LIMPIEZA DE DATOS
+        # 1. LIMPIEZA DE DATOS (Igual que en Flexo)
         # ------------------------------------------------------------
         q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
+        q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
         
-        # Limpiamos el color y quitamos guiones para agrupar bien
+        # Limpieza de Color: Quitar guiones, espacios y mayúsculas
         q["_color_key"] = (
             q.get("Colores", "")
             .fillna("")
             .astype(str)
             .str.lower()
-            .str.replace("-", "", regex=False)
+            .str.replace("-", "", regex=False) # <--- CLAVE: Ignorar guiones
             .str.strip()
         )
-        
+
+        # Asegurar fechas correctas
         q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
-        
-        # 2. AGRUPACIÓN POR COLOR (Clustering)
-        # ------------------------------------------------------------
-        grupos = []
-        
-        # Iteramos por cada color distinto (Ej: "azul", "k", "knaranja")
-        for color, g in q.groupby("_color_key", dropna=False):
-            
-            # A. Calculamos la "Urgencia del Color"
-            # Buscamos la fecha más próxima dentro de este grupo de color.
-            # Si hay un pedido azul para mañana y otro para el viernes, 
-            # el "bloque azul" tomará la prioridad de mañana.
-            due_min_del_color = g["DueDate"].min()
-            
-            # B. Ordenamos internamente el grupo
-            # Dentro del bloque de color, ordenamos por Fecha y luego Cliente
-            g_sorted = g.sort_values(
-                by=["DueDate", "_cliente_key", "CantidadPliegos"], 
-                ascending=[True, True, False]
-            )
-            
-            # Guardamos el grupo con su fecha de 'ancla'
-            # La tupla es: (Fecha más urgente, Nombre Color, Lista de Tareas)
-            grupos.append((due_min_del_color, color, g_sorted.to_dict("records")))
-        
-        # 3. ORDENAMIENTO DE BLOQUES
-        # ------------------------------------------------------------
-        # Ahora ordenamos los BLOQUES enteros.
-        # El bloque con la tarea más urgente va primero.
-        grupos.sort() 
-        
-        # Aplanamos la lista de listas para devolver una sola cola continua
-        return deque([item for _, _, recs in grupos for item in recs])
-    
-    
-    def _cola_impresora_offset(q): # NUEVA LÓGICA (para Offset)
-        if q.empty: return deque()
-        q = q.copy()
+        q["DueDate"] = q["DueDate"].fillna(pd.Timestamp.max)
 
-        # 1. Añadir claves de agrupación
-        q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
-        q["_color_key"] = q.get("Colores", "").fillna("").astype(str).str.strip().str.lower()
-        q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
-
-        # 2. Dividir: Tareas sin pantone vs. con pantone
-        # Asumimos que "pantone" o "pms" identifica un pantone.
+        # 2. CLASIFICACIÓN (Pantone vs CMYK)
+        # ------------------------------------------------------------
         colores_upper = q["_color_key"].str.upper()
-        mask_con_pantone = colores_upper.str.contains(r'[^CMYK\-]', na=False)
+        # Regex: Si tiene algo que NO sea C, M, Y, K o vacío, es Pantone
+        mask_con_pantone = colores_upper.str.contains(r'[^CMYK]', na=False) # Quitamos el \- del regex porque ya borramos los guiones arriba
         
         q_sin_pantone = q[~mask_con_pantone]
         q_con_pantone = q[mask_con_pantone]
 
         grupos_todos = []
 
-        # 3. Procesar SIN PANTONE (Prioridad: Marca -> Troquel)
+        # 3. GRUPO A: SIN PANTONE (CMYK) -> Agrupar por CLIENTE + TROQUEL
+        # ------------------------------------------------------------
         if not q_sin_pantone.empty:
             for keys, g in q_sin_pantone.groupby(["_cliente_key", "_troq_key"], dropna=False):
-                due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
+                # Urgencia del grupo entero
+                due_min = g["DueDate"].min()
+                
+                # Orden interno
                 g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
-                # Añadimos clave de desempate (0)
+                
+                # Tupla: (Fecha, Prioridad 0, Cliente, Troquel, Tareas)
                 grupos_todos.append((due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
-        # 4. Procesar CON PANTONE (Prioridad: Marca -> Colores)
+        # 4. GRUPO B: CON PANTONE -> Agrupar por CLIENTE + COLOR
+        # ------------------------------------------------------------
         if not q_con_pantone.empty:
             for keys, g in q_con_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
-                due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
+                # Urgencia del grupo entero
+                due_min = g["DueDate"].min()
+                
+                # Orden interno
                 g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
-                # Añadimos clave de desempate (1)
+                
+                # Tupla: (Fecha, Prioridad 1, Cliente, Color, Tareas)
+                # Nota: Si prefieres que NO se separen CMYK de Pantone por defecto, 
+                # cambia el '1' por '0' aquí también. Pero usualmente es mejor separarlos.
                 grupos_todos.append((due_min, 1, keys[0], keys[1], g_sorted.to_dict("records")))
         
-        # 5. Ordenar todos los grupos juntos por DueDate
+        # 5. ORDENAMIENTO FINAL DE BLOQUES
+        # ------------------------------------------------------------
+        # Ordena por: Fecha -> Prioridad (0=CMYK, 1=Pantone) -> Cliente
         grupos_todos.sort() 
 
-        # 6. Crear la cola final
         return deque([item for _, _, _, _, recs in grupos_todos for item in recs])
-
+    
     def _cola_troquelada(q): 
         if q.empty: return deque()
         q = q.copy()
@@ -566,27 +507,25 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
             grupos.append((due_min, troq, g_sorted.to_dict("records")))
         grupos.sort()
-
         return deque([item for _, _, recs in grupos for item in recs])
 
     colas = {}
-    buffer_espera = {m: None for m in maquinas}
+    buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
+    
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
         m_lower = m.lower()
 
         if q.empty: colas[m] = deque()
         elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower): colas[m] = _cola_troquelada(q)
-        elif "offset" in m_lower:
-            colas[m] = _cola_impresora_offset(q) # Nueva función para Offset
-        elif ("flexo" in m_lower) or ("impres" in m_lower): # 'impres' genérico usa la de flexo
-            colas[m] = _cola_impresora_flexo(q) # Antigua función para Flexo
+        elif "offset" in m_lower: colas[m] = _cola_impresora_offset(q)
+        elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         else: 
             q.sort_values(by=["DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
     # =================================================================
-    # 5. LÓGICA DE PLANIFICACIÓN
+    # 5. LÓGICA DE PLANIFICACIÓN (EL NÚCLEO)
     # =================================================================
     
     pendientes_por_ot = defaultdict(set); [pendientes_por_ot[t["OT_id"]].add(t["Proceso"]) for _, t in tasks.iterrows()]
@@ -597,459 +536,308 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     def quedan_tareas(): return any(len(q) > 0 for q in colas.values())
 
     def lista_para_ejecutar(t): 
-        # 1. Función auxiliar de limpieza (Normalización)
         def clean(s):
             if not s: return ""
             s = str(s).lower().strip()
-            # Quitar tildes
             trans = str.maketrans("áéíóúüñ", "aeiouun")
             s = s.translate(trans)
-            
-            # --- ALIAS AGRESIVOS ---
+            # Alias Agresivos
             if "flexo" in s: return "impresion flexo"
             if "offset" in s: return "impresion offset"
             if "troquel" in s: return "troquelado"
-            # -----------------------
             return s
 
         proc_actual_clean = clean(t["Proceso"])
         ot = t["OT_id"]
-        
-        # Obtenemos el flujo estándar limpio
         flujo_clean = [clean(p) for p in flujo_estandar]
         
-        # Si el proceso actual no está en el flujo estándar, asumimos que no tiene trabas
-        if proc_actual_clean not in flujo_clean: 
-            return True
+        if proc_actual_clean not in flujo_clean: return True
             
         idx = flujo_clean.index(proc_actual_clean)
-        
-        # 2. Identificamos qué procesos anteriores REALMENTE tiene esta OT
-        # Comparamos usando las versiones limpias
         pendientes_clean = {clean(p) for p in pendientes_por_ot[ot]}
-        
-        # Los procesos previos son los que están antes en la lista estándar
-        # Y ADEMÁS existen en la lista de pendientes de esta OT.
         prev_procs_names = []
         for p_raw in flujo_estandar[:idx]:
             if clean(p_raw) in pendientes_clean:
-                prev_procs_names.append(p_raw) # Guardamos el nombre original para buscar en 'completado' y 'fin_proceso'
+                prev_procs_names.append(p_raw)
 
-        # --- BLOQUE DEBUG TEMPORAL (Bórralo cuando lo arregles) ---
-        if "troquel" in proc_actual_clean and "E7311" in str(ot):
-            print(f"\n🕵️ CASO E7311 DETECTADO:")
-            print(f"   1. Proceso actual (limpio): '{proc_actual_clean}'")
-            print(f"   2. ¿Está en el flujo estándar?: {'SÍ' if proc_actual_clean in flujo_clean else 'NO'}")
-            print(f"   3. Flujo Estándar que ve el sistema: {flujo_clean}")
-            print(f"   4. Procesos pendientes de esta OT: {pendientes_clean}")
-            print(f"   5. Padres detectados (prev_procs): {prev_procs_names}")
-            print(f"   -> CONCLUSIÓN: {'⛔ SE FRENA' if prev_procs_names else '🟢 PASA (ERROR)'}\n")
-        # ----------------------------------------------------------        
+        if not prev_procs_names: return True
 
-        # Si no hay predecesores, pase adelante
-        if not prev_procs_names: 
-            return True
-
-        # 3. Verificamos si TODOS los predecesores están completados
-        # Aquí volvemos a limpiar para comparar contra el set 'completado'
         completados_clean = {clean(c) for c in completado[ot]}
-        
         for p in prev_procs_names:
             if clean(p) not in completados_clean:
-                return False # ¡FRENAR! Falta un paso anterior
+                return False 
 
-        # 4. Gestión de Tiempos (Si terminó ayer, o hace un rato)
-        # Buscamos la hora fin más tardía de los procesos previos
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
         
         if last_end:
             maq = t["Maquina"]
             current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
             
-            # Si el proceso anterior termina EN EL FUTURO respecto a la máquina actual
             if current_agenda < last_end:
-                
-                # --- MODIFICADO: Salto de tiempo respetando feriados ---
                 fecha_destino = last_end.date()
                 hora_destino = last_end.time()
 
-                # Si cae en día no hábil o feriado...
                 if not es_dia_habil(fecha_destino, cfg):
                     fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg)
-                    hora_destino = time(7, 0) # Ajustado a tu turno de 7 AM
+                    hora_destino = time(7, 0) # Turno inicia a las 7
                 
-                # Actualizamos la agenda de la máquina para que espere
                 agenda[maq]["fecha"] = fecha_destino
                 agenda[maq]["hora"] = hora_destino
-                
                 h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                 agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
-                # --- FIN MODIFICADO ---
-
         return True    
     
-    #--- Bucle principal de planificación ---
-    
     def _prioridad_dinamica(m):
-    # Si es automática → darle prioridad cuando está libre
         if "autom" in m.lower():
-            fecha = agenda[m]["fecha"]
-            hora = agenda[m]["hora"]
-            return (0, fecha, hora)   # prioridad alta
-
-        # Manuales después
-        fecha = agenda[m]["fecha"]
-        hora = agenda[m]["hora"]
-        return (1, fecha, hora)
+            return (0, agenda[m]["fecha"], agenda[m]["hora"])
+        return (1, agenda[m]["fecha"], agenda[m]["hora"])
 
     progreso = True
     while quedan_tareas() and progreso:
         progreso = False
-        # (Ahora 'maquinas' está ordenada con Manuales primero)
+        
         for maquina in sorted(maquinas, key=_prioridad_dinamica):
-            if not colas.get(maquina): continue
-            
+            if not colas.get(maquina): 
+                # --- SISTEMA DE RESCATE (CRÍTICO) ---
+                # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
+                if buffer_espera.get(maquina):
+                    print(f"🚨 RESCATE FINAL: Liberando {buffer_espera[maquina]['OT_id']} porque la máquina se quedó sin tareas.")
+                    colas[maquina].appendleft(buffer_espera[maquina])
+                    buffer_espera[maquina] = None
+                    # No hacemos continue, dejamos que fluya para que se procese abajo
+                else:
+                    continue
+
             tareas_agendadas = True
             while tareas_agendadas: 
                 tareas_agendadas = False
-                if not colas.get(maquina): break
                 
+                # --- CHEQUEO DE SEGURIDAD PREVIO ---
+                if not colas.get(maquina):
+                    if buffer_espera.get(maquina):
+                         print(f"🚨 RESCATE INTERMEDIO: Liberando {buffer_espera[maquina]['OT_id']}.")
+                         colas[maquina].appendleft(buffer_espera[maquina])
+                         buffer_espera[maquina] = None
+                    else:
+                        break
+                
+                # ==========================================================
+                # PASO 1: BÚSQUEDA DE CANDIDATA (Estricta)
+                # ==========================================================
                 idx_cand = -1 
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     if not mp_ok: continue
 
-                    # =========================================================
-                    # LÓGICA ANTI-ESPERA (Para activar el robo)
-                    # =========================================================
-                    ot = t_cand["OT_id"]
-                    
-                    # 1. Calculamos cuándo termina el proceso anterior (sin mover el reloj)
-                    # Reconstruimos la lógica de dependencias aquí brevemente
-                    orden_std = flujo_estandar
-                    proc = t_cand["Proceso"].strip()
-                    if proc in orden_std:
-                        idx_proc = orden_std.index(proc)
-                        prev_procs = [p for p in orden_std[:idx_proc] if p in pendientes_por_ot[ot]]
-                        
-                        if not all(p in completado[ot] for p in prev_procs):
-                            continue # Si falta algo anterior, ni la miramos
-                        
-                        # Buscamos la hora fin del proceso anterior más tardío
-                        last_end = max((fin_proceso[ot].get(p) for p in prev_procs if fin_proceso[ot].get(p)), default=None)
-                        
-                        if last_end:
-                            hora_maquina_actual = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
-                            
-                            # Calculamos la espera en horas
-                            espera_h = (last_end - hora_maquina_actual).total_seconds() / 3600.0
-                            
-                            # EL UMBRAL DE PACIENCIA: 
-                            # Si tengo que esperar más de 0.5 horas (30 min), paso de esta tarea
-                            # y dejo idx_cand en -1 para que se active el robo.
-                            if espera_h > 0.5: 
-                                continue 
-                    # =========================================================
-
-                    # Si la espera es aceptable, entonces sí llamamos a la función que agenda
                     if lista_para_ejecutar(t_cand):
                         idx_cand = i
                         break
                 
+                # ==========================================================
+                # PASO 2: INTENTO DE ROBO (Casos A, B, C, D)
+                # ==========================================================
                 tarea_robada = False
-                
-                # ==========================================================
-                # --- BLOQUE DE ROBO "ROBIN HOOD" (TOTALMENTE CONECTADO) ---
-                # ==========================================================
-
                 if idx_cand == -1:
-                    tarea_encontrada = None
-                    fuente_maquina = None
-                    idx_robado = -1
+                    if buffer_espera.get(maquina):
+                         print(f"⚠️ PACIENCIA AGOTADA: No hay pareja para {buffer_espera[maquina]['OT_id']}. La libero y la ejecuto sola.")
+                         colas[maquina].appendleft(buffer_espera[maquina])
+                         buffer_espera[maquina] = None
+                         idx_cand = 0 # Ahora sí tengo algo para hacer
+                    
+                    else:
+                        # Si realmente estoy vacío y sin buffer, ahí sí salgo a robar
+                        tarea_encontrada = None
+                        fuente_maquina = None
+                        idx_robado = -1
 
-                    # -------------------------------------------------------
-                    # CASO A: La Automática tiene hambre (Roba a Manuales)
-                    # -------------------------------------------------------
+                    # A: Auto roba a Manual
                     if maquina in auto_names:
                         for m_manual in manuales:
                             if not colas.get(m_manual): continue
-                            
                             for i, t_cand in enumerate(colas[m_manual]):
                                 if t_cand["Proceso"].strip() != "Troquelado": continue
-                                
-                                # Validaciones estándar (MP, Dependencias)
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                 if not mp_ok: continue
-                                
                                 if lista_para_ejecutar(t_cand):
-                                    tarea_encontrada = t_cand
-                                    fuente_maquina = m_manual
-                                    idx_robado = i
-                                    break
+                                    tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
                             if tarea_encontrada: break
 
-                    # -------------------------------------------------------
-                    # SI SOY UNA MÁQUINA MANUAL (Manual 1, 2 o 3)
-                    # -------------------------------------------------------
+                    # B y C: Manual roba a Auto o Manual
                     elif any(m in maquina for m in manuales):
-                        
-                        # --- CASO B: Intento robarle a la JEFA (Automática) ---
-                        # Prioridad 1: Descongestionar la automática de tareas chicas
+                        # B: Robar a Auto
                         if auto_name and colas.get(auto_name):
                             for i, t_cand in enumerate(colas[auto_name]):
                                 if t_cand["Proceso"].strip() != "Troquelado": continue
-
-                                # REGLA DE ORO: > 2000 SE QUEDA EN AUTOMÁTICA
-                                cant = float(t_cand.get("CantidadPliegos", 0) or 0)
-                                if cant > 2000: continue 
-
-                                # Validaciones Físicas y MP
-                                anc = float(t_cand.get("PliAnc", 0) or 0)
-                                lar = float(t_cand.get("PliLar", 0) or 0)
-                                if anc > 60 or lar > 60: continue # Ajustar a tus medidas
-                                
+                                if float(t_cand.get("CantidadPliegos", 0) or 0) > 2000: continue # No robar grandes
+                                anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                if anc > 60 or lar > 60: continue 
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                 if not mp_ok: continue
-
                                 if lista_para_ejecutar(t_cand):
-                                    tarea_encontrada = t_cand
-                                    fuente_maquina = auto_name
-                                    idx_robado = i
-                                    break
+                                    tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                         
-                        # --- CASO C: (NUEVO) Intento robarle a mis VECINAS (Otras Manuales) ---
-                        # Prioridad 2: Balancear carga entre manuales
-                        
+                        # C: Robar a Vecina Manual
                         if not tarea_encontrada:
-                            otras_manuales = [m for m in manuales if m != maquina] # Lista de vecinas
-                            
-                            for vecina in otras_manuales:
+                            vecinas = [m for m in manuales if m != maquina]
+                            for vecina in vecinas:
                                 if not colas.get(vecina): continue
-                                
                                 for i, t_cand in enumerate(colas[vecina]):
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
-                                    
-                                    # Validaciones Físicas (Por si las manuales tienen tamaños distintos)
-                                    # anc = float(t_cand.get("PliAnc", 0) or 0)
-                                    # lar = float(t_cand.get("PliLar", 0) or 0)
-                                    # if anc > 100 or lar > 140: continue 
-                                    
-                                    # Validaciones estándar
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-
-                                    # Aquí NO importa la cantidad de pliegos, entre manuales se vale todo
                                     if lista_para_ejecutar(t_cand):
-                                        tarea_encontrada = t_cand
-                                        fuente_maquina = vecina
-                                        idx_robado = i
-                                        break
-                                
+                                        tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                 if tarea_encontrada: break
-                        
-                    # -------------------------------------------------------
-                    # CASO D: ROBO ENTRE DESCARTONADORAS (NUEVO)
-                    # -------------------------------------------------------
-
+                    
+                    # D: Robo entre Descartonadoras
                     elif "descartonad" in maquina.lower():
-                        # Identificamos a las vecinas (otras descartonadoras)
-                        # Buscamos en las claves de 'colas' las que tengan nombre similar
                         vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
-                        
                         for vecina in vecinas_desc:
                             if not colas.get(vecina): continue
-                            
-                            # Revisamos la cola de la vecina
                             for i, t_cand in enumerate(colas[vecina]):
-                                # Solo nos interesan tareas de Descartonado
                                 if "descartonad" not in t_cand["Proceso"].lower(): continue
-                                
-                                # Validar Materia Prima (estándar)
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                 if not mp_ok: continue
-
-                                # LO MÁS IMPORTANTE: ¿Está lista para hacerse YA?
-                                # (O sea, ¿ya terminó el troquelado anterior?)
                                 if lista_para_ejecutar(t_cand):
-                                    tarea_encontrada = t_cand
-                                    fuente_maquina = vecina
-                                    idx_robado = i
-                                    print(f"♻️ DESCARTONADO: {maquina} le robó la OT {t_cand['OT_id']} a {vecina}")
-                                    break
-                            
+                                    tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                             if tarea_encontrada: break
 
-                    # -------------------------------------------------------
-                    # EJECUCIÓN DEL ROBO
-                    # -------------------------------------------------------
+                    # Ejecutar Robo
                     if tarea_encontrada:
                         tarea_para_mover = colas[fuente_maquina][idx_robado]
                         del colas[fuente_maquina][idx_robado]
-                        
                         tarea_para_mover["Maquina"] = maquina 
                         colas[maquina].appendleft(tarea_para_mover)
-                        
                         idx_cand = 0
                         tarea_robada = True
                     else:
                         break
 
                 # ==========================================================
-
-                if idx_cand > 0: colas[maquina].rotate(-idx_cand) 
-                
+                # PASO 3: FRANCOTIRADOR Y EJECUCIÓN
                 # ==========================================================
-            # PASO 1: BÚSQUEDA DE CANDIDATA (Con Filtro de Paciencia)
-            # ==========================================================
-            idx_cand = -1 
-            
-            for i, t_cand in enumerate(colas[maquina]):
-                # Chequeo básico de Materia Prima
-                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                if not mp_ok: continue
-
-                # VALIDACIÓN CRÍTICA: ¿Se cumplieron las dependencias anteriores (Impresión, etc)?
-                if lista_para_ejecutar(t_cand):
-                    idx_cand = i
-                    break
-            
-            # ==========================================================
-            # PASO 2: INTENTO DE ROBO (Si estoy vacío)
-            # ==========================================================
-            tarea_robada = False
-            
-            if idx_cand == -1:
-                # ... (Aquí va tu código de ROBO existente: Casos A, B, C, D) ...
-                # ... (Asegurate de que dentro del robo también uses lista_para_ejecutar) ...
-                pass 
-
-            # ==========================================================
-            # PASO 3: ESTRATEGIA "FRANCOTIRADOR" Y EJECUCIÓN
-            # ==========================================================
-            
-            # Si encontramos una tarea válida (propia o robada)
-            if idx_cand != -1:
-                
-                # 1. Traemos la tarea al frente de la cola
-                if not tarea_robada and idx_cand > 0:
-                    colas[maquina].rotate(-idx_cand)
-                
-                # Ahora la candidata es la primera de la fila
-                t_candidata = colas[maquina][0]
-                
-                se_ejecuta_ya = True # Por defecto, sí la hacemos
-                es_barniz = "barniz" in t_candidata["Proceso"].lower()
-                
-                # --- LÓGICA DE ESPERA (Solo para Barniz) ---
-                if es_barniz:
+                if idx_cand != -1:
+                    # Traemos la tarea al frente
+                    if not tarea_robada and idx_cand > 0:
+                        colas[maquina].rotate(-idx_cand)
                     
-                    # A) ¿HAY ALGUIEN EN LA SALA DE ESPERA?
-                    if buffer_espera[maquina]:
-                        # ¡Pareja encontrada!
-                        # Sacamos la actual para hacerla YA
-                        t = colas[maquina].popleft()
-                        
-                        # Recuperamos la vieja y la ponemos PRIMERA para la próxima vuelta
-                        tarea_vieja = buffer_espera[maquina]
-                        buffer_espera[maquina] = None
-                        colas[maquina].appendleft(tarea_vieja)
-                        
-                        print(f"🎯 FRANCOTIRADOR: Ejecutando par Barnizado {t['OT_id']} + {tarea_vieja['OT_id']}")
-                        # se_ejecuta_ya sigue siendo True, así que procesamos 't' abajo
-
-                    # B) NO HAY NADIE ESPERANDO. ¿VALE LA PENA ESPERAR?
-                    else:
-                        encontre_pareja = False
-                        
-                        # Miramos el futuro (sin sacar nada)
-                        limit = min(len(colas[maquina]), 6) # Miramos 5 adelante
-                        for k in range(1, limit):
-                            futura = colas[maquina][k]
+                    t_candidata = colas[maquina][0]
+                    se_ejecuta_ya = True
+                    es_barniz = "barniz" in t_candidata["Proceso"].lower()
+                    
+                    if es_barniz:
+                        # A) ¿HAY ALGUIEN EN EL BUFFER? -> ¡MATRIMONIO!
+                        if buffer_espera[maquina]:
+                            # 1. Sacamos la tarea ACTUAL de la cola (El "gatillo")
+                            t_actual = colas[maquina].popleft() 
                             
-                            # --- CORRECCIÓN CLAVE: VALIDACIÓN LAXA ---
-                            # Solo chequeamos que sea Barniz y tenga MP.
-                            # NO chequeamos lista_para_ejecutar (tiempos/dependencias),
-                            # porque asumimos que estará lista en el futuro cuando llegue su turno.
-                            if "barniz" in futura["Proceso"].lower():
-                                mp_fut = str(futura.get("MateriaPrimaPlanta")).strip().lower()
-                                mp_fut_ok = mp_fut in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
+                            # 2. Sacamos la tarea VIEJA del buffer (La que esperaba)
+                            t_vieja = buffer_espera[maquina]
+                            buffer_espera[maquina] = None
+                            
+                            # --- CORRECCIÓN: DEVOLVER AMBAS A LA COLA ---
+                            # Queremos que el orden de ejecución sea: [VIEJA] -> [ACTUAL]
+                            # Como appendleft empuja hacia abajo, insertamos en orden inverso.
+                            
+                            # Primero metemos la ACTUAL (quedará segunda en la fila)
+                            colas[maquina].appendleft(t_actual)
+                            
+                            # Después metemos la VIEJA (quedará primera en la fila)
+                            colas[maquina].appendleft(t_vieja)
+                            
+                            print(f"🎯 FRANCOTIRADOR: ¡Bingo! Reordenando cola: 1° {t_vieja['OT_id']} -> 2° {t_actual['OT_id']}")
+                        
+                        # Dejamos 'se_ejecuta_ya = True'.
+                        # El código saldrá de este if, irá al bloque de ejecución,
+                        # hará un popleft() y se llevará a 't_vieja'.
+                        # En la PRÓXIMA vuelta del while, se llevará a 't_actual'.
+                            
+                        # B) BUFFER VACÍO -> ¿MIRAMOS AL FUTURO?
+                        else:
+                            encontre_pareja = False
+                            # Miramos 6 tareas adelante
+                            limit = min(len(colas[maquina]), 7) 
+                            
+                            for k in range(1, limit):
+                                futura = colas[maquina][k]
                                 
-                                if mp_fut_ok:
-                                    encontre_pareja = True
-                                    break
-                        
-                        if encontre_pareja:
-                            # GUARDAMOS la actual y pasamos turno
-                            buffer_espera[maquina] = colas[maquina].popleft()
-                            print(f"⏳ HOLD: Guardando Barniz {buffer_espera[maquina]['OT_id']} esperando pareja futura...")
+                                # CONDICIÓN LAXA: Solo chequeamos que sea Barniz.
+                                # No chequeamos dependencias (asumimos que llegarán).
+                                # No chequeamos setup. Solo queremos juntar barnices.
+                                if "barniz" in futura["Proceso"].lower():
+                                    # Chequeo MP simple
+                                    mp = str(futura.get("MateriaPrimaPlanta")).strip().lower()
+                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
+                                    
+                                    if mp_ok:
+                                        encontre_pareja = True
+                                        print(f"👀 OJO: Veo barniz futuro {futura['OT_id']} en pos {k}")
+                                        break
                             
-                            se_ejecuta_ya = False 
-                            continue # <--- SALTAMOS AL SIGUIENTE CICLO DEL WHILE
+                            if encontre_pareja:
+                                # GUARDAMOS la actual en el freezer
+                                buffer_espera[maquina] = colas[maquina].popleft()
+                                print(f"⏳ HOLD: Guardando Barniz {buffer_espera[maquina]['OT_id']} esperando a su pareja futura...")
+                                
+                                se_ejecuta_ya = False 
+                                continue
 
-                # ------------------------------------------------------
-                # EJECUCIÓN FINAL (Si no se quedó esperando en el buffer)
-                # ------------------------------------------------------
-                if se_ejecuta_ya:
-                    t = colas[maquina].popleft()
+                    #========================================
+                    # PASO 4: EJECUCIÓN FINAL
+                    #========================================
 
-                orden = df_ordenes.loc[t["idx"]].copy()
+                    if se_ejecuta_ya:
+                        t = colas[maquina].popleft()
+                        orden = df_ordenes.loc[t["idx"]].copy()
 
-                # =================================================================
-                # --- CORRECCIÓN CRÍTICA: USAR DATOS CALCULADOS (POSES/BOCAS) ---
-                # =================================================================
-                # Sobrescribimos los valores crudos de la OT con los valores
-                # matemáticos que calculamos en _expandir_tareas (que ya tienen poses/bocas)
-                orden["CantidadPliegos"] = float(t["CantidadPliegos"]) 
-                orden["Poses"] = float(t.get("Poses", 1))
-                orden["Bocas"] = float(t.get("Bocas", 1))
-                
-                _, proc_h = tiempo_operacion_h(orden, t["Proceso"], maquina, cfg)
-                setup_min = setup_base_min(t["Proceso"], maquina, cfg)
-                motivo = "Setup base"
-                
-                last_task = ultimo_en_maquina.get(maquina) 
-                if last_task:
-                    if (t["Proceso"] == "Troquelado" and 
-                        str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
-                        setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Mismo troquel (sin setup)"
-                    elif usa_setup_menor(last_task, orden, t["Proceso"]): 
-                        setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
-                
-                total_h = proc_h + setup_min / 60.0
-                if pd.isna(total_h) or total_h <= 0: continue    
+                        # Inyección de datos calculados
+                        orden["CantidadPliegos"] = float(t["CantidadPliegos"]) 
+                        orden["Poses"] = float(t.get("Poses", 1))
+                        orden["Bocas"] = float(t.get("Bocas", 1))
+                        
+                        _, proc_h = tiempo_operacion_h(orden, t["Proceso"], maquina, cfg)
+                        setup_min = setup_base_min(t["Proceso"], maquina, cfg)
+                        motivo = "Setup base"
+                        
+                        last_task = ultimo_en_maquina.get(maquina) 
+                        if last_task:
+                            if (t["Proceso"] == "Troquelado" and 
+                                str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
+                                setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Mismo troquel (sin setup)"
+                            elif usa_setup_menor(last_task, orden, t["Proceso"]): 
+                                setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
+                        
+                        total_h = proc_h + setup_min / 60.0
+                        if pd.isna(total_h) or total_h <= 0: continue    
 
-                bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
-                if not bloques: colas[maquina].appendleft(t); break 
-                inicio, fin = bloques[0][0], bloques[-1][1]
-                # duracion_h = round((fin - inicio).total_seconds() / 3600.0, 3)
-                segundos_netos = sum((b_fin - b_ini).total_seconds() for b_ini, b_fin in bloques)
-                duracion_h = round(segundos_netos / 3600.0, 3)
+                        bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
+                        if not bloques: colas[maquina].appendleft(t); break 
+                        
+                        inicio, fin = bloques[0][0], bloques[-1][1]
+                        segundos_netos = sum((b_fin - b_ini).total_seconds() for b_ini, b_fin in bloques)
+                        duracion_h = round(segundos_netos / 3600.0, 3)
 
-                fin_proceso[t["OT_id"]][t["Proceso"]] = fin
-                for b_ini, b_fin in bloques:
-                    carga_reg.append({"Fecha": b_ini.date(), "Maquina": maquina, 
-                                        "HorasPlanificadas": (b_fin - b_ini).total_seconds() / 3600.0, 
-                                        "CapacidadDia": h_dia})
+                        fin_proceso[t["OT_id"]][t["Proceso"]] = fin
+                        for b_ini, b_fin in bloques:
+                            carga_reg.append({"Fecha": b_ini.date(), "Maquina": maquina, 
+                                                "HorasPlanificadas": (b_fin - b_ini).total_seconds() / 3600.0, 
+                                                "CapacidadDia": h_dia})
 
-                filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                    "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
-                             {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
-                              "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
+                        filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
+                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
+                                     {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
+                                      "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
 
-                completado[t["OT_id"]].add(t["Proceso"])
-                ultimo_en_maquina[maquina] = t 
-                progreso = True; tareas_agendadas = True
-                
-                # (Mantenemos este break para que la Automática 
-                # no sea demasiado agresiva en un solo turno)
-                if tarea_robada:
-                    break 
+                        completado[t["OT_id"]].add(t["Proceso"])
+                        ultimo_en_maquina[maquina] = t 
+                        progreso = True; tareas_agendadas = True
+                        
+                        if tarea_robada: break 
 
     # =================================================================
     # 6. SALIDAS 
@@ -1072,8 +860,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 Cliente=('Cliente', 'first'),
                 Fin_OT=('Fin', 'max'),
                 DueDate=('DueDate', 'max')
-            )
-            .reset_index()
+            ).reset_index()
         )
         due_date_deadline = pd.to_datetime(resumen_ot["DueDate"].dt.date) + timedelta(hours=18)
         resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - due_date_deadline).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2) 
