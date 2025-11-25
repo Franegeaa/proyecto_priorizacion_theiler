@@ -566,7 +566,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         for p in prev_procs_names:
             if clean(p) not in completados_clean:
                 return False 
-
+        
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
         
         if last_end:
@@ -586,7 +586,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                 agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
         return True    
-    
     def _prioridad_dinamica(m):
         if "autom" in m.lower():
             return (0, agenda[m]["fecha"], agenda[m]["hora"])
@@ -601,9 +600,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
                 if buffer_espera.get(maquina):
-                    print(f"🚨 RESCATE FINAL: Liberando {buffer_espera[maquina]['OT_id']} porque la máquina se quedó sin tareas.")
-                    colas[maquina].appendleft(buffer_espera[maquina])
-                    buffer_espera[maquina] = None
+                    print(f"🚨 RESCATE FINAL: Liberando {len(buffer_espera[maquina])} tareas del buffer.")
+                    colas[maquina].extendleft(reversed(buffer_espera[maquina]))
+                    buffer_espera[maquina] = []
+                    progreso = True # Marcar progreso para no cortar la ejecución
                     # No hacemos continue, dejamos que fluya para que se procese abajo
                 else:
                     continue
@@ -615,9 +615,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # --- CHEQUEO DE SEGURIDAD PREVIO ---
                 if not colas.get(maquina):
                     if buffer_espera.get(maquina):
-                         print(f"🚨 RESCATE INTERMEDIO: Liberando {buffer_espera[maquina]['OT_id']}.")
-                         colas[maquina].appendleft(buffer_espera[maquina])
-                         buffer_espera[maquina] = None
+                         print(f"🚨 RESCATE INTERMEDIO: Liberando {len(buffer_espera[maquina])} tareas.")
+                         colas[maquina].extendleft(reversed(buffer_espera[maquina]))
+                         buffer_espera[maquina] = []
                     else:
                         break
                 
@@ -640,9 +640,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 tarea_robada = False
                 if idx_cand == -1:
                     if buffer_espera.get(maquina):
-                         print(f"⚠️ PACIENCIA AGOTADA: No hay pareja para {buffer_espera[maquina]['OT_id']}. La libero y la ejecuto sola.")
-                         colas[maquina].appendleft(buffer_espera[maquina])
-                         buffer_espera[maquina] = None
+                         print(f"⚠️ PACIENCIA AGOTADA: No hay pareja. Libero {len(buffer_espera[maquina])} tareas.")
+                         colas[maquina].extendleft(reversed(buffer_espera[maquina]))
+                         buffer_espera[maquina] = []
                          idx_cand = 0 # Ahora sí tengo algo para hacer
                     
                     else:
@@ -651,72 +651,72 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         fuente_maquina = None
                         idx_robado = -1
 
-                    # A: Auto roba a Manual
-                    if maquina in auto_names:
-                        for m_manual in manuales:
-                            if not colas.get(m_manual): continue
-                            for i, t_cand in enumerate(colas[m_manual]):
-                                if t_cand["Proceso"].strip() != "Troquelado": continue
-                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                if not mp_ok: continue
-                                if lista_para_ejecutar(t_cand):
-                                    tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
-                            if tarea_encontrada: break
+                        # A: Auto roba a Manual
+                        if maquina in auto_names:
+                            for m_manual in manuales:
+                                if not colas.get(m_manual): continue
+                                for i, t_cand in enumerate(colas[m_manual]):
+                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                    if not mp_ok: continue
+                                    if lista_para_ejecutar(t_cand):
+                                        tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
+                                if tarea_encontrada: break
 
-                    # B y C: Manual roba a Auto o Manual
-                    elif any(m in maquina for m in manuales):
-                        # B: Robar a Auto
-                        if auto_name and colas.get(auto_name):
-                            for i, t_cand in enumerate(colas[auto_name]):
-                                if t_cand["Proceso"].strip() != "Troquelado": continue
-                                if float(t_cand.get("CantidadPliegos", 0) or 0) > 2000: continue # No robar grandes
-                                anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                if anc > 60 or lar > 60: continue 
-                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                if not mp_ok: continue
-                                if lista_para_ejecutar(t_cand):
-                                    tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
+                        # B y C: Manual roba a Auto o Manual
+                        elif any(m in maquina for m in manuales):
+                            # B: Robar a Auto
+                            if auto_name and colas.get(auto_name):
+                                for i, t_cand in enumerate(colas[auto_name]):
+                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    if float(t_cand.get("CantidadPliegos", 0) or 0) > 2000: continue # No robar grandes
+                                    anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                    if anc > 60 or lar > 60: continue 
+                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                    if not mp_ok: continue
+                                    if lista_para_ejecutar(t_cand):
+                                        tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
+                            
+                            # C: Robar a Vecina Manual
+                            if not tarea_encontrada:
+                                vecinas = [m for m in manuales if m != maquina]
+                                for vecina in vecinas:
+                                    if not colas.get(vecina): continue
+                                    for i, t_cand in enumerate(colas[vecina]):
+                                        if t_cand["Proceso"].strip() != "Troquelado": continue
+                                        mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                        if not mp_ok: continue
+                                        if lista_para_ejecutar(t_cand):
+                                            tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
+                                    if tarea_encontrada: break
                         
-                        # C: Robar a Vecina Manual
-                        if not tarea_encontrada:
-                            vecinas = [m for m in manuales if m != maquina]
-                            for vecina in vecinas:
+                        # D: Robo entre Descartonadoras
+                        elif "descartonad" in maquina.lower():
+                            vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
+                            for vecina in vecinas_desc:
                                 if not colas.get(vecina): continue
                                 for i, t_cand in enumerate(colas[vecina]):
-                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    if "descartonad" not in t_cand["Proceso"].lower(): continue
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
                                     if lista_para_ejecutar(t_cand):
                                         tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                 if tarea_encontrada: break
-                    
-                    # D: Robo entre Descartonadoras
-                    elif "descartonad" in maquina.lower():
-                        vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
-                        for vecina in vecinas_desc:
-                            if not colas.get(vecina): continue
-                            for i, t_cand in enumerate(colas[vecina]):
-                                if "descartonad" not in t_cand["Proceso"].lower(): continue
-                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                if not mp_ok: continue
-                                if lista_para_ejecutar(t_cand):
-                                    tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
-                            if tarea_encontrada: break
 
-                    # Ejecutar Robo
-                    if tarea_encontrada:
-                        tarea_para_mover = colas[fuente_maquina][idx_robado]
-                        del colas[fuente_maquina][idx_robado]
-                        tarea_para_mover["Maquina"] = maquina 
-                        colas[maquina].appendleft(tarea_para_mover)
-                        idx_cand = 0
-                        tarea_robada = True
-                    else:
-                        break
+                        # Ejecutar Robo
+                        if tarea_encontrada:
+                            tarea_para_mover = colas[fuente_maquina][idx_robado]
+                            del colas[fuente_maquina][idx_robado]
+                            tarea_para_mover["Maquina"] = maquina 
+                            colas[maquina].appendleft(tarea_para_mover)
+                            idx_cand = 0
+                            tarea_robada = True
+                        else:
+                            break
 
                 # ==========================================================
                 # PASO 3: FRANCOTIRADOR Y EJECUCIÓN
@@ -731,61 +731,59 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     es_barniz = "barniz" in t_candidata["Proceso"].lower()
                     
                     if es_barniz:
-                        # A) ¿HAY ALGUIEN EN EL BUFFER? -> ¡MATRIMONIO!
+                        # 1. CONSOLIDACIÓN: Si hay gente en el buffer, ¡traerlos YA!
                         if buffer_espera[maquina]:
-                            # 1. Sacamos la tarea ACTUAL de la cola (El "gatillo")
-                            t_actual = colas[maquina].popleft() 
+                            # Traemos todo lo del buffer al inicio de la cola
+                            # Buffer: [B1, B2] -> Cola: [B1, B2, Actual...]
+                            # Para mantener orden: extendleft con reversed
+                            colas[maquina].extendleft(reversed(buffer_espera[maquina]))
+                            buffer_espera[maquina] = [] # Limpiar buffer
                             
-                            # 2. Sacamos la tarea VIEJA del buffer (La que esperaba)
-                            t_vieja = buffer_espera[maquina]
-                            buffer_espera[maquina] = None
-                            
-                            # --- CORRECCIÓN: DEVOLVER AMBAS A LA COLA ---
-                            # Queremos que el orden de ejecución sea: [VIEJA] -> [ACTUAL]
-                            # Como appendleft empuja hacia abajo, insertamos en orden inverso.
-                            
-                            # Primero metemos la ACTUAL (quedará segunda en la fila)
-                            colas[maquina].appendleft(t_actual)
-                            
-                            # Después metemos la VIEJA (quedará primera en la fila)
-                            colas[maquina].appendleft(t_vieja)
-                            
-                            print(f"🎯 FRANCOTIRADOR: ¡Bingo! Reordenando cola: 1° {t_vieja['OT_id']} -> 2° {t_actual['OT_id']}")
+                            print(f"🎯 FRANCOTIRADOR: Reagrupando {len(colas[maquina])} barnices.")
+                            # YA NO hacemos continue. Dejamos que fluya para EJECUTAR la primera tarea del grupo.
+                            # Esto rompe el ciclo infinito de agrupar-desagrupar.
+                            se_ejecuta_ya = True 
+
+
+                        # 2. MIRAR AL FUTURO (Solo si el buffer estaba vacío, o sea, ya consolidamos)
+                        # Identificar bloque contiguo de barnices en el tope
+                        bloque_barniz = []
+                        idx = 0
+                        while idx < len(colas[maquina]):
+                            t = colas[maquina][idx]
+                            if "barniz" in t["Proceso"].lower():
+                                bloque_barniz.append(t)
+                                idx += 1
+                            else:
+                                break
                         
-                        # Dejamos 'se_ejecuta_ya = True'.
-                        # El código saldrá de este if, irá al bloque de ejecución,
-                        # hará un popleft() y se llevará a 't_vieja'.
-                        # En la PRÓXIMA vuelta del while, se llevará a 't_actual'.
-                            
-                        # B) BUFFER VACÍO -> ¿MIRAMOS AL FUTURO?
-                        else:
-                            encontre_pareja = False
-                            # Miramos 6 tareas adelante
-                            limit = min(len(colas[maquina]), 7) 
-                            
-                            for k in range(1, limit):
-                                futura = colas[maquina][k]
+                        # Mirar 3 tareas MÁS ALLÁ del bloque
+                        rango_vision = 3
+                        encontre_pareja = False
+                        limit = min(len(colas[maquina]), idx + rango_vision)
+                        
+                        for k in range(idx, limit):
+                            futura = colas[maquina][k]
+                            if "barniz" in futura["Proceso"].lower():
+                                # Chequeo MP simple
+                                mp = str(futura.get("MateriaPrimaPlanta")).strip().lower()
+                                mp_ok = mp in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
                                 
-                                # CONDICIÓN LAXA: Solo chequeamos que sea Barniz.
-                                # No chequeamos dependencias (asumimos que llegarán).
-                                # No chequeamos setup. Solo queremos juntar barnices.
-                                if "barniz" in futura["Proceso"].lower():
-                                    # Chequeo MP simple
-                                    mp = str(futura.get("MateriaPrimaPlanta")).strip().lower()
-                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
-                                    
-                                    if mp_ok:
-                                        encontre_pareja = True
-                                        print(f"👀 OJO: Veo barniz futuro {futura['OT_id']} en pos {k}")
-                                        break
+                                if mp_ok:
+                                    encontre_pareja = True
+                                    print(f"👀 OJO: Veo barniz futuro {futura['OT_id']} en pos {k}. Reteniendo bloque de {len(bloque_barniz)} tareas.")
+                                    break
+                        
+                        if encontre_pareja:
+                            # Guardamos TODO el bloque en el buffer
+                            # Ojo: hay que sacarlos de la cola
+                            for _ in range(len(bloque_barniz)):
+                                t_removed = colas[maquina].popleft()
+                                buffer_espera[maquina].append(t_removed)
                             
-                            if encontre_pareja:
-                                # GUARDAMOS la actual en el freezer
-                                buffer_espera[maquina] = colas[maquina].popleft()
-                                print(f"⏳ HOLD: Guardando Barniz {buffer_espera[maquina]['OT_id']} esperando a su pareja futura...")
-                                
-                                se_ejecuta_ya = False 
-                                continue
+                            se_ejecuta_ya = False
+                            progreso = True # ¡IMPORTANTE! Hemos hecho algo (buffer), así que el sistema sigue vivo.
+                            continue
 
                     #========================================
                     # PASO 4: EJECUCIÓN FINAL
