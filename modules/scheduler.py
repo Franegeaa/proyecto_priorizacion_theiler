@@ -252,6 +252,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "PeliculaArt": row.get("PeliculaArt", ""),
                 "PliAnc": row.get("PliAnc", 0),
                 "PliLar": row.get("PliLar", 0),
+                "Urgente": es_si(row.get("Urgente", False)) # Nueva bandera de urgencia
             })  
 
     tasks = pd.DataFrame(tareas)
@@ -321,6 +322,34 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
 
+    def _validar_medidas_troquel(maquina, anc, lar):
+        # Normalizar nombre
+        m = str(maquina).lower().strip()
+        
+        # Dimensiones de la tarea (STRICT CHECK - Sin rotación)
+        # El usuario especificó que PliAnc es Ancho y PliLar es Largo
+        w = float(anc or 0)
+        l = float(lar or 0)
+
+        if "autom" in m:
+            # Min 38x38 (Ambos lados deben ser >= 38)
+            return w >= 38 and l >= 38
+        
+        # Manuales: Maximos definidos (Ancho x Largo)
+        # Manual 1: Max 80 x 105
+        if "manual 1" in m or "manual1" in m:
+            return w <= 80 and l <= 105
+        
+        # Manual 2: Max 66 x 90
+        if "manual 2" in m or "manual2" in m:
+            return w <= 66 and l <= 90
+            
+        # Manual 3: Max 70 x 100
+        if "manual 3" in m or "manual3" in m:
+            return w <= 70 and l <= 100
+            
+        return True # Por defecto si no matchea nombre
+
     if not tasks.empty and manuales: 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
@@ -345,28 +374,47 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].sum())
                 
-                # Reglas de Oro para forzar Automática
-                alguna_grande = bool((g["CantidadPliegos"] > 2500).any())
-                tamano_grande = bool((g["PliAnc"].fillna(0) > 60).any()) or bool((g["PliLar"].fillna(0) > 60).any())
+                # Datos para validación de medidas (usamos el maximo del grupo para asegurar)
+                anc = g["PliAnc"].max()
+                lar = g["PliLar"].max()
+                bocas = float(g["Bocas"].max()) # Tomamos el maximo de bocas del grupo
 
-                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, alguna_grande or tamano_grande))
+                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, anc, lar, bocas))
             grupos.sort() 
 
-            for _, troq_key, idxs, total_pliegos, requiere_auto in grupos:
-                if requiere_auto and auto_name:
-                    candidatas = [auto_name]
+            for _, troq_key, idxs, total_pliegos, anc, lar, bocas in grupos:
+                candidatas = []
+                
+                # 1. Validar candidatos por TAMAÑO primero
+                posibles = manuales + ([auto_name] if auto_name else [])
+                candidatos_tamano = [m for m in posibles if _validar_medidas_troquel(m, anc, lar)]
+                
+                if not candidatos_tamano: continue
+
+                # 2. REGLA DE BOCAS (> 6) -> Automática Obligatoria (si entra)
+                if bocas > 6:
+                    if auto_name and (auto_name in candidatos_tamano):
+                        candidatas = [auto_name]
+                    else:
+                        # Si no entra en Auto, va a manual compatible
+                        candidatas = [m for m in candidatos_tamano if m != auto_name]
+                
+                # 3. REGLA DE CANTIDAD (> 3000) -> Automática Obligatoria (si entra)
+                elif total_pliegos > 3000:
+                    if auto_name and (auto_name in candidatos_tamano):
+                        candidatas = [auto_name]
+                    else:
+                        candidatas = [m for m in candidatos_tamano if m != auto_name]
+                
+                # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Cualquiera compatible
                 else:
-                    candidatas = manuales + ([auto_name] if auto_name else [])
+                    candidatas = candidatos_tamano
 
                 if not candidatas: continue
 
                 def criterio_balanceo(m):
-                    # Penalización artificial para Manual 3 (Lastre)
-                    penalizacion_dias = 0
-                    if "manual 3" in str(m).lower() or "manual3" in str(m).lower():
-                        penalizacion_dias = 2
-                    
-                    fecha_orden = agenda_m[m]["fecha"] + timedelta(days=penalizacion_dias)
+                    # Sin penalización artificial para Manual 3
+                    fecha_orden = agenda_m[m]["fecha"]
                     return (fecha_orden, agenda_m[m]["hora"], load_h[m])
 
                 m_sel = min(candidatas, key=criterio_balanceo)
@@ -422,11 +470,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         grupos = []
         for color, g in q.groupby("_color_key", dropna=False):
             due_min_del_color = g["DueDate"].min()
-            g_sorted = g.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], ascending=[True, True, False])
-            grupos.append((due_min_del_color, color, g_sorted.to_dict("records")))
+            # Urgencia del grupo: Si alguna tarea es urgente, el grupo es urgente (True > False)
+            es_urgente = g["Urgente"].any()
+            
+            g_sorted = g.sort_values(by=["Urgente", "DueDate", "_cliente_key", "CantidadPliegos"], ascending=[False, True, True, False])
+            grupos.append((not es_urgente, due_min_del_color, color, g_sorted.to_dict("records")))
         
         grupos.sort() 
-        return deque([item for _, _, recs in grupos for item in recs])
+        return deque([item for _, _, _, recs in grupos for item in recs])
     
     def _cola_impresora_offset(q):
         if q.empty: return deque()
@@ -468,12 +519,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             for keys, g in q_sin_pantone.groupby(["_cliente_key", "_troq_key"], dropna=False):
                 # Urgencia del grupo entero
                 due_min = g["DueDate"].min()
+                es_urgente = g["Urgente"].any()
                 
                 # Orden interno
-                g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
+                g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
                 
-                # Tupla: (Fecha, Prioridad 0, Cliente, Troquel, Tareas)
-                grupos_todos.append((due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+                # Tupla: (NoUrgente, Fecha, Prioridad 0, Cliente, Troquel, Tareas)
+                # False < True, así que usamos 'not es_urgente' para que True (Urgente) quede primero (False) en sort ascendente
+                grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
         # 4. GRUPO B: CON PANTONE -> Agrupar por CLIENTE + COLOR
         # ------------------------------------------------------------
@@ -481,21 +534,22 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             for keys, g in q_con_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
                 # Urgencia del grupo entero
                 due_min = g["DueDate"].min()
+                es_urgente = g["Urgente"].any()
                 
                 # Orden interno
-                g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
+                g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
                 
-                # Tupla: (Fecha, Prioridad 1, Cliente, Color, Tareas)
+                # Tupla: (NoUrgente, Fecha, Prioridad 1, Cliente, Color, Tareas)
                 # Nota: Si prefieres que NO se separen CMYK de Pantone por defecto, 
                 # cambia el '1' por '0' aquí también. Pero usualmente es mejor separarlos.
-                grupos_todos.append((due_min, 1, keys[0], keys[1], g_sorted.to_dict("records")))
+                grupos_todos.append((not es_urgente, due_min, 1, keys[0], keys[1], g_sorted.to_dict("records")))
         
         # 5. ORDENAMIENTO FINAL DE BLOQUES
         # ------------------------------------------------------------
-        # Ordena por: Fecha -> Prioridad (0=CMYK, 1=Pantone) -> Cliente
+        # Ordena por: NoUrgente -> Fecha -> Prioridad (0=CMYK, 1=Pantone) -> Cliente
         grupos_todos.sort() 
 
-        return deque([item for _, _, _, _, recs in grupos_todos for item in recs])
+        return deque([item for _, _, _, _, _, recs in grupos_todos for item in recs])
     
     def _cola_troquelada(q): 
         if q.empty: return deque()
@@ -504,10 +558,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         grupos = []
         for troq, g in q.groupby("_troq_key", dropna=False):
             due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
-            g_sorted = g.sort_values(["DueDate", "CantidadPliegos"], ascending=[True, False])
-            grupos.append((due_min, troq, g_sorted.to_dict("records")))
+            es_urgente = g["Urgente"].any()
+            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
+            grupos.append((not es_urgente, due_min, troq, g_sorted.to_dict("records")))
         grupos.sort()
-        return deque([item for _, _, recs in grupos for item in recs])
+        return deque([item for _, _, _, recs in grupos for item in recs])
 
     colas = {}
     buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
@@ -521,7 +576,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         elif "offset" in m_lower: colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         else: 
-            q.sort_values(by=["DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[True, True, False], inplace=True)
+            # Orden por defecto: Urgente -> DueDate -> Orden Proceso -> Cantidad
+            q.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
     # =================================================================
@@ -657,6 +713,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 if not colas.get(m_manual): continue
                                 for i, t_cand in enumerate(colas[m_manual]):
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    
+                                    # Validar medidas para Auto (Min 38x38)
+                                    anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                    if not _validar_medidas_troquel(maquina, anc, lar): continue
+
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
@@ -670,9 +731,15 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             if auto_name and colas.get(auto_name):
                                 for i, t_cand in enumerate(colas[auto_name]):
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
-                                    if float(t_cand.get("CantidadPliegos", 0) or 0) > 2000: continue # No robar grandes
+                                    
+                                    # REGLA: Manual solo roba si cantidad <= 3000
+                                    cant = float(t_cand.get("CantidadPliegos", 0) or 0)
+                                    if cant > 3000: continue 
+
+                                    # Validar medidas para ESTA manual
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if anc > 60 or lar > 60: continue 
+                                    if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                    
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
@@ -686,6 +753,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     if not colas.get(vecina): continue
                                     for i, t_cand in enumerate(colas[vecina]):
                                         if t_cand["Proceso"].strip() != "Troquelado": continue
+                                        
+                                        # Validar medidas para ESTA manual
+                                        anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                        if not _validar_medidas_troquel(maquina, anc, lar): continue
+
                                         mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                         if not mp_ok: continue
@@ -876,4 +948,41 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             .reset_index(level=0)
         )
 
+    # # --- REPORTE DE OTS NO PROCESADAS ---
+    # todas_ots = set(df_ordenes["OT_id"].unique())
+    # procesadas_ots = set(schedule["OT_id"].unique()) if not schedule.empty else set()
+    # no_procesadas = todas_ots - procesadas_ots
+    
+    # print(f"\n=== REPORTE DE OTS NO PROCESADAS ({len(no_procesadas)}/{len(todas_ots)}) ===")
+    
+    # # Analizar por qué no se procesaron
+    # # 1. ¿Estaban en 'tasks'? (Si no, _expandir_tareas las filtró)
+    # tasks_ots = set(tasks["OT_id"].unique())
+    # filtradas_expansion = no_procesadas - tasks_ots
+    # if filtradas_expansion:
+    #     print(f"🔴 {len(filtradas_expansion)} OTs filtradas al inicio (sin procesos pendientes o MP inválida):")
+    #     print(list(filtradas_expansion)[:10], "..." if len(filtradas_expansion) > 10 else "")
+
+    # # 2. Estaban en tasks pero no se agendaron
+    # en_cola_pero_no_agendadas = no_procesadas & tasks_ots
+    # if en_cola_pero_no_agendadas:
+    #     print(f"🟠 {len(en_cola_pero_no_agendadas)} OTs quedaron en cola (Falta MP o Dependencias):")
+        
+    #     # Muestreo de razones
+    #     razones = defaultdict(list)
+    #     for ot in en_cola_pero_no_agendadas:
+    #         # Buscar la tarea en el dataframe original de tasks para ver su MP
+    #         t_orig = tasks[tasks["OT_id"] == ot].iloc[0]
+    #         mp = str(t_orig.get("MateriaPrimaPlanta")).strip().lower()
+    #         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_orig.get("MateriaPrimaPlanta")
+            
+    #         if not mp_ok:
+    #             razones["Falta Materia Prima"].append(ot)
+    #         else:
+    #             razones["Dependencias / Capacidad / Lógica"].append(ot)
+        
+    #     for r, lista_ots in razones.items():
+    #         print(f"   - {r}: {len(lista_ots)} OTs")
+    #         print(f"     IDs: {lista_ots}")
+            
     return schedule, carga_md, resumen_ot, detalle_maquina
