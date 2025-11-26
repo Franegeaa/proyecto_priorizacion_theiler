@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta, time
 from collections import defaultdict, deque
+import random
 
 # Importaciones de tus módulos auxiliares
 from modules.config_loader import (
@@ -428,29 +429,15 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =====================================================================
 
     desc_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("descartonado")]
-    desc_maquinas = desc_cfg["Maquina"].tolist()
+    desc_maquinas = sorted(desc_cfg["Maquina"].tolist()) 
 
     if not tasks.empty and len(desc_maquinas) > 1:
-        cap_desc = {} 
-        for m in desc_maquinas:
-            c = capacidad_pliegos_h("Descartonado", m, cfg) 
-            cap_desc[m] = float(c) if c and c > 0 else 5000.0
+        # ESTRATEGIA: COLA ÚNICA (POOL)
+        # Todas las tareas van a un "buzón" común llamado "POOL_DESCARTONADO".
+        # Las máquinas tomarán tareas de ahí a medida que se liberen.
         
-        load_desc = {m: 0.0 for m in desc_maquinas} 
         mask_desc = tasks["Proceso"].eq("Descartonado")
-        desc_df = tasks.loc[mask_desc].copy()
-
-        if not desc_df.empty:
-            desc_df.sort_values(by=["DueDate", "_orden_proceso"], inplace=True)
-            
-            for idx, tarea in desc_df.iterrows():
-                pliegos_tarea = float(tarea.get("CantidadPliegos", 0)) 
-                if pliegos_tarea <= 0: continue
-
-                # Balanceo por Carga Acumulada
-                m_sel = min(desc_maquinas, key=lambda m: load_desc[m])
-                tasks.loc[idx, "Maquina"] = m_sel
-                load_desc[m_sel] += pliegos_tarea / cap_desc[m_sel]
+        tasks.loc[mask_desc, "Maquina"] = "POOL_DESCARTONADO"
 
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
@@ -580,6 +567,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             q.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
+    # Crear la cola del POOL si existe
+    if "POOL_DESCARTONADO" in tasks["Maquina"].values:
+        q_pool = tasks[tasks["Maquina"] == "POOL_DESCARTONADO"].copy()
+        q_pool.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[False, True, True, False], inplace=True)
+        colas["POOL_DESCARTONADO"] = deque(q_pool.to_dict("records"))
+    else:
+        colas["POOL_DESCARTONADO"] = deque()
+
     # =================================================================
     # 5. LÓGICA DE PLANIFICACIÓN (EL NÚCLEO)
     # =================================================================
@@ -591,7 +586,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     def quedan_tareas(): return any(len(q) > 0 for q in colas.values())
 
-    def lista_para_ejecutar(t): 
+    def lista_para_ejecutar(t, maquina_contexto=None): 
         def clean(s):
             if not s: return ""
             s = str(s).lower().strip()
@@ -626,7 +621,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
         
         if last_end:
-            maq = t["Maquina"]
+            # Si nos pasan contexto (ej. quien roba), usamos ese. Si no, el de la tarea.
+            maq = maquina_contexto if maquina_contexto else t["Maquina"]
+            
+            # Protección extra: Si maq es POOL, no podemos chequear agenda.
+            if "POOL" in str(maq): return True 
+
             current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
             
             if current_agenda < last_end:
@@ -651,7 +651,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     while quedan_tareas() and progreso:
         progreso = False
         
-        for maquina in sorted(maquinas, key=_prioridad_dinamica):
+        # Mezclar máquinas para evitar sesgo hacia la primera (Descartonadora 1)
+        maquinas_shuffled = list(maquinas)
+        random.shuffle(maquinas_shuffled)
+        
+        for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina): 
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
@@ -662,7 +666,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     progreso = True # Marcar progreso para no cortar la ejecución
                     # No hacemos continue, dejamos que fluya para que se procese abajo
                 else:
-                    continue
+                    # EXCEPCIÓN: Si es Descartonadora y hay tareas en el POOL, ¡NO CONTINUAR!
+                    if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO"):
+                        pass # Dejar pasar para que intente robar del POOL
+                    else:
+                        continue
 
             tareas_agendadas = True
             while tareas_agendadas: 
@@ -675,7 +683,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                          colas[maquina].extendleft(reversed(buffer_espera[maquina]))
                          buffer_espera[maquina] = []
                     else:
-                        break
+                        # EXCEPCIÓN: Si es Descartonadora y hay tareas en el POOL, ¡NO ROMPER!
+                        if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO"):
+                            pass # Dejar pasar
+                        else:
+                            break
                 
                 # ==========================================================
                 # PASO 1: BÚSQUEDA DE CANDIDATA (Estricta)
@@ -686,7 +698,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     if not mp_ok: continue
 
-                    if lista_para_ejecutar(t_cand):
+                    if lista_para_ejecutar(t_cand, maquina):
                         idx_cand = i
                         break
                 
@@ -707,8 +719,28 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         fuente_maquina = None
                         idx_robado = -1
 
+                        # ------------------------------------------------------
+                        # NUEVO: Robo desde el POOL (Prioridad Máxima para Descartonadoras)
+                        # ------------------------------------------------------
+                        if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO"):
+                            for i, t_cand in enumerate(colas["POOL_DESCARTONADO"]):
+                                # Validar MP
+                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                if not mp_ok: continue
+                                
+                                if lista_para_ejecutar(t_cand, maquina):
+                                    tarea_encontrada = t_cand
+                                    fuente_maquina = "POOL_DESCARTONADO"
+                                    idx_robado = i
+                                    break
+                        
+                        if tarea_encontrada:
+                            # Ejecutar robo del POOL inmediatamente
+                            pass # Se procesa abajo en el bloque común de robo
+                        
                         # A: Auto roba a Manual
-                        if maquina in auto_names:
+                        elif maquina in auto_names:
                             for m_manual in manuales:
                                 if not colas.get(m_manual): continue
                                 for i, t_cand in enumerate(colas[m_manual]):
@@ -721,7 +753,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-                                    if lista_para_ejecutar(t_cand):
+                                    if lista_para_ejecutar(t_cand, maquina):
                                         tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
                                 if tarea_encontrada: break
 
@@ -743,7 +775,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-                                    if lista_para_ejecutar(t_cand):
+                                    if lista_para_ejecutar(t_cand, maquina):
                                         tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
                             # C: Robar a Vecina Manual
@@ -761,7 +793,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                         if not mp_ok: continue
-                                        if lista_para_ejecutar(t_cand):
+                                        if lista_para_ejecutar(t_cand, maquina):
                                             tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                     if tarea_encontrada: break
                         
@@ -775,7 +807,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-                                    if lista_para_ejecutar(t_cand):
+                                    if lista_para_ejecutar(t_cand, maquina):
                                         tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                 if tarea_encontrada: break
 

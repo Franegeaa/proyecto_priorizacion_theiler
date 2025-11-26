@@ -566,7 +566,7 @@ if archivo is not None:
                     showarrow=False,
                     font=dict(color="red", size=12)
                 )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
             
     elif not _HAS_PLOTLY:
         st.info("Para ver el Gantt instalá Plotly: `pip install plotly`")
@@ -587,7 +587,7 @@ if archivo is not None:
             elegido = st.selectbox("Elegí OT:", opciones)
             df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido] # Usar 'schedule'
             df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
-            st.dataframe(df_show, use_container_width=True)
+            st.dataframe(df_show)
         else:
             st.info("No hay tareas planificadas (verificá pendientes o MPPlanta).")
 
@@ -639,7 +639,7 @@ if archivo is not None:
 
             cols_exist = [c for c in cols if c in df_maquina.columns]
             df_maquina_display = df_maquina[cols_exist].drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
-            st.dataframe(df_maquina_display, use_container_width=True)
+            st.dataframe(df_maquina_display)
         else:
             st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
             
@@ -651,7 +651,7 @@ if archivo is not None:
 
     st.subheader("⚙️ Carga por máquina y día")
     if not carga_md.empty:
-        st.dataframe(carga_md.sort_values(["Fecha","Maquina"]), use_container_width=True)
+        st.dataframe(carga_md.sort_values(["Fecha","Maquina"]))
     else:
         st.info("No hay carga registrada (puede que no haya tareas planificadas).")
 
@@ -661,7 +661,7 @@ if archivo is not None:
     st.subheader("📦 Resumen por OT (Fin vs Entrega)")
     if not resumen_ot.empty:
         resumen_display = resumen_ot.sort_values(["EnRiesgo","Atraso_h","Fin_OT"], ascending=[False, False, True]).copy()
-        st.dataframe(resumen_display, use_container_width=True)
+        st.dataframe(resumen_display)
     else:
         st.info("Sin resumen disponible.")
 
