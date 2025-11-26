@@ -664,7 +664,6 @@ if archivo is not None:
         st.dataframe(resumen_display)
     else:
         st.info("Sin resumen disponible.")
-
     # ==========================
     # Exportación a Excel
     # ==========================
@@ -672,13 +671,30 @@ if archivo is not None:
     st.subheader("💾 Exportar")
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        schedule.to_excel(w, index=False, sheet_name="Schedule") # Exporta el schedule completo
+        # 1. Plan por Máquina (Lo que pidió el usuario)
+        if not schedule.empty:
+            plan_por_maquina = schedule.copy()
+            # Ordenar por Máquina y luego por Inicio
+            plan_por_maquina.sort_values(by=["Maquina", "Inicio"], inplace=True)
+            
+            # Seleccionar y reordenar columnas amigables
+            cols_export = [
+                "Maquina", "Inicio", "Fin", "Duracion_h", 
+                "OT_id", "Cliente", "Cliente-articulo", "CodigoProducto", 
+                "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
+            ]
+            # Filtrar solo las que existan
+            cols_final = [c for c in cols_export if c in plan_por_maquina.columns]
+            
+            plan_por_maquina[cols_final].to_excel(w, index=False, sheet_name="Plan por Máquina")
+        
+        # 2. Otras hojas útiles
+        schedule.to_excel(w, index=False, sheet_name="Datos Crudos (Schedule)") 
         if not resumen_ot.empty:
-            resumen_ot.to_excel(w, index=False, sheet_name="Resumen_OT")
+            resumen_ot.to_excel(w, index=False, sheet_name="Resumen por OT")
         if not carga_md.empty:
-            carga_md.to_excel(w, index=False, sheet_name="Carga_Maquina_Dia")
-        if 'detalle_maquina' in locals() and not detalle_maquina.empty:
-            detalle_maquina.to_excel(w, index=False, sheet_name="Detalle_Maquina")
+            carga_md.to_excel(w, index=False, sheet_name="Carga Máquina-Día")
+            
     buf.seek(0)
     st.download_button(
         "⬇️ Descargar Excel de planificación",

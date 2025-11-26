@@ -151,7 +151,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     pendientes = []
     
     if es_si(orden.get("_PEN_Guillotina")): pendientes.append("Guillotina")
-    if es_si(orden.get("_PEN_ImpresionFlexo")): pendientes.append("Impresión Flexo")
+    if es_si(orden.get("_PEN_ImpresionFlexo")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Flexo")
     if es_si(orden.get("_PEN_ImpresionOffset")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Offset") 
     if es_si(orden.get("_PEN_Barnizado"))and not es_si(orden.get("PeliculaArt")): pendientes.append("Barnizado")
     if es_si(orden.get("_PEN_OPP")): pendientes.append("OPP")
@@ -357,7 +357,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         cap = {} 
         for m in manuales + ([auto_name] if auto_name else []):
-            if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 2500.0)
+            if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 3000.0)
         load_h = {m: 0.0 for m in cap.keys()} 
 
         # Agenda simulada solo para lectura de fechas (no escritura)
@@ -657,6 +657,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina): 
+                
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
                 if buffer_espera.get(maquina):
@@ -931,7 +932,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                                 "CapacidadDia": h_dia})
 
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
+                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar",
+                                                            "CodigoTroquel", "Colores"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
                                       "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
 
@@ -979,42 +981,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             .apply(lambda x: x.reset_index(drop=True))
             .reset_index(level=0)
         )
-
-    # # --- REPORTE DE OTS NO PROCESADAS ---
-    # todas_ots = set(df_ordenes["OT_id"].unique())
-    # procesadas_ots = set(schedule["OT_id"].unique()) if not schedule.empty else set()
-    # no_procesadas = todas_ots - procesadas_ots
-    
-    # print(f"\n=== REPORTE DE OTS NO PROCESADAS ({len(no_procesadas)}/{len(todas_ots)}) ===")
-    
-    # # Analizar por qué no se procesaron
-    # # 1. ¿Estaban en 'tasks'? (Si no, _expandir_tareas las filtró)
-    # tasks_ots = set(tasks["OT_id"].unique())
-    # filtradas_expansion = no_procesadas - tasks_ots
-    # if filtradas_expansion:
-    #     print(f"🔴 {len(filtradas_expansion)} OTs filtradas al inicio (sin procesos pendientes o MP inválida):")
-    #     print(list(filtradas_expansion)[:10], "..." if len(filtradas_expansion) > 10 else "")
-
-    # # 2. Estaban en tasks pero no se agendaron
-    # en_cola_pero_no_agendadas = no_procesadas & tasks_ots
-    # if en_cola_pero_no_agendadas:
-    #     print(f"🟠 {len(en_cola_pero_no_agendadas)} OTs quedaron en cola (Falta MP o Dependencias):")
-        
-    #     # Muestreo de razones
-    #     razones = defaultdict(list)
-    #     for ot in en_cola_pero_no_agendadas:
-    #         # Buscar la tarea en el dataframe original de tasks para ver su MP
-    #         t_orig = tasks[tasks["OT_id"] == ot].iloc[0]
-    #         mp = str(t_orig.get("MateriaPrimaPlanta")).strip().lower()
-    #         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_orig.get("MateriaPrimaPlanta")
-            
-    #         if not mp_ok:
-    #             razones["Falta Materia Prima"].append(ot)
-    #         else:
-    #             razones["Dependencias / Capacidad / Lógica"].append(ot)
-        
-    #     for r, lista_ots in razones.items():
-    #         print(f"   - {r}: {len(lista_ots)} OTs")
-    #         print(f"     IDs: {lista_ots}")
             
     return schedule, carga_md, resumen_ot, detalle_maquina
+    
