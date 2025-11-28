@@ -595,7 +595,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             # Alias Agresivos
             if "flexo" in s: return "impresion flexo"
             if "offset" in s: return "impresion offset"
-            if "troquel" in s: return "troquelado"
+            # if "troquel" in s: return "troquelado"
             return s
 
         proc_actual_clean = clean(t["Proceso"])
@@ -614,6 +614,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         if not prev_procs_names: return True
 
         completados_clean = {clean(c) for c in completado[ot]}
+
         for p in prev_procs_names:
             if clean(p) not in completados_clean:
                 return False 
@@ -641,7 +642,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 agenda[maq]["hora"] = hora_destino
                 h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                 agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
-        return True    
+
+        return True 
+
     def _prioridad_dinamica(m):
         if "autom" in m.lower():
             return (0, agenda[m]["fecha"], agenda[m]["hora"])
@@ -655,7 +658,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         maquinas_shuffled = list(maquinas)
         random.shuffle(maquinas_shuffled)
         
-        for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
+        for maquina in maquinas_shuffled:
+        # for maquina in maquinas:
             if not colas.get(maquina): 
                 
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
@@ -767,7 +771,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     
                                     # REGLA: Manual solo roba si cantidad <= 3000
                                     cant = float(t_cand.get("CantidadPliegos", 0) or 0)
-                                    if cant > 3000: continue 
+                                    # if cant > 3000: continue 
 
                                     # Validar medidas para ESTA manual
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
