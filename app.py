@@ -255,7 +255,10 @@ if archivo is not None:
 
     df["_PEN_Guillotina"]   = to_bool_series(["GuillotinadoSNDpd"])
     df["_PEN_Barnizado"]    = to_bool_series(["Barnizado.1"])
-    df["_PEN_Encapado"]     = to_bool_series(["Encapado", "EncapadoSND"])
+    df["_PEN_Encapado"]     = to_bool_series(["Encapa", "EncapadoSND"])
+    df["_PEN_Cuño"]         = to_bool_series(["Cuño", "CuñoSND"])
+    df["_PEN_Plastificado"]  = to_bool_series(["Plastifica", "PlastificadoSND"]) 
+    df["_PEN_Stamping"]     = to_bool_series(["StampSNDpd", "StampingSND"])
     df["_PEN_OPP"]          = to_bool_series(["OPPSNDpd", "OPPSND"])
     df["_PEN_Troquelado"]   = to_bool_series(["TroqueladoSNDpd", "TroqueladoSND"])
     df["_PEN_Descartonado"] = to_bool_series(["DescartonadoSNDpd", "DescartonadoSND"])
@@ -273,8 +276,8 @@ if archivo is not None:
     # ... (Impresión: separar Offset/Flexo) ...
     mat = df.get("MateriaPrima", "").astype(str).str.lower()
     imp_pend = to_bool_series(["ImpresionSNDpd", "ImpresionSND"])
-    df["_PEN_ImpresionFlexo"]  = imp_pend & (mat.str.contains("micro", na=False) | mat.str.contains("carton", na=False))
-    df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False) | mat.str.contains("papel", na=False))
+    df["_PEN_ImpresionFlexo"]  = imp_pend & (mat.str.contains("micro", na=False) )
+    df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False))
 
     # ... (OT_id) ...
     if "OT_id" not in df.columns:

@@ -1,6 +1,13 @@
 import pandas as pd
 from modules.config_loader import cargar_config, es_si
 
+# Duraciones fijas para procesos tercerizados sin cola (horas)
+TERCERIZADOS_DURACION_FIJA_H = {
+    "encapado": 72.0,
+    "stamping": 72.0,
+    "plastificado": 72.0,
+}
+
 # =========================================================
 # Capacidad y setups
 # =========================================================
@@ -97,13 +104,13 @@ def usa_setup_menor(prev, curr, proceso):
 # =========================================================
 
 def tiempo_operacion_h(orden, proceso, maquina, cfg):
-    """Devuelve (setup_h, proc_h) con soporte para dorso, barnizado y encapado."""
-    cap = capacidad_pliegos_h(proceso, maquina, cfg)
+    """Devuelve (setup_h, proc_h) con soporte para dorso, barnizado y procesos tercerizados."""
+    proceso_lower = proceso.lower().strip()
 
-    # Caso especial: encapado tercerizado → demora fija de 3 días
-    if proceso.lower() == "encapado":
-        proc_h = 72.0  # 72 horas = 3 días
-        return (0.0, proc_h)
+    if proceso_lower in TERCERIZADOS_DURACION_FIJA_H:
+        return (0.0, TERCERIZADOS_DURACION_FIJA_H[proceso_lower])
+
+    cap = capacidad_pliegos_h(proceso, maquina, cfg)
 
     # Si no hay capacidad definida, saltar
     if not cap or cap <= 0:

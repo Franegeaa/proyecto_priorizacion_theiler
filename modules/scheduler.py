@@ -11,6 +11,9 @@ from modules.tiempos_y_setup import (
     capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
 )
 
+# Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
+PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado"}
+
 # =======================================================
 # (Las funciones _reservar_en_agenda, _procesos_pendientes_de_orden, 
 # elegir_maquina, y _clave_prioridad_maquina permanecen igual)
@@ -143,7 +146,7 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
 def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     flujo = orden_std or [
         "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
-        "OPP", "Stamping", "Cuño", "Encapado", "Troquelado",
+        "OPP", "Stamping", "Plastificado", "Encapado", "Cuño","Troquelado", 
         "Descartonado", "Ventana", "Pegado"
     ]
     flujo = [p.strip() for p in flujo] 
@@ -154,7 +157,9 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     if es_si(orden.get("_PEN_ImpresionFlexo")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Flexo")
     if es_si(orden.get("_PEN_ImpresionOffset")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Offset") 
     if es_si(orden.get("_PEN_Barnizado"))and not es_si(orden.get("PeliculaArt")): pendientes.append("Barnizado")
-    if es_si(orden.get("_PEN_OPP")): pendientes.append("OPP")
+    if es_si(orden.get("_PEN_Stamping")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Stamping")
+    if es_si(orden.get("_PEN_Plastificado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Plastificado")
+    if es_si(orden.get("_PEN_Encapado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Encapado")
     if es_si(orden.get("_PEN_Troquelado")) and not es_si(orden.get("TroquelArt")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Troquelado")
     if es_si(orden.get("_PEN_Descartonado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Descartonado")
     if es_si(orden.get("_PEN_Ventana"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Ventana")
@@ -281,6 +286,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     df_ordenes["OT_id"] = df_ordenes["CodigoProducto"].astype(str) + "-" + df_ordenes["Subcodigo"].astype(str)
     agenda = construir_calendario(cfg, start=start, start_time=start_time)
+    inicio_general = datetime.combine(agenda["General"]["fecha"], agenda["General"]["hora"])
 
     # 1. Expande OTs en tareas individuales
     tasks = _expandir_tareas(df_ordenes, cfg)
@@ -653,7 +659,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         # Mezclar máquinas para evitar sesgo hacia la primera (Descartonadora 1)
         maquinas_shuffled = list(maquinas)
-        random.shuffle(maquinas_shuffled)
+        # random.shuffle(maquinas_shuffled)
+        # print(maquinas_shuffled)
+
+        maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo']
         
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina): 
@@ -896,50 +905,85 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     if se_ejecuta_ya:
                         t = colas[maquina].popleft()
                         orden = df_ordenes.loc[t["idx"]].copy()
+                        proceso_nombre = str(t["Proceso"])
+                        proceso_lower = proceso_nombre.strip().lower()
 
                         # Inyección de datos calculados
-                        orden["CantidadPliegos"] = float(t["CantidadPliegos"]) 
+                        orden["CantidadPliegos"] = float(t["CantidadPliegos"])
                         orden["Poses"] = float(t.get("Poses", 1))
                         orden["Bocas"] = float(t.get("Bocas", 1))
-                        
-                        _, proc_h = tiempo_operacion_h(orden, t["Proceso"], maquina, cfg)
-                        setup_min = setup_base_min(t["Proceso"], maquina, cfg)
+
+                        _, proc_h = tiempo_operacion_h(orden, proceso_nombre, maquina, cfg)
+                        setup_min = 0.0
                         motivo = "Setup base"
-                        
-                        last_task = ultimo_en_maquina.get(maquina) 
-                        if last_task:
-                            if (t["Proceso"] == "Troquelado" and 
-                                str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
-                                setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Mismo troquel (sin setup)"
-                            elif usa_setup_menor(last_task, orden, t["Proceso"]): 
-                                setup_min = setup_menor_min(t["Proceso"], maquina, cfg); motivo = "Setup menor (cluster)"
-                        
+
+                        if proceso_lower in PROCESOS_TERCERIZADOS_SIN_COLA:
+                            motivo = "Duración fija tercerizado"
+                        else:
+                            setup_min = setup_base_min(proceso_nombre, maquina, cfg)
+                            last_task = ultimo_en_maquina.get(maquina)
+                            if last_task:
+                                if (proceso_nombre == "Troquelado" and
+                                    str(last_task.get("CodigoTroquel", "")).strip().lower() == str(t.get("CodigoTroquel", "")).strip().lower()):
+                                    setup_min = setup_menor_min(proceso_nombre, maquina, cfg); motivo = "Mismo troquel (sin setup)"
+                                elif usa_setup_menor(last_task, orden, proceso_nombre):
+                                    setup_min = setup_menor_min(proceso_nombre, maquina, cfg); motivo = "Setup menor (cluster)"
+
                         total_h = proc_h + setup_min / 60.0
-                        if pd.isna(total_h) or total_h <= 0: continue    
+                        if pd.isna(total_h) or total_h <= 0:
+                            continue
+
+                        if proceso_lower in PROCESOS_TERCERIZADOS_SIN_COLA:
+                            inicio = inicio_general
+                            prev_fins = [fin for fin in fin_proceso[t["OT_id"]].values() if fin]
+                            if prev_fins:
+                                inicio = max([inicio] + prev_fins)
+                            fin = inicio + timedelta(hours=total_h)
+
+                            filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
+                                                                "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
+                                         {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
+                                          "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
+
+                            fin_proceso[t["OT_id"]][proceso_nombre] = fin
+                            completado[t["OT_id"]].add(proceso_nombre)
+                            ultimo_en_maquina[maquina] = t
+                            progreso = True; tareas_agendadas = True
+
+                            agenda[maquina]["fecha"] = inicio_general.date()
+                            agenda[maquina]["hora"] = inicio_general.time()
+                            agenda[maquina]["resto_horas"] = h_dia
+
+                            if tarea_robada:
+                                break
+                            continue
 
                         bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
-                        if not bloques: colas[maquina].appendleft(t); break 
-                        
+                        if not bloques:
+                            colas[maquina].appendleft(t)
+                            break
+
                         inicio, fin = bloques[0][0], bloques[-1][1]
                         segundos_netos = sum((b_fin - b_ini).total_seconds() for b_ini, b_fin in bloques)
                         duracion_h = round(segundos_netos / 3600.0, 3)
 
-                        fin_proceso[t["OT_id"]][t["Proceso"]] = fin
+                        fin_proceso[t["OT_id"]][proceso_nombre] = fin
                         for b_ini, b_fin in bloques:
-                            carga_reg.append({"Fecha": b_ini.date(), "Maquina": maquina, 
-                                                "HorasPlanificadas": (b_fin - b_ini).total_seconds() / 3600.0, 
-                                                "CapacidadDia": h_dia})
+                            carga_reg.append({"Fecha": b_ini.date(), "Maquina": maquina,
+                                              "HorasPlanificadas": (b_fin - b_ini).total_seconds() / 3600.0,
+                                              "CapacidadDia": h_dia})
 
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
-                                     {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3), 
+                                     {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
 
-                        completado[t["OT_id"]].add(t["Proceso"])
-                        ultimo_en_maquina[maquina] = t 
+                        completado[t["OT_id"]].add(proceso_nombre)
+                        ultimo_en_maquina[maquina] = t
                         progreso = True; tareas_agendadas = True
-                        
-                        if tarea_robada: break 
+
+                        if tarea_robada:
+                            break
 
     # =================================================================
     # 6. SALIDAS 
