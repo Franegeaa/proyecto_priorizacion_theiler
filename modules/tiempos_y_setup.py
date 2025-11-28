@@ -6,6 +6,7 @@ TERCERIZADOS_DURACION_FIJA_H = {
     "encapado": 72.0,
     "stamping": 72.0,
     "plastificado": 72.0,
+    "cuño": 72.0,
 }
 
 # =========================================================

@@ -12,7 +12,7 @@ from modules.tiempos_y_setup import (
 )
 
 # Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
-PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado"}
+PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
 
 # =======================================================
 # (Las funciones _reservar_en_agenda, _procesos_pendientes_de_orden, 
@@ -226,6 +226,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             continue
 
         for proceso in pendientes:
+            
             maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
 
             # Cálculo de pliegos
@@ -290,6 +291,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     # 1. Expande OTs en tareas individuales
     tasks = _expandir_tareas(df_ordenes, cfg)
+    print("Plastificado en tasks:")
+    print(tasks[tasks["Proceso"] == "Plastificado"][["OT_id", "Proceso", "Maquina"]].head())
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # =======================================================
@@ -617,6 +620,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             if clean(p_raw) in pendientes_clean:
                 prev_procs_names.append(p_raw)
 
+        # if ot == "B5956-2061339":
+        #     if not prev_procs_names:
+        #         print(f"DEBUG OT {ot}: Prev procesos necesarios: {prev_procs_names}, Completados: {completado[ot]}")
+        #     else:
+        #         print(f"DEBUG OT {ot}: Prev procesos necesarios: {prev_procs_names}, Completados: {completado[ot]}")
+
         if not prev_procs_names: return True
 
         completados_clean = {clean(c) for c in completado[ot]}
@@ -662,8 +671,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         # random.shuffle(maquinas_shuffled)
         # print(maquinas_shuffled)
 
-        maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo']
-        
+        maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora"]
+
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina): 
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---

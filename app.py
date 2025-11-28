@@ -23,7 +23,8 @@ archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)
 color_map_procesos = {
     "Guillotina": "dimgray",        # Gris oscuro
     "Impresión Offset": "mediumseagreen", # Verde mar
-    "Impresión Flexo": "darkorange",      # Naranja oscuro
+    "Impresión Flexo": "darkorange",
+    "Plastificado": "violet",      # Naranja oscuro
     "Barnizado": "gold",            # Dorado (o "Barniz" si se llama así)
     "Barniz": "gold",               # Añade variantes si es necesario
     "OPP": "slateblue",             # Azul pizarra
@@ -42,15 +43,16 @@ def ordenar_maquinas_personalizado(lista_maquinas):
         (1, ["guillotina"]),
         (2, ["offset"]),
         (3, ["flexo"]),
-        (4, ["automat", "automát"]),
-        (5, ["manual 1", "manual-1", "manual1"]),
-        (6, ["manual 2", "manual-2", "manual2"]),
-        (7, ["manual 3", "manual-3", "manual3"]),
-        (8, ["descartonadora 1"]),
-        (9, ["descartonadora 2"]),
-        (10, ["descartonadora 3"]),
-        (11, ["ventana"]),
-        (12, ["pegadora", "pegado"]),
+        (4, ["plastificadora"]),
+        (5, ["automat", "automát"]),
+        (6, ["manual 1", "manual-1", "manual1"]),
+        (7, ["manual 2", "manual-2", "manual2"]),
+        (8, ["manual 3", "manual-3", "manual3"]),
+        (9, ["descartonadora 1"]),
+        (10, ["descartonadora 2"]),
+        (11, ["descartonadora 3"]),
+        (12, ["ventana"]),
+        (13, ["pegadora", "pegado"]),
     ]
 
     def clave(nombre):
@@ -71,6 +73,7 @@ if archivo is not None:
     cfg = st.session_state.cfg   # <- SIEMPRE usar el mismo cfg    
 
     maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
+    print(maquinas_todas)
     
     with st.expander("Añadir un velocidades de máquina (opcional)"):
         col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
