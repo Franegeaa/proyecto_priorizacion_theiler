@@ -24,7 +24,7 @@ color_map_procesos = {
     "Guillotina": "dimgray",        # Gris oscuro
     "Impresión Offset": "mediumseagreen", # Verde mar
     "Impresión Flexo": "darkorange",
-    "Plastificado": "violet",      # Naranja oscuro
+    "Plastificado": "violet",      
     "Barnizado": "gold",            # Dorado (o "Barniz" si se llama así)
     "Barniz": "gold",               # Añade variantes si es necesario
     "OPP": "slateblue",             # Azul pizarra
@@ -43,16 +43,18 @@ def ordenar_maquinas_personalizado(lista_maquinas):
         (1, ["guillotina"]),
         (2, ["offset"]),
         (3, ["flexo"]),
-        (4, ["plastificadora"]),
-        (5, ["automat", "automát"]),
-        (6, ["manual 1", "manual-1", "manual1"]),
-        (7, ["manual 2", "manual-2", "manual2"]),
-        (8, ["manual 3", "manual-3", "manual3"]),
-        (9, ["descartonadora 1"]),
-        (10, ["descartonadora 2"]),
-        (11, ["descartonadora 3"]),
-        (12, ["ventana"]),
-        (13, ["pegadora", "pegado"]),
+        (4, ["stamping"]),
+        (5, ["plastificadora"]),
+        (6, ["encapado"]),
+        (7, ["automat", "automát"]),
+        (8, ["manual 1", "manual-1", "manual1"]),
+        (9, ["manual 2", "manual-2", "manual2"]),
+        (10, ["manual 3", "manual-3", "manual3"]),
+        (11, ["descartonadora 1"]),
+        (12, ["descartonadora 2"]),
+        (13, ["descartonadora 3"]),
+        (14, ["ventana"]),
+        (15, ["pegadora", "pegado"]),
     ]
 
     def clave(nombre):
@@ -261,7 +263,7 @@ if archivo is not None:
     df["_PEN_Encapado"]     = to_bool_series(["Encapa", "EncapadoSND"])
     df["_PEN_Cuño"]         = to_bool_series(["Cuño", "CuñoSND"])
     df["_PEN_Plastificado"]  = to_bool_series(["Plastifica", "PlastificadoSND"]) 
-    df["_PEN_Stamping"]     = to_bool_series(["StampSNDpd", "StampingSND"])
+    df["_PEN_Stamping"]     = to_bool_series(["StampSNDdp", "StampingSND"])
     df["_PEN_OPP"]          = to_bool_series(["OPPSNDpd", "OPPSND"])
     df["_PEN_Troquelado"]   = to_bool_series(["TroqueladoSNDpd", "TroqueladoSND"])
     df["_PEN_Descartonado"] = to_bool_series(["DescartonadoSNDpd", "DescartonadoSND"])

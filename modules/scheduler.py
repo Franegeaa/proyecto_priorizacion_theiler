@@ -157,7 +157,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     if es_si(orden.get("_PEN_ImpresionFlexo")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Flexo")
     if es_si(orden.get("_PEN_ImpresionOffset")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Offset") 
     if es_si(orden.get("_PEN_Barnizado"))and not es_si(orden.get("PeliculaArt")): pendientes.append("Barnizado")
-    if es_si(orden.get("_PEN_Stamping")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Stamping")
+    if es_si(orden.get("_PEN_Stamping")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Stamping") ; 
     if es_si(orden.get("_PEN_Plastificado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Plastificado")
     if es_si(orden.get("_PEN_Encapado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Encapado")
     if es_si(orden.get("_PEN_Troquelado")) and not es_si(orden.get("TroquelArt")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Troquelado")
@@ -291,6 +291,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     # 1. Expande OTs en tareas individuales
     tasks = _expandir_tareas(df_ordenes, cfg)
+
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # =======================================================
@@ -648,7 +649,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 agenda[maq]["hora"] = hora_destino
                 h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                 agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
-        return True    
+        return True 
+
     def _prioridad_dinamica(m):
         if "autom" in m.lower():
             return (0, agenda[m]["fecha"], agenda[m]["hora"])
@@ -662,7 +664,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         maquinas_shuffled = list(maquinas)
         # random.shuffle(maquinas_shuffled)
 
-        maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora"]
+        maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora", "Stamping", "Encapado"]
 
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina): 
