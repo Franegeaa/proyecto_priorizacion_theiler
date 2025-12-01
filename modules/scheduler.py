@@ -384,20 +384,33 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].sum())
                 
-                # Datos para validación de medidas (usamos el maximo del grupo para asegurar)
-                anc = g["PliAnc"].max()
-                lar = g["PliLar"].max()
+                # Datos para validación de medidas
+                max_anc = g["PliAnc"].max()
+                max_lar = g["PliLar"].max()
+                min_anc = g["PliAnc"].min()
+                min_lar = g["PliLar"].min()
                 bocas = float(g["Bocas"].max()) # Tomamos el maximo de bocas del grupo
 
-                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, anc, lar, bocas))
+                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas))
             grupos.sort() 
 
-            for _, troq_key, idxs, total_pliegos, anc, lar, bocas in grupos:
+            for _, troq_key, idxs, total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas in grupos:
                 candidatas = []
                 
                 # 1. Validar candidatos por TAMAÑO primero
                 posibles = manuales + ([auto_name] if auto_name else [])
-                candidatos_tamano = [m for m in posibles if _validar_medidas_troquel(m, anc, lar)]
+                candidatos_tamano = []
+                for m in posibles:
+                    if "autom" in str(m).lower():
+                        # Para Automatica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
+                        # Si la hoja más chica es < 38, NO entra en Auto.
+                        if _validar_medidas_troquel(m, min_anc, min_lar):
+                            candidatos_tamano.append(m)
+                    else:
+                        # Para Manuales (Restricción de MAXIMO), usamos las dimensiones MAXIMAS del grupo
+                        # Si la hoja más grande es > 80, NO entra en Manual.
+                        if _validar_medidas_troquel(m, max_anc, max_lar):
+                            candidatos_tamano.append(m)
                 
                 if not candidatos_tamano: continue
 
