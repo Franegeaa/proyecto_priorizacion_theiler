@@ -5,7 +5,7 @@ import random
 
 # Importaciones de tus módulos auxiliares
 from modules.config_loader import (
-    es_si, horas_por_dia, proximo_dia_habil, construir_calendario, es_dia_habil
+    es_si, horas_por_dia, proximo_dia_habil, construir_calendario, es_dia_habil, sumar_horas_habiles
 )
 from modules.tiempos_y_setup import (
     capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
@@ -291,8 +291,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     # 1. Expande OTs en tareas individuales
     tasks = _expandir_tareas(df_ordenes, cfg)
-    print("Plastificado en tasks:")
-    print(tasks[tasks["Proceso"] == "Plastificado"][["OT_id", "Proceso", "Maquina"]].head())
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # =======================================================
@@ -620,12 +618,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             if clean(p_raw) in pendientes_clean:
                 prev_procs_names.append(p_raw)
 
-        # if ot == "B5956-2061339":
-        #     if not prev_procs_names:
-        #         print(f"DEBUG OT {ot}: Prev procesos necesarios: {prev_procs_names}, Completados: {completado[ot]}")
-        #     else:
-        #         print(f"DEBUG OT {ot}: Prev procesos necesarios: {prev_procs_names}, Completados: {completado[ot]}")
-
         if not prev_procs_names: return True
 
         completados_clean = {clean(c) for c in completado[ot]}
@@ -669,7 +661,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         # Mezclar máquinas para evitar sesgo hacia la primera (Descartonadora 1)
         maquinas_shuffled = list(maquinas)
         # random.shuffle(maquinas_shuffled)
-        # print(maquinas_shuffled)
 
         maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora"]
 
@@ -678,7 +669,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
                 if buffer_espera.get(maquina):
-                    print(f"🚨 RESCATE FINAL: Liberando {len(buffer_espera[maquina])} tareas del buffer.")
                     colas[maquina].extendleft(reversed(buffer_espera[maquina]))
                     buffer_espera[maquina] = []
                     progreso = True # Marcar progreso para no cortar la ejecución
@@ -697,7 +687,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # --- CHEQUEO DE SEGURIDAD PREVIO ---
                 if not colas.get(maquina):
                     if buffer_espera.get(maquina):
-                         print(f"🚨 RESCATE INTERMEDIO: Liberando {len(buffer_espera[maquina])} tareas.")
                          colas[maquina].extendleft(reversed(buffer_espera[maquina]))
                          buffer_espera[maquina] = []
                     else:
@@ -726,7 +715,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 tarea_robada = False
                 if idx_cand == -1:
                     if buffer_espera.get(maquina):
-                         print(f"⚠️ PACIENCIA AGOTADA: No hay pareja. Libero {len(buffer_espera[maquina])} tareas.")
                          colas[maquina].extendleft(reversed(buffer_espera[maquina]))
                          buffer_espera[maquina] = []
                          idx_cand = 0 # Ahora sí tengo algo para hacer
@@ -861,7 +849,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             colas[maquina].extendleft(reversed(buffer_espera[maquina]))
                             buffer_espera[maquina] = [] # Limpiar buffer
                             
-                            print(f"🎯 FRANCOTIRADOR: Reagrupando {len(colas[maquina])} barnices.")
                             # YA NO hacemos continue. Dejamos que fluya para EJECUTAR la primera tarea del grupo.
                             # Esto rompe el ciclo infinito de agrupar-desagrupar.
                             se_ejecuta_ya = True 
@@ -893,7 +880,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 
                                 if mp_ok:
                                     encontre_pareja = True
-                                    print(f"👀 OJO: Veo barniz futuro {futura['OT_id']} en pos {k}. Reteniendo bloque de {len(bloque_barniz)} tareas.")
                                     break
                         
                         if encontre_pareja:
@@ -947,7 +933,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             prev_fins = [fin for fin in fin_proceso[t["OT_id"]].values() if fin]
                             if prev_fins:
                                 inicio = max([inicio] + prev_fins)
-                            fin = inicio + timedelta(hours=total_h)
+                            fin = sumar_horas_habiles(inicio, total_h, cfg)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
@@ -1032,42 +1018,5 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             .apply(lambda x: x.reset_index(drop=True))
             .reset_index(level=0)
         )
-
-    # # --- REPORTE DE OTS NO PROCESADAS ---
-    # todas_ots = set(df_ordenes["OT_id"].unique())
-    # procesadas_ots = set(schedule["OT_id"].unique()) if not schedule.empty else set()
-    # no_procesadas = todas_ots - procesadas_ots
-    
-    # print(f"\n=== REPORTE DE OTS NO PROCESADAS ({len(no_procesadas)}/{len(todas_ots)}) ===")
-    
-    # # Analizar por qué no se procesaron
-    # # 1. ¿Estaban en 'tasks'? (Si no, _expandir_tareas las filtró)
-    # tasks_ots = set(tasks["OT_id"].unique())
-    # filtradas_expansion = no_procesadas - tasks_ots
-    # if filtradas_expansion:
-    #     print(f"🔴 {len(filtradas_expansion)} OTs filtradas al inicio (sin procesos pendientes o MP inválida):")
-    #     print(list(filtradas_expansion)[:10], "..." if len(filtradas_expansion) > 10 else "")
-
-    # # 2. Estaban en tasks pero no se agendaron
-    # en_cola_pero_no_agendadas = no_procesadas & tasks_ots
-    # if en_cola_pero_no_agendadas:
-    #     print(f"🟠 {len(en_cola_pero_no_agendadas)} OTs quedaron en cola (Falta MP o Dependencias):")
-        
-    #     # Muestreo de razones
-    #     razones = defaultdict(list)
-    #     for ot in en_cola_pero_no_agendadas:
-    #         # Buscar la tarea en el dataframe original de tasks para ver su MP
-    #         t_orig = tasks[tasks["OT_id"] == ot].iloc[0]
-    #         mp = str(t_orig.get("MateriaPrimaPlanta")).strip().lower()
-    #         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_orig.get("MateriaPrimaPlanta")
-            
-    #         if not mp_ok:
-    #             razones["Falta Materia Prima"].append(ot)
-    #         else:
-    #             razones["Dependencias / Capacidad / Lógica"].append(ot)
-        
-    #     for r, lista_ots in razones.items():
-    #         print(f"   - {r}: {len(lista_ots)} OTs")
-    #         print(f"     IDs: {lista_ots}")
             
     return schedule, carga_md, resumen_ot, detalle_maquina

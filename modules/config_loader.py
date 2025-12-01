@@ -102,6 +102,34 @@ def construir_calendario(cfg, start=None, start_time=None):
         "hora": hora_base,
         "resto_horas": resto_horas_inicial
     }
-    # --- FIN DE LA MODIFICACIÓN ---
 
     return agenda
+
+def sumar_horas_habiles(inicio: datetime, horas: float, cfg: dict) -> datetime:
+    """
+    Suma 'horas' a una fecha 'inicio' saltando días no hábiles (fines de semana y feriados).
+    Asume que los días hábiles son de 24 horas para estos procesos (tercerizados).
+    """
+    tiempo_restante = timedelta(hours=horas)
+    cursor = inicio
+
+    while tiempo_restante.total_seconds() > 0:
+        # Fin del día actual (23:59:59...)
+        fin_dia = datetime.combine(cursor.date(), time.max)
+        
+        # Tiempo disponible hoy hasta fin del día
+        disponible_hoy = fin_dia - cursor
+        
+        # Si entra todo hoy, listo
+        if tiempo_restante <= disponible_hoy:
+            return cursor + tiempo_restante
+        
+        # Si no entra, consumimos lo que queda del día
+        tiempo_restante -= (disponible_hoy + timedelta(microseconds=1)) # +1us para saltar al dia sig
+        
+        # Avanzamos al inicio del siguiente día hábil
+        siguiente_dia = cursor.date() + timedelta(days=1)
+        siguiente_dia = proximo_dia_habil(siguiente_dia, cfg)
+        cursor = datetime.combine(siguiente_dia, time.min)
+        
+    return cursor
