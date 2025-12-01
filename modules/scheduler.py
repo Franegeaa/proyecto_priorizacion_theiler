@@ -410,15 +410,22 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         candidatas = [m for m in candidatos_tamano if m != auto_name]
                 
                 # 3. REGLA DE CANTIDAD (> 3000) -> Automática Obligatoria (si entra)
-                # elif total_pliegos > 3000:
-                #     if auto_name and (auto_name in candidatos_tamano):
-                #         candidatas = [auto_name]
-                #     else:
-                #         candidatas = [m for m in candidatos_tamano if m != auto_name]
+                elif total_pliegos > 3000:
+                    if auto_name and (auto_name in candidatos_tamano):
+                        candidatas = [auto_name]
+                    else:
+                        candidatas = [m for m in candidatos_tamano if m != auto_name]
                 
-                # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Cualquiera compatible
+                # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Preferencia Manual
                 else:
-                    candidatas = candidatos_tamano
+                    # Intentar filtrar solo manuales (excluir Auto)
+                    manuales_compatibles = [m for m in candidatos_tamano if m != auto_name]
+                    
+                    if manuales_compatibles:
+                        candidatas = manuales_compatibles
+                    else:
+                        # Si no entra en ninguna manual (por tamaño), permitimos Auto
+                        candidatas = candidatos_tamano
 
                 if not candidatas: continue
 
@@ -665,7 +672,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         maquinas_shuffled = list(maquinas)
         random.shuffle(maquinas_shuffled)
 
-        # maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora", "Stamping", "Encapado"]
+        # maquinas_shuffled = ['Automatica', 'Descartonadora 1', 'Descartonadora 2', 'Encapado', 'Flexo', 'Guillotina 1', 'Manual 1', 'Manual 2', 'Offset', 'Pegadora 1', 'Plastificadora', 'Stamping', 'Ventanas', 'Cuño']
 
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina):  
@@ -754,6 +761,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 if not colas.get(m_manual): continue
                                 for i, t_cand in enumerate(colas[m_manual]):
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
+
+                                    cant = float(t_cand.get("CantidadPliegos", 0) or 0)
+                                    if cant < 3000: continue
                                     
                                     # Validar medidas para Auto (Min 38x38)
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
