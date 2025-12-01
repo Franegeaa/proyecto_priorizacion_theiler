@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date
 from collections import defaultdict, deque
 import random
 
@@ -602,7 +602,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     def quedan_tareas(): return any(len(q) > 0 for q in colas.values())
 
-    def lista_para_ejecutar(t, maquina_contexto=None): 
+    def verificar_disponibilidad(t, maquina_contexto=None): 
+        """
+        Verifica si una tarea puede ejecutarse (dependencias listas).
+        Devuelve (bool_runnable, datetime_disponible).
+        NO MODIFICA LA AGENDA.
+        """
         def clean(s):
             if not s: return ""
             s = str(s).lower().strip()
@@ -618,7 +623,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         ot = t["OT_id"]
         flujo_clean = [clean(p) for p in flujo_estandar]
         
-        if proc_actual_clean not in flujo_clean: return True
+        # Si no está en el flujo estándar, asumimos que no tiene dependencias previas en este flujo
+        if proc_actual_clean not in flujo_clean: 
+            return (True, None)
             
         idx = flujo_clean.index(proc_actual_clean)
         pendientes_clean = {clean(p) for p in pendientes_por_ot[ot]}
@@ -627,37 +634,18 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             if clean(p_raw) in pendientes_clean:
                 prev_procs_names.append(p_raw)
 
-        if not prev_procs_names: return True
+        if not prev_procs_names: 
+            return (True, None)
 
         completados_clean = {clean(c) for c in completado[ot]}
         for p in prev_procs_names:
             if clean(p) not in completados_clean:
-                return False 
+                return (False, None) # Falta un proceso previo
         
+        # Calcular cuándo estará lista la última dependencia
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
         
-        if last_end:
-            # Si nos pasan contexto (ej. quien roba), usamos ese. Si no, el de la tarea.
-            maq = maquina_contexto if maquina_contexto else t["Maquina"]
-            
-            # Protección extra: Si maq es POOL, no podemos chequear agenda.
-            if "POOL" in str(maq): return True 
-
-            current_agenda = datetime.combine(agenda[maq]["fecha"], agenda[maq]["hora"])
-            
-            if current_agenda < last_end:
-                fecha_destino = last_end.date()
-                hora_destino = last_end.time()
-
-                if not es_dia_habil(fecha_destino, cfg):
-                    fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg)
-                    hora_destino = time(7, 0) # Turno inicia a las 7
-                
-                agenda[maq]["fecha"] = fecha_destino
-                agenda[maq]["hora"] = hora_destino
-                h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
-                agenda[maq]["resto_horas"] = max(0, h_dia - h_usadas)
-        return True 
+        return (True, last_end)
 
     def _prioridad_dinamica(m):
         if "autom" in m.lower():
@@ -670,9 +658,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         # Mezclar máquinas para evitar sesgo hacia la primera (Descartonadora 1)
         maquinas_shuffled = list(maquinas)
-        random.shuffle(maquinas_shuffled)
-
-        # maquinas_shuffled = ['Automatica', 'Descartonadora 1', 'Descartonadora 2', 'Encapado', 'Flexo', 'Guillotina 1', 'Manual 1', 'Manual 2', 'Offset', 'Pegadora 1', 'Plastificadora', 'Stamping', 'Ventanas', 'Cuño']
+        # random.shuffle(maquinas_shuffled)
 
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
             if not colas.get(maquina):  
@@ -707,17 +693,57 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             break
                 
                 # ==========================================================
-                # PASO 1: BÚSQUEDA DE CANDIDATA (Estricta)
+                # PASO 1: BÚSQUEDA DE CANDIDATA (GAP FILLING)
                 # ==========================================================
                 idx_cand = -1 
+                mejor_candidato_futuro = None # (idx, fecha_disponible)
+                
+                current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     if not mp_ok: continue
 
-                    if lista_para_ejecutar(t_cand, maquina):
+                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                    
+                    if not runnable: continue
+
+                    # Si está lista YA (o antes), la tomamos inmediatamente (Gap Filling)
+                    if not available_at or available_at <= current_agenda_dt:
                         idx_cand = i
+                        mejor_candidato_futuro = None # Ya encontramos una perfecta
                         break
+                    
+                    # Si no está lista ya, pero es runnable, la guardamos como opción futura
+                    if mejor_candidato_futuro is None:
+                        mejor_candidato_futuro = (i, available_at)
+                    else:
+                        # Si esta está lista ANTES que la que teníamos guardada, la preferimos
+                        if available_at < mejor_candidato_futuro[1]:
+                            mejor_candidato_futuro = (i, available_at)
+                
+                # Si no encontramos ninguna lista YA, pero hay futuras, tomamos la mejor futura
+                if idx_cand == -1 and mejor_candidato_futuro:
+                    idx_cand = mejor_candidato_futuro[0]
+                    future_dt = mejor_candidato_futuro[1]
+                    
+                    # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
+                    # Lógica de salto de tiempo (respetando días hábiles)
+                    fecha_destino = future_dt.date()
+                    hora_destino = future_dt.time()
+
+                    if not es_dia_habil(fecha_destino, cfg):
+                        fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg)
+                        hora_destino = time(7, 0)
+                    
+                    # Solo avanzamos si el destino es futuro (debería serlo por lógica anterior)
+                    dest_dt = datetime.combine(fecha_destino, hora_destino)
+                    if dest_dt > current_agenda_dt:
+                        agenda[maquina]["fecha"] = fecha_destino
+                        agenda[maquina]["hora"] = hora_destino
+                        h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
+                        agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
                 
                 # ==========================================================
                 # PASO 2: INTENTO DE ROBO (Casos A, B, C, D)
@@ -745,7 +771,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                 if not mp_ok: continue
                                 
-                                if lista_para_ejecutar(t_cand, maquina):
+                                runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                if runnable:
+                                    # Para robo, simplificamos: si es runnable, la tomamos.
                                     tarea_encontrada = t_cand
                                     fuente_maquina = "POOL_DESCARTONADO"
                                     idx_robado = i
@@ -772,7 +800,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-                                    if lista_para_ejecutar(t_cand, maquina):
+                                    
+                                    runnable, _ = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable:
                                         tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
                                 if tarea_encontrada: break
 
@@ -794,7 +824,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-                                    if lista_para_ejecutar(t_cand, maquina):
+                                    
+                                    runnable, _ = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable:
                                         tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
                             # C: Robar a Vecina Manual
@@ -812,7 +844,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                         if not mp_ok: continue
-                                        if lista_para_ejecutar(t_cand, maquina):
+                                        
+                                        runnable, _ = verificar_disponibilidad(t_cand, maquina)
+                                        if runnable:
                                             tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                     if tarea_encontrada: break
                         
@@ -826,7 +860,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
-                                    if lista_para_ejecutar(t_cand, maquina):
+                                    
+                                    runnable, _ = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable:
                                         tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                 if tarea_encontrada: break
 
@@ -921,12 +957,15 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         orden["Poses"] = float(t.get("Poses", 1))
                         orden["Bocas"] = float(t.get("Bocas", 1))
 
+                        # Calcular tiempos
+                        # Calcular tiempos
                         _, proc_h = tiempo_operacion_h(orden, proceso_nombre, maquina, cfg)
                         setup_min = 0.0
                         motivo = "Setup base"
 
                         if proceso_lower in PROCESOS_TERCERIZADOS_SIN_COLA:
                             motivo = "Duración fija tercerizado"
+                            total_h = proc_h
                         else:
                             setup_min = setup_base_min(proceso_nombre, maquina, cfg)
                             last_task = ultimo_en_maquina.get(maquina)
@@ -936,12 +975,29 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     setup_min = setup_menor_min(proceso_nombre, maquina, cfg); motivo = "Mismo troquel (sin setup)"
                                 elif usa_setup_menor(last_task, orden, proceso_nombre):
                                     setup_min = setup_menor_min(proceso_nombre, maquina, cfg); motivo = "Setup menor (cluster)"
+                            
+                            total_h = proc_h + setup_min / 60.0
 
-                        total_h = proc_h + setup_min / 60.0
                         if pd.isna(total_h) or total_h <= 0:
                             continue
+                        
+                        # --- LÓGICA DE AGENDA (Reserva de tiempo) ---
+                        inicio_general = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                        
+                        # Ajuste por dependencias (Solo si es necesario, aunque ya deberíamos estar en fecha)
+                        # verificar_disponibilidad nos dio la fecha, pero por seguridad:
+                        _, available_at = verificar_disponibilidad(t, maquina)
+                        if available_at and available_at > inicio_general:
+                            inicio_general = available_at
+                            # Sincronizar agenda si nos adelantamos
+                            agenda[maquina]["fecha"] = inicio_general.date()
+                            agenda[maquina]["hora"] = inicio_general.time()
+                            h_usadas = (inicio_general.hour - 7) + (inicio_general.minute / 60.0)
+                            agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
 
+                        # Calcular Fin (Usando lógica de horas hábiles para tercerizados o normal para internas)
                         if proceso_lower in PROCESOS_TERCERIZADOS_SIN_COLA:
+                            # ... (Lógica existente para tercerizados)
                             inicio = inicio_general
                             prev_fins = [fin for fin in fin_proceso[t["OT_id"]].values() if fin]
                             if prev_fins:
@@ -966,32 +1022,50 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 break
                             continue
 
-                        bloques = _reservar_en_agenda(agenda[maquina], total_h, cfg)
-                        if not bloques:
-                            colas[maquina].appendleft(t)
-                            break
+                        # ... (Lógica normal para máquinas internas)
+                        inicio_real = inicio_general
+                        
+                        # Consumo de tiempo en agenda
+                        tiempo_restante_tarea = total_h
+                        
+                        while tiempo_restante_tarea > 0:
+                            # Si no queda tiempo hoy, avanzar al siguiente día
+                            if agenda[maquina]["resto_horas"] <= 0.001:
+                                sig_dia = proximo_dia_habil(agenda[maquina]["fecha"] + timedelta(days=1), cfg)
+                                agenda[maquina]["fecha"] = sig_dia
+                                agenda[maquina]["hora"] = time(7, 0)
+                                agenda[maquina]["resto_horas"] = h_dia
+                                # Si es el primer bloque, actualizamos inicio_real
+                                if tiempo_restante_tarea == total_h:
+                                    inicio_real = datetime.combine(sig_dia, time(7, 0))
 
-                        inicio, fin = bloques[0][0], bloques[-1][1]
-                        segundos_netos = sum((b_fin - b_ini).total_seconds() for b_ini, b_fin in bloques)
-                        duracion_h = round(segundos_netos / 3600.0, 3)
+                            tiempo_a_consumir = min(tiempo_restante_tarea, agenda[maquina]["resto_horas"])
+                            agenda[maquina]["resto_horas"] -= tiempo_a_consumir
+                            tiempo_restante_tarea -= tiempo_a_consumir
+                            
+                            # Avanzar hora
+                            minutos_a_sumar = tiempo_a_consumir * 60
+                            nueva_hora = (datetime.combine(date.today(), agenda[maquina]["hora"]) + timedelta(minutes=minutos_a_sumar)).time()
+                            agenda[maquina]["hora"] = nueva_hora
 
-                        fin_proceso[t["OT_id"]][proceso_nombre] = fin
-                        for b_ini, b_fin in bloques:
-                            carga_reg.append({"Fecha": b_ini.date(), "Maquina": maquina,
-                                              "HorasPlanificadas": (b_fin - b_ini).total_seconds() / 3600.0,
-                                              "CapacidadDia": h_dia})
-
+                        fin_real = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                        
+                        motivo = "Planificado"
+                        if tarea_robada: motivo = "Robado (Optimización)"
+                        
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
-                                      "Inicio": inicio, "Fin": fin, "Duracion_h": duracion_h, "Motivo": motivo})
+                                      "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
+                        fin_proceso[t["OT_id"]][proceso_nombre] = fin_real
                         completado[t["OT_id"]].add(proceso_nombre)
                         ultimo_en_maquina[maquina] = t
-                        progreso = True; tareas_agendadas = True
-
+                        progreso = True
+                        tareas_agendadas = True
+                        
                         if tarea_robada:
-                            break
+                            break # Salir del while de tareas_agendadas para reevaluar la cola
 
     # =================================================================
     # 6. SALIDAS 
