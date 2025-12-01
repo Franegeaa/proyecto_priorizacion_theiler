@@ -160,6 +160,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     if es_si(orden.get("_PEN_Stamping")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Stamping") ; 
     if es_si(orden.get("_PEN_Plastificado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Plastificado")
     if es_si(orden.get("_PEN_Encapado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Encapado")
+    if es_si(orden.get("_PEN_Cuño")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Cuño")
     if es_si(orden.get("_PEN_Troquelado")) and not es_si(orden.get("TroquelArt")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Troquelado")
     if es_si(orden.get("_PEN_Descartonado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Descartonado")
     if es_si(orden.get("_PEN_Ventana"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Ventana")
@@ -365,7 +366,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         cap = {} 
         for m in manuales + ([auto_name] if auto_name else []):
-            if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg) or 2500.0)
+            if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg))
         load_h = {m: 0.0 for m in cap.keys()} 
 
         # Agenda simulada solo para lectura de fechas (no escritura)
@@ -409,11 +410,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         candidatas = [m for m in candidatos_tamano if m != auto_name]
                 
                 # 3. REGLA DE CANTIDAD (> 3000) -> Automática Obligatoria (si entra)
-                elif total_pliegos > 3000:
-                    if auto_name and (auto_name in candidatos_tamano):
-                        candidatas = [auto_name]
-                    else:
-                        candidatas = [m for m in candidatos_tamano if m != auto_name]
+                # elif total_pliegos > 3000:
+                #     if auto_name and (auto_name in candidatos_tamano):
+                #         candidatas = [auto_name]
+                #     else:
+                #         candidatas = [m for m in candidatos_tamano if m != auto_name]
                 
                 # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Cualquiera compatible
                 else:
@@ -662,12 +663,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         # Mezclar máquinas para evitar sesgo hacia la primera (Descartonadora 1)
         maquinas_shuffled = list(maquinas)
-        # random.shuffle(maquinas_shuffled)
+        random.shuffle(maquinas_shuffled)
 
-        maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora", "Stamping", "Encapado"]
+        # maquinas_shuffled = ['Descartonadora 1', 'Automatica', 'Pegadora 1', 'Offset', 'Descartonadora 2', 'Manual 2', 'Ventanas', 'Guillotina 1', 'Manual 1', 'Flexo', "Plastificadora", "Stamping", "Encapado"]
 
         for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
-            if not colas.get(maquina): 
+            if not colas.get(maquina):  
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
                 if buffer_espera.get(maquina):
