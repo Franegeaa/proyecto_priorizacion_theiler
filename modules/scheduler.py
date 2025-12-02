@@ -50,15 +50,22 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
     ]
     paros_maquina.sort(key=lambda x: x[0])
 
-    # PAUSA FIJA DE ALMUERZO (13:30 → 14:00)
-    fecha_actual = fecha  # fecha del día que estamos procesando
-    almuerzo_inicio = datetime.combine(fecha_actual, time(13, 30))
-    almuerzo_fin = datetime.combine(fecha_actual, time(14, 0))
 
-    paros_maquina.append((almuerzo_inicio, almuerzo_fin))
-    paros_maquina.sort(key=lambda x: x[0])
+
+
+
+
+    
+
 
     while h > 1e-9:
+        # PAUSA FIJA DE ALMUERZO (13:30 → 14:00) para el día actual
+        almuerzo_inicio = datetime.combine(fecha, time(13, 30))
+        almuerzo_fin = datetime.combine(fecha, time(14, 0))
+        
+        # Combinar paros configurados con el almuerzo del día
+        paros_activos = paros_maquina + [(almuerzo_inicio, almuerzo_fin)]
+        paros_activos.sort(key=lambda x: x[0])
 
         # Si no queda resto de día → avanzar al siguiente día hábil
         if resto <= 1e-9:
@@ -69,7 +76,7 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
 
         # Si estamos dentro de un paro → avanzar al final del paro
         dentro_paro = False
-        for inicio, fin in paros_maquina:
+        for inicio, fin in paros_activos:
             if inicio <= hora_actual < fin:
                 hora_actual = fin
                 dentro_paro = True
@@ -86,7 +93,7 @@ def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
 
         # Buscar el próximo paro que interfiera
         proximo_paro = None
-        for inicio, fin in paros_maquina:
+        for inicio, fin in paros_activos:
             if inicio >= hora_actual and inicio < limite_fin_dia:
                 proximo_paro = inicio
                 break
@@ -1112,30 +1119,15 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # ... (Lógica normal para máquinas internas)
                         inicio_real = inicio_general
                         
-                        # Consumo de tiempo en agenda
-                        tiempo_restante_tarea = total_h
+                        # Consumo de tiempo en agenda (USANDO LÓGICA ROBUSTA)
+                        bloques_reserva = _reservar_en_agenda(agenda[maquina], total_h, cfg)
                         
-                        while tiempo_restante_tarea > 0:
-                            # Si no queda tiempo hoy, avanzar al siguiente día
-                            if agenda[maquina]["resto_horas"] <= 0.001:
-                                sig_dia = proximo_dia_habil(agenda[maquina]["fecha"] + timedelta(days=1), cfg)
-                                agenda[maquina]["fecha"] = sig_dia
-                                agenda[maquina]["hora"] = time(7, 0)
-                                agenda[maquina]["resto_horas"] = h_dia
-                                # Si es el primer bloque, actualizamos inicio_real
-                                if tiempo_restante_tarea == total_h:
-                                    inicio_real = datetime.combine(sig_dia, time(7, 0))
-
-                            tiempo_a_consumir = min(tiempo_restante_tarea, agenda[maquina]["resto_horas"])
-                            agenda[maquina]["resto_horas"] -= tiempo_a_consumir
-                            tiempo_restante_tarea -= tiempo_a_consumir
-                            
-                            # Avanzar hora
-                            minutos_a_sumar = tiempo_a_consumir * 60
-                            nueva_hora = (datetime.combine(date.today(), agenda[maquina]["hora"]) + timedelta(minutes=minutos_a_sumar)).time()
-                            agenda[maquina]["hora"] = nueva_hora
-
-                        fin_real = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                        if bloques_reserva:
+                            inicio_real = bloques_reserva[0][0]
+                            fin_real = bloques_reserva[-1][1]
+                        else:
+                            # Fallback (no debería ocurrir)
+                            fin_real = inicio_real
                         
                         motivo = "Planificado"
                         if tarea_robada: motivo = "Robado (Optimización)"
