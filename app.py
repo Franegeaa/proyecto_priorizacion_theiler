@@ -658,11 +658,11 @@ if archivo is not None:
     # Carga por máquina / día
     # ==========================
 
-    st.subheader("⚙️ Carga por máquina y día")
-    if not carga_md.empty:
-        st.dataframe(carga_md.sort_values(["Fecha","Maquina"]))
-    else:
-        st.info("No hay carga registrada (puede que no haya tareas planificadas).")
+    # st.subheader("⚙️ Carga por máquina y día")
+    # if not carga_md.empty:
+    #     st.dataframe(carga_md.sort_values(["Fecha","Maquina"]))
+    # else:
+    #     st.info("No hay carga registrada (puede que no haya tareas planificadas).")
 
     # ==========================
     # Resumen por OT
