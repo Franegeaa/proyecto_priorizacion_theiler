@@ -662,8 +662,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
     def _prioridad_dinamica(m):
         if "autom" in m.lower():
-            return (0, agenda[m]["fecha"], agenda[m]["hora"])
-        return (1, agenda[m]["fecha"], agenda[m]["hora"])
+            return (0, agenda[m]["fecha"], agenda[m]["hora"], m)
+        return (1, agenda[m]["fecha"], agenda[m]["hora"], m)
 
     progreso = True
     while quedan_tareas() and progreso:
@@ -778,6 +778,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # NUEVO: Robo desde el POOL (Prioridad Máxima para Descartonadoras)
                         # ------------------------------------------------------
                         if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO"):
+                            best_pool_idx = -1
+                            best_pool_future = None # (idx, available_at)
+                            current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+
                             for i, t_cand in enumerate(colas["POOL_DESCARTONADO"]):
                                 # Validar MP
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
@@ -785,12 +789,35 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 if not mp_ok: continue
                                 
                                 runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                                if runnable:
-                                    # Para robo, simplificamos: si es runnable, la tomamos.
-                                    tarea_encontrada = t_cand
-                                    fuente_maquina = "POOL_DESCARTONADO"
-                                    idx_robado = i
+                                
+                                if not runnable: continue
+
+                                # Si está lista YA, la tomamos inmediatamente
+                                if not available_at or available_at <= current_agenda_dt:
+                                    best_pool_idx = i
+                                    best_pool_future = None
                                     break
+                                
+                                # Si es futura, guardamos la mejor opción (la que esté lista antes)
+                                if best_pool_future is None:
+                                    best_pool_future = (i, available_at)
+                                else:
+                                    if available_at < best_pool_future[1]:
+                                        best_pool_future = (i, available_at)
+                            
+                            # Decisión final del POOL
+                            idx_robado = -1
+                            if best_pool_idx != -1:
+                                idx_robado = best_pool_idx
+                            elif best_pool_future:
+                                idx_robado = best_pool_future[0]
+                                # Nota: Al robar una futura, el avance de agenda ocurrirá naturalmente
+                                # cuando se procese la tarea en el paso 4 (verificar_disponibilidad se llama de nuevo)
+                            
+                            if idx_robado != -1:
+                                tarea_encontrada = colas["POOL_DESCARTONADO"][idx_robado]
+                                fuente_maquina = "POOL_DESCARTONADO"
+                                # No break aquí, dejamos que fluya al bloque de ejecución de robo
                         
                         if tarea_encontrada:
                             # Ejecutar robo del POOL inmediatamente
