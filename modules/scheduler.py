@@ -476,6 +476,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         # Lógica Clustering (Agrupa Color -> Urgencia del Grupo)
         if q.empty: return deque()
         q = q.copy()
+        # Convertir Urgente a booleano real para que .any() funcione bien
+        q["Urgente"] = q["Urgente"].apply(lambda x: es_si(x))
+        
         q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
         q["_color_key"] = (
             q.get("Colores", "").fillna("").astype(str).str.lower()
@@ -780,6 +783,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO"):
                             best_pool_idx = -1
                             best_pool_future = None # (idx, available_at)
+                            best_has_successor = False # Flag for priority
+                            best_is_urgent = False
                             current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
 
                             for i, t_cand in enumerate(colas["POOL_DESCARTONADO"]):
@@ -792,13 +797,55 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 
                                 if not runnable: continue
 
-                                # Si está lista YA, la tomamos inmediatamente
-                                if not available_at or available_at <= current_agenda_dt:
-                                    best_pool_idx = i
-                                    best_pool_future = None
-                                    break
+                                # Check for successors (Pegado, Ventana, etc.)
+                                # We check if there are any pending processes that are NOT Descartonado or previous ones.
+                                # A simple heuristic: check if '_PEN_Pegado' or '_PEN_Ventana' or similar are 'Si'.
+                                # Or check if there are any pending keys starting with '_PEN_' other than current.
+                                has_successor = False
+                                for k, v in t_cand.items():
+                                    if k.startswith("_PEN_") and str(v).lower() == "si":
+                                        proc_pend = k.replace("_PEN_", "").lower()
+                                        if "descartonado" not in proc_pend and "impres" not in proc_pend and "troquel" not in proc_pend:
+                                            has_successor = True
+                                            break
                                 
-                                # Si es futura, guardamos la mejor opción (la que esté lista antes)
+                                # Si está lista YA
+                                if not available_at or available_at <= current_agenda_dt:
+                                    # Logic Refined:
+                                    # 1. Urgency is King. (Urgente="Si" > "No")
+                                    # 2. If Urgency is same, prefer Successor.
+                                    # 3. If both same, prefer original order (DueDate).
+                                    
+                                    is_urgent = str(t_cand.get("Urgente", "")).lower() == "si"
+                                    
+                                    if best_pool_idx == -1:
+                                        best_pool_idx = i
+                                        best_has_successor = has_successor
+                                        best_is_urgent = is_urgent
+                                    else:
+                                        # Compare current candidate (i) with best so far
+                                        
+                                        # 1. Urgency Check
+                                        if is_urgent and not best_is_urgent:
+                                            # Found urgent, replace non-urgent best
+                                            best_pool_idx = i
+                                            best_has_successor = has_successor
+                                            best_is_urgent = True
+                                        elif not is_urgent and best_is_urgent:
+                                            # Current is not urgent, best is. Keep best.
+                                            pass
+                                        else:
+                                            # Same urgency status. Check Successor.
+                                            if has_successor and not best_has_successor:
+                                                best_pool_idx = i
+                                                best_has_successor = True
+                                                best_is_urgent = is_urgent
+                                            # Else: Keep best (respects original sort order which is DueDate)
+                                    
+                                    # Note: We don't break immediately anymore because we want to scan for a better priority task
+                                    continue
+                                
+                                # Si es futura
                                 if best_pool_future is None:
                                     best_pool_future = (i, available_at)
                                 else:
