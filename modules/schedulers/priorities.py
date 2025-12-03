@@ -121,6 +121,6 @@ def _cola_troquelada(q):
         due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
         es_urgente = g["Urgente"].any()
         g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
-        grupos.append((es_urgente, due_min, troq, g_sorted.to_dict("records")))
+        grupos.append((not es_urgente, due_min, troq, g_sorted.to_dict("records")))
     grupos.sort()
     return deque([item for _, _, _, recs in grupos for item in recs])
