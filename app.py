@@ -260,7 +260,7 @@ if archivo is not None:
         return pd.Series(False, index=df.index)
 
     df["_PEN_Guillotina"]   = to_bool_series(["GuillotinadoSNDpd"])
-    df["_PEN_Barnizado"]    = to_bool_series(["Barnizado.1"])
+    df["_PEN_Barnizado"]    = to_bool_series(["Barniz"])
     df["_PEN_Encapado"]     = to_bool_series(["Encapa", "EncapadoSND"])
     df["_PEN_Cuño"]         = to_bool_series(["Cuño", "CuñoSND"])
     df["_PEN_Plastificado"]  = to_bool_series(["Plastifica", "PlastificadoSND"]) 
