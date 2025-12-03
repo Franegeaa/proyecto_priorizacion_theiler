@@ -326,7 +326,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         continue
 
             tareas_agendadas = True
+            tasks_scheduled_count = 0 # LIMITADOR DE RACHA
             while tareas_agendadas: 
+                if tasks_scheduled_count >= 1: break # Yield para permitir que otras máquinas (dependencias) avancen
                 tareas_agendadas = False
                 
                 # --- CHEQUEO DE SEGURIDAD PREVIO ---
@@ -600,74 +602,77 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # ==========================================================
                 # PASO 3: FRANCOTIRADOR Y EJECUCIÓN
                 # ==========================================================
+                # ==========================================================
+                # PASO 3: FRANCOTIRADOR Y EJECUCIÓN
+                # ==========================================================
                 if idx_cand != -1:
-                    # Traemos la tarea al frente
-                    if not tarea_robada and idx_cand > 0:
-                        colas[maquina].rotate(-idx_cand)
-                    
-                    t_candidata = colas[maquina][0]
+                    t_final = None
                     se_ejecuta_ya = True
-                    es_barniz = "barniz" in t_candidata["Proceso"].lower()
+
+                    # CASO 1: GAP FILLING (Cherry Picking) - Preservar orden de los saltados
+                    if not tarea_robada and idx_cand > 0:
+                        t_final = colas[maquina][idx_cand]
+                        del colas[maquina][idx_cand]
+                        se_ejecuta_ya = True
                     
-                    if es_barniz:
-                        # 1. CONSOLIDACIÓN: Si hay gente en el buffer, ¡traerlos YA!
-                        if buffer_espera[maquina]:
-                            # Traemos todo lo del buffer al inicio de la cola
-                            # Buffer: [B1, B2] -> Cola: [B1, B2, Actual...]
-                            # Para mantener orden: extendleft con reversed
-                            colas[maquina].extendleft(reversed(buffer_espera[maquina]))
-                            buffer_espera[maquina] = [] # Limpiar buffer
+                    # CASO 2: NORMAL (Tope de Cola o Robado)
+                    else:
+                        # Traemos la tarea al frente si es necesario (solo si no es gap filling, que ya manejamos arriba)
+                        # Si tarea_robada=True, idx_cand es 0 (o irrelevante porque ya lo pusimos al frente en el paso de robo)
+                        
+                        t_candidata = colas[maquina][0]
+                        es_barniz = "barniz" in t_candidata["Proceso"].lower()
+                        
+                        if es_barniz:
+                            # 1. CONSOLIDACIÓN: Si hay gente en el buffer, ¡traerlos YA!
+                            if buffer_espera[maquina]:
+                                colas[maquina].extendleft(reversed(buffer_espera[maquina]))
+                                buffer_espera[maquina] = []
+                                se_ejecuta_ya = True 
                             
-                            # YA NO hacemos continue. Dejamos que fluya para EJECUTAR la primera tarea del grupo.
-                            # Esto rompe el ciclo infinito de agrupar-desagrupar.
-                            se_ejecuta_ya = True 
-
-
-                        # 2. MIRAR AL FUTURO (Solo si el buffer estaba vacío, o sea, ya consolidamos)
-                        # Identificar bloque contiguo de barnices en el tope
-                        bloque_barniz = []
-                        idx = 0
-                        while idx < len(colas[maquina]):
-                            t = colas[maquina][idx]
-                            if "barniz" in t["Proceso"].lower():
-                                bloque_barniz.append(t)
-                                idx += 1
+                            # 2. MIRAR AL FUTURO
                             else:
-                                break
-                        
-                        # Mirar 3 tareas MÁS ALLÁ del bloque
-                        rango_vision = 3
-                        encontre_pareja = False
-                        limit = min(len(colas[maquina]), idx + rango_vision)
-                        
-                        for k in range(idx, limit):
-                            futura = colas[maquina][k]
-                            if "barniz" in futura["Proceso"].lower():
-                                # Chequeo MP simple
-                                mp = str(futura.get("MateriaPrimaPlanta")).strip().lower()
-                                mp_ok = mp in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
+                                bloque_barniz = []
+                                idx = 0
+                                while idx < len(colas[maquina]):
+                                    t = colas[maquina][idx]
+                                    if "barniz" in t["Proceso"].lower():
+                                        bloque_barniz.append(t)
+                                        idx += 1
+                                    else:
+                                        break
                                 
-                                if mp_ok:
-                                    encontre_pareja = True
-                                    break
-                        
-                        if encontre_pareja:
-                            # Guardamos TODO el bloque en el buffer
-                            # Ojo: hay que sacarlos de la cola
-                            for _ in range(len(bloque_barniz)):
-                                t_removed = colas[maquina].popleft()
-                                buffer_espera[maquina].append(t_removed)
-                            
-                            se_ejecuta_ya = False
-                            progreso = True # ¡IMPORTANTE! Hemos hecho algo (buffer), así que el sistema sigue vivo.
-                            continue
+                                rango_vision = 3
+                                encontre_pareja = False
+                                limit = min(len(colas[maquina]), idx + rango_vision)
+                                
+                                for k in range(idx, limit):
+                                    futura = colas[maquina][k]
+                                    if "barniz" in futura["Proceso"].lower():
+                                        mp = str(futura.get("MateriaPrimaPlanta")).strip().lower()
+                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
+                                        if mp_ok:
+                                            encontre_pareja = True
+                                            break
+                                
+                                if encontre_pareja:
+                                    for _ in range(len(bloque_barniz)):
+                                        t_removed = colas[maquina].popleft()
+                                        buffer_espera[maquina].append(t_removed)
+                                    
+                                    se_ejecuta_ya = False
+                                    progreso = True 
+                                    continue
+
+                        if se_ejecuta_ya:
+                            t_final = colas[maquina].popleft()
 
                     #========================================
                     # PASO 4: EJECUCIÓN FINAL
                     #========================================
 
-                    if se_ejecuta_ya:
-                        t = colas[maquina].popleft()
+                    if se_ejecuta_ya and t_final:
+                        t = t_final
                         orden = df_ordenes.loc[t["idx"]].copy()
                         proceso_nombre = str(t["Proceso"])
                         proceso_lower = proceso_nombre.strip().lower()
@@ -733,6 +738,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             completado[t["OT_id"]].add(proceso_nombre)
                             ultimo_en_maquina[maquina] = t
                             progreso = True; tareas_agendadas = True
+                            tasks_scheduled_count += 1
 
                             agenda[maquina]["fecha"] = inicio_general.date()
                             agenda[maquina]["hora"] = inicio_general.time()
@@ -768,6 +774,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         ultimo_en_maquina[maquina] = t
                         progreso = True
                         tareas_agendadas = True
+                        tasks_scheduled_count += 1
                         
                         if tarea_robada:
                             break # Salir del while de tareas_agendadas para reevaluar la cola
