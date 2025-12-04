@@ -87,20 +87,20 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
         if "autom" in m:
             # Min 38x38 (Ambos lados deben ser >= 38)
-            return w >= 42 and l >= 39
+            return w >= 38 and l >= 38
         
         # Manuales: Maximos definidos (Ancho x Largo)
         # Manual 1: Max 80 x 105
         if "manual 1" in m or "manual1" in m:
-            return w <= 104 and l <= 104
+            return w <= 105 and l <= 105
         
         # Manual 2: Max 66 x 90
         if "manual 2" in m or "manual2" in m:
-            return w <= 70 and l <= 70
+            return w <= 90 and l <= 90
             
         # Manual 3: Max 70 x 100
         if "manual 3" in m or "manual3" in m:
-            return w <= 110 and l <= 110
+            return w <= 100 and l <= 100
             
         return True # Por defecto si no matchea nombre
 
