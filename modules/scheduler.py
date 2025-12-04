@@ -166,8 +166,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # Si no entra en Auto, va a manual compatible
                         candidatas = [m for m in candidatos_tamano if m != auto_name]
                 
-                # 3. REGLA DE CANTIDAD (> 3000) -> Automática Obligatoria (si entra)
-                elif total_pliegos > 3000:
+                # 3. REGLA DE CANTIDAD (> 2500) -> Automática Obligatoria (si entra)
+                elif total_pliegos > 2500:
                     if auto_name and (auto_name in candidatos_tamano):
                         candidatas = [auto_name]
                     else:
@@ -537,7 +537,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     
                                     # REGLA: Manual solo roba si cantidad <= 3000
                                     cant = float(t_cand.get("CantidadPliegos", 0) or 0)
-                                    # if cant > 3000: continue 
+                                    if cant > 2500: continue 
 
                                     # Validar medidas para ESTA manual
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
