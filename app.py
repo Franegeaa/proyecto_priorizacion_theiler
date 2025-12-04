@@ -76,7 +76,6 @@ if archivo is not None:
     cfg = st.session_state.cfg   # <- SIEMPRE usar el mismo cfg    
 
     maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
-    print(maquinas_todas)
     
     with st.expander("Añadir un velocidades de máquina (opcional)"):
         col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -705,12 +704,38 @@ if archivo is not None:
             carga_md.to_excel(w, index=False, sheet_name="Carga Máquina-Día")
             
     buf.seek(0)
+    
+    
     st.download_button(
-        "⬇️ Descargar Excel de planificación",
+        "⬇️ Descargar Excel (.xlsx)",
         data=buf,
         file_name="Plan_Produccion_Theiler.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    # 3. Opción CSV para Excel viejo / Configuración regional Argentina
+    if not schedule.empty:
+        plan_csv = schedule.copy()
+        plan_csv.sort_values(by=["Maquina", "Inicio"], inplace=True)
+        
+        # Mismas columnas que la hoja principal del Excel
+        cols_export = [
+            "Maquina", "Inicio", "Fin", "Duracion_h", 
+            "OT_id", "Cliente", "Cliente-articulo", "CodigoProducto", 
+            "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
+        ]
+        cols_final = [c for c in cols_export if c in plan_csv.columns]
+        
+        # Generar CSV con ; como separador y , para decimales
+        csv_data = plan_csv[cols_final].to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        st.download_button(
+            "⬇️ Descargar CSV (Compatible Excel 2010)",
+            data=csv_data,
+            file_name="Plan_Produccion_Theiler.csv",
+            mime="text/csv",
+            help="Usá esta opción si el Excel normal te sale todo en una sola celda."
+        )
 
 else:
     st.info("⬆️ Subí el archivo Excel de órdenes para comenzar.")
