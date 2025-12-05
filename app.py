@@ -7,6 +7,16 @@ import plotly.graph_objects as go
 from modules.config_loader import cargar_config, es_dia_habil, horas_por_dia
 from modules.scheduler import programar
 import streamlit.components.v1 as components
+import platform
+import locale
+
+if platform.system() == "Windows":
+    # Para Windows (puedes necesitar 'Spanish_Spain' o similar dependiendo de tu versión)
+    locale.setlocale(locale.LC_TIME, 'Spanish_Spain.1252')
+else:
+    # Para sistemas Unix/Linux/macOS (comúnmente 'es_ES.UTF-8')
+    # Asegúrate de que tu sistema tenga instalada esta locale.
+    locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
 
 # Opcional: Plotly para Gantt
 try:
@@ -223,6 +233,88 @@ if archivo is not None:
     cfg["downtimes"] = st.session_state.downtimes
     # --- FIN NUEVO ---
 
+    
+    # --- NUEVO: HORAS EXTRAS ---
+    st.subheader("⏳ Horas Extras")
+    
+    # 1. Calcular los días de la semana de la planificación
+    start_of_week_plan = fecha_inicio_plan 
+    dias_semana = []
+    lista_dias_str = []
+    map_str_date = {}
+    
+    for i in range(7):
+        dia_actual = start_of_week_plan + timedelta(days=i)
+        nombre = dia_actual.strftime('%A')
+        label = f"{nombre} {dia_actual.strftime('%d/%m')}"
+        dias_semana.append(dia_actual)
+        lista_dias_str.append(label)
+        map_str_date[label] = dia_actual
+
+    # 2. Selección de máquinas para horas extras
+    # Usamos un expander para no ensuciar tanto la UI principal si no se usa
+    with st.expander("Planificar Horas Extras (por máquina)"):
+        
+        # 2.1 Seleccionar QUE máquinas harán horas extras
+        maquinas_con_extras = st.multiselect(
+            "Seleccioná las máquinas que harán horas extras:",
+            options=maquinas_activas, # Solo las que se van a usar
+            default=[]
+        )
+        
+        horas_extras_general = {} # Diccionario Maquina -> {Fecha -> Horas}
+        
+        if maquinas_con_extras:
+            st.markdown("---")
+            for maq in maquinas_con_extras:
+                st.markdown(f"#### 🏭 {maq}")
+                
+                # Para cada máquina, un multiselect de días
+                dias_sel_maq = st.multiselect(
+                    f"Días de horas extras para {maq}:",
+                    options=lista_dias_str,
+                    default=[],
+                    key=f"dias_he_{maq}"
+                )
+                
+                horas_extras_maq = {}
+                if dias_sel_maq:
+                    # Layout de inputs
+                    cols_he = st.columns(len(dias_sel_maq)) if len(dias_sel_maq) <= 4 else st.columns(4)
+                    
+                    for idx, dia_label in enumerate(dias_sel_maq):
+                        col_obj = cols_he[idx % 4]
+                        fecha_obj = map_str_date[dia_label]
+                        
+                        with col_obj:
+                            horas = st.number_input(
+                                f"{dia_label} ({maq})",
+                                min_value=0.0, 
+                                max_value=24.0, 
+                                value=2.0, 
+                                step=0.5,
+                                label_visibility="collapsed", # Ahorrar espacio visual
+                                key=f"he_{maq}_{fecha_obj}"
+                            )
+                            # Etiqueta manual pequeña
+                            st.caption(f"{dia_label}")
+                            
+                            if horas > 0:
+                                horas_extras_maq[fecha_obj] = horas
+                
+                if horas_extras_maq:
+                    horas_extras_general[maq] = horas_extras_maq
+                st.markdown("---")
+
+        if horas_extras_general:
+             total_dias = sum(len(v) for v in horas_extras_general.values())
+             st.info(f"Se han configurado horas extras para {len(horas_extras_general)} máquinas.")
+
+    # Inyectamos las horas extras en la configuración (Estructura: {Maquina: {Fecha: Horas}})
+    cfg["horas_extras"] = horas_extras_general
+    # --- FIN NUEVO ---
+
+    # --- NUEVO: TIEMPO FUERA DE SERVICIO (DOWNTIME) ---
     start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
     # if start_datetime < datetime.now():
     #     st.warning("⚠️ La planificación no puede iniciar en el pasado. Ajustá la fecha u hora.")

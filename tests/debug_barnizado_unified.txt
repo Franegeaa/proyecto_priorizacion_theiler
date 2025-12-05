@@ -1,0 +1,5 @@
+=== TEST: Unified Offset Queue (Barniz + Print) ===
+Running _cola_impresora_offset...
+Ordered IDs: ['B1', 'B2', 'P1', 'P2']
+Barniz Indices: [0, 1]
+Barnizado tasks are grouped together!

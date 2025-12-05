@@ -1,0 +1,3 @@
+=== TEST: Barnizado Backfill ===
+Test script placeholder - Logic implemented in scheduler.py directly.
+Please run app to verify.

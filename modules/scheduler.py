@@ -346,12 +346,42 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # ==========================================================
                 # PASO 1: BÚSQUEDA DE CANDIDATA (GAP FILLING)
                 # ==========================================================
+                def log_debug(msg):
+                    with open("tests/debug_francotirador.txt", "a", encoding="utf-8") as f:
+                        f.write(f"[{maquina}] {msg}\n")
+
                 idx_cand = -1 
                 mejor_candidato_futuro = None # (idx, fecha_disponible)
+                mejor_candidato_setup = None 
                 
                 current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                
+                ultima_tarea = ultimo_en_maquina.get(maquina)
+                if "barniz" in maquina.lower():
+                    log_debug(f"--- Ciclo Nueva Tarea @ {current_agenda_dt} ---")
+                    if ultima_tarea:
+                        log_debug(f"Ultima Tarea: {ultima_tarea.get('Cliente')} - {ultima_tarea.get('Proceso')}")
+                    else:
+                        log_debug("Ultima Tarea: NONE")
 
                 for i, t_cand in enumerate(colas[maquina]):
+                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                    if not mp_ok: continue
+
+                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                    
+                    if not runnable: continue
+                    
+                    es_setup = False
+                    if ultima_tarea:
+                         es_setup = usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", ""))
+
+                    if "barniz" in maquina.lower() and i < 5:
+                         log_debug(f"Cand[{i}]: {t_cand.get('Cliente')} (Due: {t_cand.get('DueDate')}) - Avail: {available_at} - SetupMenor: {es_setup}")
+
+                    # Si está lista YA (o antes), la tomamos inmediatamente (Gap Filling)
+
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     if not mp_ok: continue
@@ -373,11 +403,48 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # Si esta está lista ANTES que la que teníamos guardada, la preferimos
                         if available_at < mejor_candidato_futuro[1]:
                             mejor_candidato_futuro = (i, available_at)
+                            
+                    # -- LÓGICA FRANCOTIRADOR (SMART WAIT) --
+                    # Guardamos el mejor candidato de setup para compararlo luego
+                    if es_setup:
+                         if mejor_candidato_setup is None:
+                             mejor_candidato_setup = (i, available_at)
+                             if "barniz" in maquina.lower(): log_debug(f"MARKING SETUP CANDIDATE: IDX {i}")
+                         else:
+                             if available_at < mejor_candidato_setup[1]:
+                                 mejor_candidato_setup = (i, available_at)
+                                 if "barniz" in maquina.lower(): log_debug(f"UPDATING SETUP CANDIDATE: IDX {i}")
+
                 
+                
+                # --- APPLY SMART WAIT / FRANCOTIRADOR LOGIC ---
+                TOLERANCIA = timedelta(minutes=90)
+                final_decision = None # (idx, dt)
+
+                if "barniz" in maquina.lower(): 
+                    log_debug(f"End Loop. IdxCand: {idx_cand}. BestFut: {mejor_candidato_futuro}. BestSetup: {mejor_candidato_setup}")
+
+                # 1. Si ya tenemos uno listo (idx_cand != -1), checkeamos si vale la pena ESPERAR por setup
+                if idx_cand != -1 and mejor_candidato_setup:
+                     wait_time = mejor_candidato_setup[1] - current_agenda_dt
+                     if wait_time <= TOLERANCIA:
+                         if "barniz" in maquina.lower(): log_debug(f"FRANCOTIRADOR: Esperando {wait_time} por cand {mejor_candidato_setup[0]} (Setup)")
+                         idx_cand = -1
+                         final_decision = mejor_candidato_setup
+                
+                # 2. Si no tenemos uno listo...
+                elif idx_cand == -1:
+                    if mejor_candidato_setup:
+                        if "barniz" in maquina.lower(): log_debug(f"No ready task. Picking Setup Candidate {mejor_candidato_setup[0]} future.")
+                        final_decision = mejor_candidato_setup
+                    elif mejor_candidato_futuro:
+                        if "barniz" in maquina.lower(): log_debug(f"No ready/setup task. Picking Normal Future {mejor_candidato_futuro[0]}.")
+                        final_decision = mejor_candidato_futuro
+
                 # Si no encontramos ninguna lista YA, pero hay futuras, tomamos la mejor futura
-                if idx_cand == -1 and mejor_candidato_futuro:
-                    idx_cand = mejor_candidato_futuro[0]
-                    future_dt = mejor_candidato_futuro[1]
+                if idx_cand == -1 and final_decision:
+                    idx_cand = final_decision[0]
+                    future_dt = final_decision[1]
                     
                     # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
                     # Lógica de salto de tiempo (respetando días hábiles)
@@ -395,6 +462,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         agenda[maquina]["hora"] = hora_destino
                         h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                         agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
+
                 
                 # ==========================================================
                 # PASO 2: INTENTO DE ROBO (Casos A, B, C, D)
@@ -602,9 +670,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # ==========================================================
                 # PASO 3: FRANCOTIRADOR Y EJECUCIÓN
                 # ==========================================================
-                # ==========================================================
-                # PASO 3: FRANCOTIRADOR Y EJECUCIÓN
-                # ==========================================================
                 if idx_cand != -1:
                     t_final = None
                     se_ejecuta_ya = True
@@ -621,49 +686,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # Si tarea_robada=True, idx_cand es 0 (o irrelevante porque ya lo pusimos al frente en el paso de robo)
                         
                         t_candidata = colas[maquina][0]
-                        es_barniz = "barniz" in t_candidata["Proceso"].lower()
-                        
-                        if es_barniz:
-                            # 1. CONSOLIDACIÓN: Si hay gente en el buffer, ¡traerlos YA!
-                            if buffer_espera[maquina]:
-                                colas[maquina].extendleft(reversed(buffer_espera[maquina]))
-                                buffer_espera[maquina] = []
-                                se_ejecuta_ya = True 
-                            
-                            # 2. MIRAR AL FUTURO
-                            else:
-                                bloque_barniz = []
-                                idx = 0
-                                while idx < len(colas[maquina]):
-                                    t = colas[maquina][idx]
-                                    if "barniz" in t["Proceso"].lower():
-                                        bloque_barniz.append(t)
-                                        idx += 1
-                                    else:
-                                        break
-                                
-                                rango_vision = 3
-                                encontre_pareja = False
-                                limit = min(len(colas[maquina]), idx + rango_vision)
-                                
-                                for k in range(idx, limit):
-                                    futura = colas[maquina][k]
-                                    if "barniz" in futura["Proceso"].lower():
-                                        mp = str(futura.get("MateriaPrimaPlanta")).strip().lower()
-                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not futura.get("MateriaPrimaPlanta")
-                                        if mp_ok:
-                                            encontre_pareja = True
-                                            break
-                                
-                                if encontre_pareja:
-                                    for _ in range(len(bloque_barniz)):
-                                        t_removed = colas[maquina].popleft()
-                                        buffer_espera[maquina].append(t_removed)
-                                    
-                                    se_ejecuta_ya = False
-                                    progreso = True 
-                                    continue
-
                         if se_ejecuta_ya:
                             t_final = colas[maquina].popleft()
 

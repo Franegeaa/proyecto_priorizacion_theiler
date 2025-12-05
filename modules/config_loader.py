@@ -42,27 +42,65 @@ def es_feriado(d, cfg):
     
     # Ahora comparamos un objeto 'date' con un set de 'date'
     if fecha_obj in cfg["feriados"]:
-        print("Es feriado:", fecha_obj) # Tu debug (ahora sí debería funcionar)
+        # print("Es feriado:", fecha_obj) 
         return True
     return False
 
-def proximo_dia_habil(d, cfg):
-    while d.weekday() == 5 or d.weekday() == 6 or es_feriado(d, cfg):
-        d += timedelta(days=1)
-    return d
-
-def es_dia_habil(d, cfg):
+def es_dia_habil(d, cfg, maquina=None):
     # 'd' debe ser un objeto date o datetime
+    fecha_obj = d.date() if isinstance(d, datetime) else d
+    
+    # 0. Chequeo de HORAS EXTRAS (Prioridad Suprema)
+    # Si el usuario definió horas extras para este día, ES HÁBIL, sin importar si es finde o feriado.
+    horas_extras_general = cfg.get("horas_extras", {})
+    
+    # Si se especificó máquina, buscamos sus extras. Si no, asumimos que no hay extras (o lógica global si existiera)
+    if maquina:
+        extras_maquina = horas_extras_general.get(maquina, {})
+        if fecha_obj in extras_maquina and extras_maquina[fecha_obj] > 0:
+            return True
+
     # 1. Chequea fin de semana (5 = Sábado, 6 = Domingo)
-    if d.weekday() >= 5:
+    if fecha_obj.weekday() >= 5:
         return False
         
-    # 2. Chequea feriados (usa la función que ya tenías)
-    if es_feriado(d, cfg):
+    # 2. Chequea feriados
+    if es_feriado(fecha_obj, cfg):
         return False
         
     return True
 
+def get_horas_totales_dia(d, cfg, maquina=None):
+    """
+    Devuelve la cantidad total de horas disponibles para trabajar en la fecha 'd'.
+    Total = Base (si es día hábil normal) + Extras (si las hay).
+    """
+    fecha_obj = d.date() if isinstance(d, datetime) else d
+    
+    # 1. Horas Base
+    es_finde = fecha_obj.weekday() >= 5
+    es_feriado_dia = es_feriado(fecha_obj, cfg)
+    
+    if es_finde or es_feriado_dia:
+        horas_base = 0.0
+    else:
+        # Es un día de semana normal
+        horas_base = horas_por_dia(cfg)
+    
+    # 2. Horas Extra (inyectadas por el usuario específicamente para ESTE día)
+    horas_extra_usuario = 0.0
+    
+    if maquina:
+        horas_extras_general = cfg.get("horas_extras", {})
+        extras_maquina = horas_extras_general.get(maquina, {})
+        horas_extra_usuario = extras_maquina.get(fecha_obj, 0.0)
+    
+    return horas_base + horas_extra_usuario
+
+def proximo_dia_habil(d, cfg, maquina=None):
+    while not es_dia_habil(d, cfg, maquina=maquina):
+        d += timedelta(days=1)
+    return d
 
 def construir_calendario(cfg, start=None, start_time=None):
     # 1. Establecer la fecha y hora base
@@ -129,6 +167,8 @@ def sumar_horas_habiles(inicio: datetime, horas: float, cfg: dict) -> datetime:
         
         # Avanzamos al inicio del siguiente día hábil
         siguiente_dia = cursor.date() + timedelta(days=1)
+        # NOTA: Aqui hay un tema, tercerizados no tienen "maquina" especifica definida en el nombre de proceso
+        # normalmente asumen calendario general.
         siguiente_dia = proximo_dia_habil(siguiente_dia, cfg)
         cursor = datetime.combine(siguiente_dia, time.min)
         

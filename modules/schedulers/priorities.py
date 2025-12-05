@@ -44,18 +44,19 @@ def _cola_impresora_offset(q):
     if q.empty: return deque()
     q = q.copy()
 
-    # 1. LIMPIEZA DE DATOS (Igual que en Flexo)
+    # 1. LIMPIEZA DE DATOS
     # ------------------------------------------------------------
     q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
     q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
+    q["_proceso_norm"] = q.get("Proceso", "").fillna("").astype(str).str.strip().str.lower()
     
-    # Limpieza de Color: Quitar guiones, espacios y mayúsculas
+    # Limpieza de Color
     q["_color_key"] = (
         q.get("Colores", "")
         .fillna("")
         .astype(str)
         .str.lower()
-        .str.replace("-", "", regex=False) # <--- CLAVE: Ignorar guiones
+        .str.replace("-", "", regex=False)
         .str.strip()
     )
 
@@ -63,51 +64,58 @@ def _cola_impresora_offset(q):
     q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
     q["DueDate"] = q["DueDate"].fillna(pd.Timestamp.max)
 
-    # 2. CLASIFICACIÓN (Pantone vs CMYK)
-    # ------------------------------------------------------------
-    colores_upper = q["_color_key"].str.upper()
-    # Regex: Si tiene algo que NO sea C, M, Y, K o vacío, es Pantone
-    mask_con_pantone = colores_upper.str.contains(r'[^CMYK]', na=False) # Quitamos el \- del regex porque ya borramos los guiones arriba
+    # 2. SEPARAR POR TIPO DE PROCESO
+    # Prioridad: (0=Impresion CMYK/Pantone, 1=Barnizado)
+    # Esto asegura que todas las impresiones (mismo DueDate) se hagan antes de pasar a Barnizado.
     
-    q_sin_pantone = q[~mask_con_pantone]
-    q_con_pantone = q[mask_con_pantone]
-
+    mask_barniz = q["_proceso_norm"].str.contains("barniz", na=False)
+    
+    q_barniz = q[mask_barniz]
+    q_impresion = q[~mask_barniz] # CMYK y Pantone aqui
+    
     grupos_todos = []
 
-    # 3. GRUPO A: SIN PANTONE (CMYK) -> Agrupar por CLIENTE + TROQUEL
+    # 3. GRUPO IMPRESION (Prioridad 0)
     # ------------------------------------------------------------
-    if not q_sin_pantone.empty:
-        for keys, g in q_sin_pantone.groupby(["_cliente_key", "_troq_key"], dropna=False):
-            # Urgencia del grupo entero
+    # Dentro de impresion, mantenemos la distincion CMYK vs Pantone si se quiere,
+    # o simplificamos. Por ahora, distinguimos para respetar agrupamiento de Troquel vs Color.
+    
+    if not q_impresion.empty:
+        colores_upper = q_impresion["_color_key"].str.upper()
+        mask_pantone = colores_upper.str.contains(r'[^CMYK]', na=False)
+        
+        q_cmyk = q_impresion[~mask_pantone]
+        q_pantone = q_impresion[mask_pantone]
+        
+        # 3.1 CMYK -> Agrupar por CLIENTE + TROQUEL
+        for keys, g in q_cmyk.groupby(["_cliente_key", "_troq_key"], dropna=False):
             due_min = g["DueDate"].min()
-            es_urgente = g["Urgente"].any()
-            
-            # Orden interno
+            es_urgente = g["Urgente"].apply(es_si).any()
             g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
-            
-            # Tupla: (NoUrgente, Fecha, Prioridad 0, Cliente, Troquel, Tareas)
-            # False < True, así que usamos 'not es_urgente' para que True (Urgente) quede primero (False) en sort ascendente
+            # Prio 0
             grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
-    # 4. GRUPO B: CON PANTONE -> Agrupar por CLIENTE + COLOR
-    # ------------------------------------------------------------
-    if not q_con_pantone.empty:
-        for keys, g in q_con_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
-            # Urgencia del grupo entero
+        # 3.2 PANTONE -> Agrupar por CLIENTE + COLOR
+        for keys, g in q_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
             due_min = g["DueDate"].min()
-            es_urgente = g["Urgente"].any()
-            
-            # Orden interno
+            es_urgente = g["Urgente"].apply(es_si).any()
             g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
-            
-            # Tupla: (NoUrgente, Fecha, Prioridad 1, Cliente, Color, Tareas)
-            # Nota: Si prefieres que NO se separen CMYK de Pantone por defecto, 
-            # cambia el '1' por '0' aquí también. Pero usualmente es mejor separarlos.
-            grupos_todos.append((not es_urgente, due_min, 1, keys[0], keys[1], g_sorted.to_dict("records")))
-    
-    # 5. ORDENAMIENTO FINAL DE BLOQUES
+            # Prio 0 (Mismo nivel que CMYK, se ordenan entre ellos por Fecha/Cliente)
+            grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+
+    # 4. GRUPO BARNIZADO (Prioridad 1)
     # ------------------------------------------------------------
-    # Ordena por: NoUrgente -> Fecha -> Prioridad (0=CMYK, 1=Pantone) -> Cliente
+    if not q_barniz.empty:
+        # Agrupar solo por CLIENTE
+        for cliente, g in q_barniz.groupby("_cliente_key", dropna=False):
+            due_min = g["DueDate"].min()
+            es_urgente = g["Urgente"].apply(es_si).any()
+            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
+            # Prio 1 -> Queda DESPUES de impresion si las fechas coinciden
+            grupos_todos.append((not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
+
+    # 5. ORDENAMIENTO FINAL
+    # ------------------------------------------------------------
     grupos_todos.sort() 
 
     return deque([item for _, _, _, _, _, recs in grupos_todos for item in recs])

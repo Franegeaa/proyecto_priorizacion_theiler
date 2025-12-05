@@ -98,6 +98,7 @@ def usa_setup_menor(prev, curr, proceso):
         if (tipo_prev == tipo_curr) and (mat_prev == mat_curr) and tipo_prev:
             return True
 
+
     return False
 
 # =========================================================

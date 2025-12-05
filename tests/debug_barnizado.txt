@@ -1,0 +1,10 @@
+=== TEST: Barnizado Grouping & Smart Wait ===
+Probando _cola_barnizado...
+Orden Resultante: ['2', '1', '3']
+Ordenamiento Correcto (Agrupa Cliente A).
+
+Probando usa_setup_menor...
+Setup A -> A: True
+Setup A -> B: False
+
+¡Test Pasado Exitosamente!
