@@ -7,16 +7,15 @@ import plotly.graph_objects as go
 from modules.config_loader import cargar_config, es_dia_habil, horas_por_dia
 from modules.scheduler import programar
 import streamlit.components.v1 as components
-import platform
-import locale
+# import platform
 
-if platform.system() == "Windows":
-    # Para Windows (puedes necesitar 'Spanish_Spain' o similar dependiendo de tu versión)
-    locale.setlocale(locale.LC_TIME, 'Spanish_Spain.1252')
-else:
-    # Para sistemas Unix/Linux/macOS (comúnmente 'es_ES.UTF-8')
-    # Asegúrate de que tu sistema tenga instalada esta locale.
-    locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
+# if platform.system() == "Windows":
+#     # Para Windows (puedes necesitar 'Spanish_Spain' o similar dependiendo de tu versión)
+#     locale.setlocale(locale.LC_TIME, 'Spanish_Spain.1252')
+# else:
+#     # Para sistemas Unix/Linux/macOS (comúnmente 'es_ES.UTF-8')
+#     # Asegúrate de que tu sistema tenga instalada esta locale.
+#     locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
 
 # Opcional: Plotly para Gantt
 try:

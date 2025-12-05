@@ -1,5 +1,4 @@
 pandas
-locale
 openpyxl
 plotly
 numpy
