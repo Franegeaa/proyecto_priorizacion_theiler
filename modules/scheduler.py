@@ -40,7 +40,123 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # =======================================================
-    # 2. ORDEN LÓGICO DE PLANIFICACIÓN
+    # 1.1 PROCESAMIENTO IMAGEN DE PLANTA (PENDING PROCESSES)
+    # =======================================================
+    
+    # Listas para guardar lo ya agendado por imagen de planta
+    completado = defaultdict(set)
+    fin_proceso = defaultdict(dict)
+    ultimo_en_maquina = {m: None for m in cfg["maquinas"]["Maquina"].unique()} 
+    filas = []
+    
+    pending_list = cfg.get("pending_processes", [])
+    if pending_list:
+        print(f"--- Procesando {len(pending_list)} procesos en curso ---")
+        
+        # Mapa inverso para saber qué tareas borrar de 'tasks'
+        # Clave: (OT_id, Maquina) -> Indices en tasks
+        # Pero ojo, necesitamos saber el "Proceso" para mappear a Maquina si no es obvio, 
+        # pero aquí el usuario nos da la Maquina directamente.
+        
+        for pp in pending_list:
+            pp_maquina = pp["maquina"]
+            pp_ot = pp["ot_id"]
+            pp_qty = float(pp["cantidad_pendiente"])
+            
+            # Buscar la tarea original para sacar metadatos (Cliente, Producto, etc.)
+            # Filtramos tasks por OT_id y Maquina
+            # Nota: 'tasks' tiene columna 'Maquina' asignada? 
+            # Originalmente _expandir_tareas asigna la máquina preferida o default.
+            # Pero para procesos manuales/troquelado podría ser ambiguo AÚN si no corrimos el optimizador.
+            # SIN EMBARGO, _expandir_tareas ya genera una fila por operación.
+            # Intentamos matchear por OT y Maquina.
+            
+            # Normalizamos nombres para búsqueda
+            mask_ot = tasks["OT_id"] == pp_ot
+            
+            # En tasks, la columna 'Maquina' puede no estar llena o ser genérica (ej. elecciones dinámicas).
+            # Pero _expandir_tareas intenta asignar si es única.
+            # Estrategia: Buscar por OT y ver cual operación corresponde a esa máquina.
+            
+            # Obtenemos el proceso de esa máquina según config
+            row_maq = cfg["maquinas"][cfg["maquinas"]["Maquina"] == pp_maquina]
+            if row_maq.empty: continue
+            proc_target = row_maq["Proceso"].iloc[0] # Ej: "Impresión Flexo"
+            
+            # Buscamos en tasks esa OT y ese Proceso
+            # Ojo con procesos genéricos ("Troquelado") vs máquinas específicas.
+            
+            mask_proc = tasks["Proceso"].astype(str).str.lower() == proc_target.lower()
+            
+            # Caso especial: Maquina especifica de un grupo (ej. Troquelado)
+            # Si el usuario eligió "Manual 1" (Troquelado), y en tasks dice "Troquelado", vale.
+            if "troquel" in proc_target.lower():
+                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("troquel")
+            elif "impres" in proc_target.lower():
+                 # Si es Flexo vs Offset, ya deberían estar separados en el nombre del proceso
+                 pass
+
+            candidates = tasks[mask_ot & mask_proc]
+            
+            if candidates.empty:
+                # Si no encontramos la tarea, quizás es porque la máquina no matchea perfecto con el proceso estándar
+                # O la OT no existe. Logueamos y seguimos.
+                print(f"Skip Pending: No se encontró tarea para {pp_ot} en {pp_maquina} ({proc_target})")
+                continue
+            
+            # Tomamos la primera coincidencia (debería ser única por proceso)
+            idx_task = candidates.index[0]
+            t = tasks.loc[idx_task].to_dict()
+            # t["idx"] = idx_task <-- LINEA ELIMINADA (Causaba el bug)
+            
+            # --- AGENDAR INMEDIATAMENTE ---
+            
+            # 1. Calcular duración con la cantidad PENDIENTE (no la total)
+            #    Creamos una "orden fake" con esa cantidad
+            orden_fake = df_ordenes.loc[t["idx"]].copy()
+            orden_fake["CantidadPliegos"] = pp_qty
+            
+            #    Usamos tiempo_operacion_h (que ya validamos)
+            _, proc_h = tiempo_operacion_h(orden_fake, proc_target, pp_maquina, cfg)
+            
+            #    Setup: Asumimos que si está "En curso", el setup YA SE HIZO.
+            #    Por lo tanto setup_min = 0.
+            setup_min = 0.0
+            total_h = proc_h # Solo tiempo productivo restante
+            
+            motivo = "En Curso (Planta)"
+            
+            # 2. Reservar en Agenda
+            #    Empieza DESDE AHORA (inicio_general del plan)
+            #    Ojo: inicio_general se define unas lineas arriba.
+            
+            current_dt_maq = datetime.combine(agenda[pp_maquina]["fecha"], agenda[pp_maquina]["hora"])
+            
+            #    Reservamos
+            bloques_reserva = _reservar_en_agenda(agenda[pp_maquina], total_h, cfg)
+            
+            if bloques_reserva:
+                inicio_real = bloques_reserva[0][0]
+                fin_real = bloques_reserva[-1][1]
+                
+                # Guardamos resultado
+                filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
+                                                        "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
+                                 {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
+                                  "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
+                
+                # Actualizar estado global
+                fin_proceso[pp_ot][proc_target] = fin_real
+                completado[pp_ot].add(proc_target)
+                t["CantidadPliegos"] = pp_qty # Para que el registro quede consistente con lo hecho
+                ultimo_en_maquina[pp_maquina] = t
+                
+                # --- BORRAR DE TASKS (Para que no se agende de nuevo) ---
+                tasks = tasks.drop(idx_task)
+                print(f"OK Pending: {pp_ot} en {pp_maquina} agendado y removido de cola.")
+            else:
+                 print(f"Error Pending: No se pudo reservar tiempo para {pp_ot} en {pp_maquina}")
+
     # =======================================================
 
     flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])] 
@@ -71,7 +187,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # 3. REASIGNACIÓN TROQUELADO (Solo asigna, NO reserva tiempo)
     # =================================================================
     
-    troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().eq("troquelado")]
+    troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
     manuales = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower()]
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
@@ -245,9 +361,17 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =================================================================
     
     pendientes_por_ot = defaultdict(set); [pendientes_por_ot[t["OT_id"]].add(t["Proceso"]) for _, t in tasks.iterrows()]
-    completado = defaultdict(set); fin_proceso = defaultdict(dict)
-    ultimo_en_maquina = {m: None for m in maquinas} 
-    carga_reg, filas = [], []; h_dia = horas_por_dia(cfg)
+    
+    # IMPORTANTE: No reiniciamos 'completado' ni 'fin_proceso' ni 'ultimo_en_maquina' 
+    # porque ya vienen con datos de la fase "Imagen de Planta"
+    # completado = defaultdict(set); fin_proceso = defaultdict(dict) <-- ELIMINADO REINICIO
+    
+    # Si ultimo_en_maquina viene vacio (sin pendientes), lo iniciamos a None si hace falta, 
+    # pero como es un diccionario mutable ya modificado arriba, lo dejamos ser.
+    
+    carga_reg = [] # filas se acumula, pero carga_reg es nuevo aqui
+    # filas = [] <-- NO reiniciamos filas, ya trae los pendientes
+    h_dia = horas_por_dia(cfg)
 
     def quedan_tareas(): return any(len(q) > 0 for q in colas.values())
 

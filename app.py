@@ -230,8 +230,6 @@ if archivo is not None:
     
     # Inyectamos la lista de paros en la configuración
     cfg["downtimes"] = st.session_state.downtimes
-    # --- FIN NUEVO ---
-
     
     # --- NUEVO: HORAS EXTRAS ---
     st.subheader("⏳ Horas Extras")
@@ -378,9 +376,104 @@ if archivo is not None:
     # ... (OT_id) ...
     if "OT_id" not in df.columns:
         df["OT_id"] = (
-            df["CodigoProducto"].astype(str).str.strip() + "-" +
-            df["Subcodigo"].astype(str).str.strip()
+           df["CodigoProducto"].astype(str).str.strip() + "-" + df["Subcodigo"].astype(str).str.strip() 
         )
+
+    # --- NUEVO: IMAGEN DE PLANTA (PROCESOS EN CURSO) ---
+    st.subheader("📸 Imagen de Planta (Procesos en Curso)")
+    
+    if "pending_processes" not in st.session_state:
+        st.session_state.pending_processes = []
+
+    with st.expander("Cargar procesos en curso (Prioridad Absoluta)"):
+        st.info("⚠️ Los procesos cargados aquí se agendarán **primero** en la máquina seleccionada, eliminando esa tarea de la lista pendiente original para evitar duplicados.")
+        
+        col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 1, 1])
+        
+        # 1. Máquina
+        with col_p1:
+            pp_maquina = st.selectbox("Máquina", options=maquinas_activas, key="pp_maquina")
+            
+        # 2. OT (Filtrada por proceso pendiente en esa máquina)
+        # Buscar el proceso de la maquina
+        proc_maq = cfg_plan["maquinas"].loc[cfg_plan["maquinas"]["Maquina"] == pp_maquina, "Proceso"]
+        try:
+             proc_maq_val = proc_maq.iloc[0] if not proc_maq.empty else ""
+        except:
+             proc_maq_val = ""
+
+        # Mapeo simple de Proceso -> Columna _PEN
+        # Normalizamos un poco (quitamos acentos y espacios para matchear lo que creamos arriba)
+        # Las columnas creadas son: _PEN_Guillotina, _PEN_Barnizado, _PEN_ImpresionFlexo, etc.
+        
+        def normalize_proc_key(p):
+            p = str(p).lower().replace("ó","o").replace("é","e").replace("í","i").replace("á","a").replace("ú","u")
+            p = p.replace(" ", "") # impresionflexo
+            return p
+
+        # Mapa manual de seguridad o heuristica
+        col_target = None
+        p_clean = normalize_proc_key(proc_maq_val)
+        
+        # Intentamos matchear
+        for c in df.columns:
+            if c.startswith("_PEN_"):
+                suffix = c.replace("_PEN_", "").lower()
+                if suffix == p_clean:
+                    col_target = c
+                    break
+        
+        # Fallback especificos si la heuristica falla
+        if not col_target:
+            if "flexo" in p_clean: col_target = "_PEN_ImpresionFlexo"
+            elif "offset" in p_clean: col_target = "_PEN_ImpresionOffset"
+            elif "troquel" in p_clean: col_target = "_PEN_Troquelado"
+            elif "pegad" in p_clean: col_target = "_PEN_Pegado"
+        
+        # Filtrado
+        if col_target and col_target in df.columns:
+            # Solo los que tienen TRUE en esa columna
+            ots_disponibles = sorted(df[df[col_target] == True]["OT_id"].unique().tolist())
+        else:
+            # Si no encontramos mapeo, mostramos todas (fallback)
+            ots_disponibles = sorted(df["OT_id"].unique().tolist()) if "OT_id" in df.columns else []
+
+        with col_p2:
+            pp_ot = st.selectbox("Orden de Trabajo (OT)", options=ots_disponibles, key="pp_ot")
+            
+        # 3. Cantidad Pendiente
+        with col_p3:
+            pp_qty = st.number_input("Cant. Pendiente", min_value=1, value=1000, step=100, key="pp_qty")
+            
+        # 4. Botón Agregar
+        with col_p4:
+            st.write("") # Spacer
+            st.write("") 
+            if st.button("➕ Cargar", key="btn_add_pp"):
+                st.session_state.pending_processes.append({
+                    "maquina": pp_maquina,
+                    "ot_id": pp_ot,
+                    "cantidad_pendiente": pp_qty
+                })
+                st.success(f"Cargado: {pp_maquina} -> {pp_ot} ({pp_qty})")
+
+        # Mostrar tabla de pendientes
+        if st.session_state.pending_processes:
+            st.write("📋 **Procesos en Curso Cargados:**")
+            
+            # Convertimos a DF para mostrar limpio
+            df_pp = pd.DataFrame(st.session_state.pending_processes)
+            
+            # Botón para limpiar todo si se equivocan
+            if st.button("Limpiar lista de en curso"):
+               st.session_state.pending_processes = []
+               st.rerun()
+
+            st.table(df_pp)
+
+    # Inyectamos en la config
+    cfg["pending_processes"] = st.session_state.pending_processes
+    # --- FIN NUEVO ---
 
     st.info("🧠 Generando programa…")
 
