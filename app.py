@@ -102,19 +102,19 @@ if archivo is not None:
         setup_min_valor = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"].values[0]
 
         with col2:
-            vel_valor = st.number_input("Velocidad de máquina", value=int(vel_valor), key=f"vel_{maquina}")
+            vel_valor = st.number_input("Velocidad de máquina (pliegos/hora)", value=int(vel_valor), key=f"vel_{maquina}")
             if vel_valor > 0:
                 cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Capacidad_pliegos_hora"] = int(vel_valor)
             else:
                 st.warning("La velocidad debe ser mayor que 0.")
         with col3:
-            setup_valor = st.number_input("Setup base", value=int(setup_valor), key=f"setup_{maquina}")
+            setup_valor = st.number_input("Setup base (min)", value=int(setup_valor), key=f"setup_{maquina}")
             if setup_valor > 0:
                 cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_base_min"] = int(setup_valor)
             else:
                 st.warning("El setup base debe ser mayor que 0.")
         with col4:
-            setup_min_valor = st.number_input("Setup menor", value=int(setup_min_valor), key=f"setup_menor_{maquina}")
+            setup_min_valor = st.number_input("Setup menor (min)", value=int(setup_min_valor), key=f"setup_menor_{maquina}")
             if setup_min_valor > 0:
                 cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Setup_menor_min"] = int(setup_min_valor)
             else:
@@ -313,13 +313,8 @@ if archivo is not None:
 
     # --- NUEVO: TIEMPO FUERA DE SERVICIO (DOWNTIME) ---
     start_datetime = datetime.combine(fecha_inicio_plan, hora_inicio_plan)
-    # if start_datetime < datetime.now():
-    #     st.warning("⚠️ La planificación no puede iniciar en el pasado. Ajustá la fecha u hora.")
-    #     st.stop()
-
-
-    # ... (toda tu lógica de renombrado y limpieza de 'df' va aquí) ...
-    # ... (Renombres base) ...
+    
+    # --- RENOMBRADO ---
     df.rename(columns={
         "ORDEN": "CodigoProducto",
         "Ped.": "Subcodigo",
@@ -336,11 +331,11 @@ if archivo is not None:
         "Pli Lar": "PliLar",
     }, inplace=True)
 
-    # ... (Colores combinados) ...
+    # --- COLORES COMBINADOS ---
     color_cols = [c for c in df.columns if str(c).startswith("Color")]
     df["Colores"] = df[color_cols].fillna("").astype(str).agg("-".join, axis=1) if color_cols else ""
 
-    # ... (Flags SOLO pendientes) ...
+    # --- FLAGS SOLO PENDIENTES ---
     def to_bool_series(names):
         for c in names:
             if c in df.columns:
@@ -361,19 +356,19 @@ if archivo is not None:
     df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada
     df["_IMP_FreyDorDpd"] = to_bool_series(["FreyDorDpd"])    # Offset → doble pasada
 
-    # ... (Troquel preferido) ...
+    # --- TROQUEL PREFERIDO ---
     for c in ["CodigoTroquel", "CodigoTroquelTapa", "CodigoTroquelCuerpo", "CodTroTapa", "CodTroCuerpo"]:
         if c in df.columns:
             df["CodigoTroquel"] = df[c]
             break
 
-    # ... (Impresión: separar Offset/Flexo) ...
+    # --- IMPRESIÓN: SEPARAR OFFSET/FLEXO ---
     mat = df.get("MateriaPrima", "").astype(str).str.lower()
     imp_pend = to_bool_series(["ImpresionSNDpd", "ImpresionSND"])
     df["_PEN_ImpresionFlexo"]  = imp_pend & (mat.str.contains("micro", na=False) )
     df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False) | mat.str.contains("carton", na=False) )
 
-    # ... (OT_id) ...
+    # --- OT_ID ---
     if "OT_id" not in df.columns:
         df["OT_id"] = (
            df["CodigoProducto"].astype(str).str.strip() + "-" + df["Subcodigo"].astype(str).str.strip() 
@@ -388,7 +383,7 @@ if archivo is not None:
     with st.expander("Cargar procesos en curso (Prioridad Absoluta)"):
         st.info("⚠️ Los procesos cargados aquí se agendarán **primero** en la máquina seleccionada, eliminando esa tarea de la lista pendiente original para evitar duplicados.")
         
-        col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 1, 1])
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([2, 1.5, 2, 1, 1])
         
         # 1. Máquina
         with col_p1:
@@ -443,10 +438,19 @@ if archivo is not None:
             
         # 3. Cantidad Pendiente
         with col_p3:
+            cliente_val = ""
+            if pp_ot:
+                 try: 
+                     cliente_val = df.loc[df["OT_id"] == pp_ot, "Cliente"].iloc[0]
+                 except: 
+                     cliente_val = ""
+            st.text_input("Cliente", value=cliente_val, disabled=True, key=f"pp_cli_{pp_ot}")
+
+        with col_p4:
             pp_qty = st.number_input("Cant. Pendiente", min_value=1, value=1000, step=100, key="pp_qty")
             
         # 4. Botón Agregar
-        with col_p4:
+        with col_p5:
             st.write("") # Spacer
             st.write("") 
             if st.button("➕ Cargar", key="btn_add_pp"):
@@ -459,17 +463,31 @@ if archivo is not None:
 
         # Mostrar tabla de pendientes
         if st.session_state.pending_processes:
+            # Mostrar tabla de pendientes
             st.write("📋 **Procesos en Curso Cargados:**")
             
-            # Convertimos a DF para mostrar limpio
-            df_pp = pd.DataFrame(st.session_state.pending_processes)
+            # Header simula tabla
+            h1, h2, h3, h4 = st.columns([3, 3, 2, 1])
+            h1.markdown("**Máquina**")
+            h2.markdown("**OT**")
+            h3.markdown("**Cant.**")
+            h4.markdown("")
+
+            for i, item in enumerate(st.session_state.pending_processes):
+                c1, c2, c3, c4 = st.columns([3, 3, 2, 1])
+                with c1: st.write(item["maquina"])
+                with c2: st.write(item["ot_id"])
+                with c3: st.write(item["cantidad_pendiente"])
+                with c4:
+                    if st.button("❌", key=f"del_pp_{i}", help="Eliminar este proceso"):
+                        st.session_state.pending_processes.pop(i)
+                        st.rerun()
             
+            st.markdown("---")
             # Botón para limpiar todo si se equivocan
-            if st.button("Limpiar lista de en curso"):
+            if st.button("Limpiar TODO", key="btn_clear_pp"):
                st.session_state.pending_processes = []
                st.rerun()
-
-            st.table(df_pp)
 
     # Inyectamos en la config
     cfg["pending_processes"] = st.session_state.pending_processes
