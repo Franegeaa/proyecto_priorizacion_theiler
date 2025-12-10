@@ -15,10 +15,10 @@ def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
     return tuple()
 
 def _cola_impresora_flexo(q): 
-    # Lógica Clustering (Agrupa Color -> Urgencia del Grupo)
+    # Lógica Clustering REVISADA (Urgencia Estricta > Color)
     if q.empty: return deque()
     q = q.copy()
-    # Convertir Urgente a booleano real para que .any() funcione bien
+    # Convertir Urgente a booleano real
     q["Urgente"] = q["Urgente"].apply(lambda x: es_si(x))
     
     q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
@@ -27,18 +27,26 @@ def _cola_impresora_flexo(q):
         .str.replace("-", "", regex=False).str.strip()
     )
     q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
-    
-    grupos = []
-    for color, g in q.groupby("_color_key", dropna=False):
-        due_min_del_color = g["DueDate"].min()
-        # Urgencia del grupo: Si alguna tarea es urgente, el grupo es urgente (True > False)
-        es_urgente = g["Urgente"].any()
-        
-        g_sorted = g.sort_values(by=["Urgente", "DueDate", "_cliente_key", "CantidadPliegos"], ascending=[False, True, True, False])
-        grupos.append((not es_urgente, due_min_del_color, color, g_sorted.to_dict("records")))
-    
-    grupos.sort() 
-    return deque([item for _, _, _, recs in grupos for item in recs])
+
+    # Separar en Urgent y Normal
+    q_urgente = q[q["Urgente"]].copy()
+    q_normal = q[~q["Urgente"]].copy()
+
+    def _agrupar_subcola(sub_q):
+        if sub_q.empty: return []
+        grupos = []
+        for color, g in sub_q.groupby("_color_key", dropna=False):
+            due_min_del_color = g["DueDate"].min()
+            # Orden interno del grupo
+            g_sorted = g.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], ascending=[True, True, False])
+            grupos.append((due_min_del_color, g_sorted.to_dict("records")))
+        grupos.sort(key=lambda x: x[0]) # Ordenar por fecha del grupo
+        return [item for _, recs in grupos for item in recs]
+
+    sorted_urgente = _agrupar_subcola(q_urgente)
+    sorted_normal = _agrupar_subcola(q_normal)
+
+    return deque(sorted_urgente + sorted_normal)
 
 def _cola_impresora_offset(q):
     if q.empty: return deque()

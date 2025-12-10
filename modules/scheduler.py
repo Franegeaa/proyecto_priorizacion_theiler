@@ -12,6 +12,7 @@ from modules.schedulers.tasks import _procesos_pendientes_de_orden, _expandir_ta
 from modules.config_loader import (
     es_si, horas_por_dia, proximo_dia_habil, construir_calendario, es_dia_habil, sumar_horas_habiles
 )
+
 from modules.tiempos_y_setup import (
     capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
 )
@@ -418,6 +419,35 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         # Calcular cuándo estará lista la última dependencia
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
         
+        # --- NUEVO: RESTRICCION POR LLEGADA DE INSUMOS (CHAPAS / TROQUEL) ---
+        arrival_date = None
+        
+        # 1. Impresión (Offset/Flexo) depende de fecha llegada chapas (PeliculaArt)
+        if "impres" in proc_actual_clean:
+            if es_si(t.get("PeliculaArt")):
+                fecha_chapas = t.get("FechaLlegadaChapas")
+                if pd.notna(fecha_chapas):
+                    # Asumimos disponibilidad al inicio de ese día (00:00) o a las 7:00?
+                    # Mejor las 07:00 para alinear con jornada
+                    arrival_date = datetime.combine(fecha_chapas.date(), time(7,0))
+
+        # 2. Troquelado depende de fecha llegada troquel (TroquelArt)
+        elif "troquel" in proc_actual_clean:
+             if es_si(t.get("TroquelArt")):
+                fecha_troquel = t.get("FechaLlegadaTroquel")
+                with open("debug_scheduler.log", "a") as f:
+                    f.write(f"DEBUG: Checking TroquelArt for {ot}. Val: {t.get('TroquelArt')}. Date: {fecha_troquel}. NotNa: {pd.notna(fecha_troquel)}\n")
+                if pd.notna(fecha_troquel):
+                    arrival_date = datetime.combine(fecha_troquel.date(), time(7,0))
+                    with open("debug_scheduler.log", "a") as f:
+                        f.write(f"DEBUG: Set arrival_date to {arrival_date}\n")
+        
+        # Fusionar restricciones: la fecha efectiva es el MAX(dependencia, llegada_insumo)
+        if last_end and arrival_date:
+            return (True, max(last_end, arrival_date))
+        elif arrival_date:
+            return (True, arrival_date)
+        
         return (True, last_end)
 
     def _prioridad_dinamica(m):
@@ -569,7 +599,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 if idx_cand == -1 and final_decision:
                     idx_cand = final_decision[0]
                     future_dt = final_decision[1]
-                    
+
+
                     # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
                     # Lógica de salto de tiempo (respetando días hábiles)
                     fecha_destino = future_dt.date()
@@ -715,8 +746,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
                                     
-                                    runnable, _ = verificar_disponibilidad(t_cand, maquina)
-                                    if runnable:
+                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable and (not available_at or available_at <= current_agenda_dt):
                                         tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
                                 if tarea_encontrada: break
 
@@ -739,8 +770,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
                                     
-                                    runnable, _ = verificar_disponibilidad(t_cand, maquina)
-                                    if runnable:
+                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable and (not available_at or available_at <= current_agenda_dt):
                                         tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
                             # C: Robar a Vecina Manual
@@ -759,8 +790,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                         if not mp_ok: continue
                                         
-                                        runnable, _ = verificar_disponibilidad(t_cand, maquina)
-                                        if runnable:
+                                        runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                        if runnable and (not available_at or available_at <= current_agenda_dt):
                                             tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                     if tarea_encontrada: break
                         
@@ -775,8 +806,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                                     if not mp_ok: continue
                                     
-                                    runnable, _ = verificar_disponibilidad(t_cand, maquina)
-                                    if runnable:
+                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable and (not available_at or available_at <= current_agenda_dt):
                                         tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                 if tarea_encontrada: break
 

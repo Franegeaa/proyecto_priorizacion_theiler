@@ -14,18 +14,35 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     orden_idx = {p: i for i, p in enumerate(flujo)}
     pendientes = []
     
+    # --- LÓGICA DE BLOQUEO POR FALTA DE FECHAS ---
+    # Si PeliculaArt es Si, pero NO hay fecha llegada, se bloquea.
+    # Si hay fecha, NO se bloquea (se agenda a futuro).
+    tiene_pelicula = es_si(orden.get("PeliculaArt"))
+    fecha_chapas = orden.get("FechaLlegadaChapas")
+    # Es NaT o nulo/vacío?
+    bloqueado_por_pelicula = tiene_pelicula and (pd.isna(fecha_chapas) or str(fecha_chapas).strip() == "")
+
+    tiene_troquel = es_si(orden.get("TroquelArt"))
+    fecha_troquel = orden.get("FechaLlegadaTroquel")
+    bloqueado_por_troquel = tiene_troquel and (pd.isna(fecha_troquel) or str(fecha_troquel).strip() == "")
+
     if es_si(orden.get("_PEN_Guillotina")): pendientes.append("Guillotina")
-    if es_si(orden.get("_PEN_ImpresionFlexo")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Flexo")
-    if es_si(orden.get("_PEN_ImpresionOffset")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Impresión Offset") 
-    if es_si(orden.get("_PEN_Barnizado"))and not es_si(orden.get("PeliculaArt")): pendientes.append("Barnizado")
-    if es_si(orden.get("_PEN_Stamping")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Stamping") ; 
-    if es_si(orden.get("_PEN_Plastificado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Plastificado")
-    if es_si(orden.get("_PEN_Encapado")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Encapado")
-    if es_si(orden.get("_PEN_Cuño")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Cuño")
-    if es_si(orden.get("_PEN_Troquelado")) and not es_si(orden.get("TroquelArt")) and not es_si(orden.get("PeliculaArt")): pendientes.append("Troquelado")
-    if es_si(orden.get("_PEN_Descartonado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Descartonado")
-    if es_si(orden.get("_PEN_Ventana"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Ventana")
-    if es_si(orden.get("_PEN_Pegado"))and not es_si(orden.get("PeliculaArt")) and not es_si(orden.get("TroquelArt")): pendientes.append("Pegado")
+    # Impresión y posteriores bloqueados por Pelicula si falta fecha
+    if es_si(orden.get("_PEN_ImpresionFlexo")) and not bloqueado_por_pelicula: pendientes.append("Impresión Flexo")
+    if es_si(orden.get("_PEN_ImpresionOffset")) and not bloqueado_por_pelicula: pendientes.append("Impresión Offset") 
+    if es_si(orden.get("_PEN_Barnizado")) and not bloqueado_por_pelicula: pendientes.append("Barnizado")
+    if es_si(orden.get("_PEN_Stamping")) and not bloqueado_por_pelicula: pendientes.append("Stamping") 
+    if es_si(orden.get("_PEN_Plastificado")) and not bloqueado_por_pelicula: pendientes.append("Plastificado")
+    if es_si(orden.get("_PEN_Encapado")) and not bloqueado_por_pelicula: pendientes.append("Encapado")
+    if es_si(orden.get("_PEN_Cuño")) and not bloqueado_por_pelicula: pendientes.append("Cuño")
+    
+    # Troquelado: Bloqueado por Pelicula (si falta fecha) O Troquel (si falta fecha)
+    if es_si(orden.get("_PEN_Troquelado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Troquelado")
+    
+    # Posteriores a Troquel: Bloqueados por ambos
+    if es_si(orden.get("_PEN_Descartonado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Descartonado")
+    if es_si(orden.get("_PEN_Ventana")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Ventana")
+    if es_si(orden.get("_PEN_Pegado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Pegado")
     
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(dict.fromkeys(pendientes))
@@ -79,6 +96,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "Bocas": bocas, "Poses": poses,
                 "TroquelArt": row.get("TroquelArt", ""),
                 "PeliculaArt": row.get("PeliculaArt", ""),
+                "FechaLlegadaChapas": row.get("FechaLlegadaChapas"), # Fecha disponiblidad Impresión
+                "FechaLlegadaTroquel": row.get("FechaLlegadaTroquel"), # Fecha disponiblidad Troquel
                 "PliAnc": row.get("PliAnc", 0),
                 "PliLar": row.get("PliLar", 0),
                 "Urgente": es_si(row.get("Urgente", False)) # Nueva bandera de urgencia

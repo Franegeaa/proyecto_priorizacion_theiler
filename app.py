@@ -327,6 +327,8 @@ if archivo is not None:
         "MPPlanta": "MateriaPrimaPlanta",
         "CodTroTapa": "CodigoTroquelTapa",
         "CodTroCuerpo": "CodigoTroquelCuerpo",
+        "FechaChaDpv": "FechaLlegadaChapas",
+        "FechaTroDpv": "FechaLlegadaTroquel",
         "Pli Anc": "PliAnc",
         "Pli Lar": "PliLar",
     }, inplace=True)
@@ -334,6 +336,38 @@ if archivo is not None:
     # --- COLORES COMBINADOS ---
     color_cols = [c for c in df.columns if str(c).startswith("Color")]
     df["Colores"] = df[color_cols].fillna("").astype(str).agg("-".join, axis=1) if color_cols else ""
+
+    # --- PARSEO DE FECHAS (CUSTOM ESPAÑOL) ---
+    def parse_spanish_date(date_str):
+        if pd.isna(date_str) or str(date_str).strip() == "":
+            return pd.NaT
+        
+        s = str(date_str).lower().strip()
+        # Mapa de meses abreviados español
+        meses = {
+            "ene": "01", "feb": "02", "mar": "03", "abr": "04", "may": "05", "jun": "06",
+            "jul": "07", "ago": "08", "sep": "09", "oct": "10", "nov": "11", "dic": "12"
+        }
+        
+        try:
+            # Intento formato '12-dic-25' o '12-dic-2025'
+            for mes_name, mes_num in meses.items():
+                if mes_name in s:
+                    s = s.replace(mes_name, mes_num)
+                    break
+            
+            # Reemplazar separadores comunes
+            s = s.replace("-", "/").replace(".", "/")
+            
+            return pd.to_datetime(s, dayfirst=True)
+        except:
+            return pd.NaT
+
+    if "FechaLlegadaChapas" in df.columns:
+        df["FechaLlegadaChapas"] = df["FechaLlegadaChapas"].apply(parse_spanish_date)
+    
+    if "FechaLlegadaTroquel" in df.columns:
+        df["FechaLlegadaTroquel"] = df["FechaLlegadaTroquel"].apply(parse_spanish_date)
 
     # --- FLAGS SOLO PENDIENTES ---
     def to_bool_series(names):
