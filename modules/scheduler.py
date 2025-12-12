@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 import random
 
 from modules.schedulers.machines import elegir_maquina
-from modules.schedulers.priorities import _clave_prioridad_maquina, _cola_impresora_flexo, _cola_impresora_offset, _cola_troquelada
+from modules.schedulers.priorities import _clave_prioridad_maquina, _cola_impresora_flexo, _cola_impresora_offset, _cola_troquelada, _cola_cortadora_bobina
 from modules.schedulers.agenda import _reservar_en_agenda
 from modules.schedulers.tasks import _procesos_pendientes_de_orden, _expandir_tareas
 
@@ -344,6 +344,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower): colas[m] = _cola_troquelada(q)
         elif "offset" in m_lower: colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
+        elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
         else: 
             # Orden por defecto: Urgente -> DueDate -> Orden Proceso -> Cantidad
             q.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[False, True, True, False], inplace=True)
