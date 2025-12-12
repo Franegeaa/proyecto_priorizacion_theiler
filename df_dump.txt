@@ -1,3 +1,0 @@
-  CodigoProducto Subcodigo Cliente FechaEntrega  CantidadPliegos MateriaPrimaPlanta MPPlanta MateriaPrima _PEN_ImpresionOffset _PEN_Troquelado PeliculaArt FechaLlegadaChapas ImpresionSND TroqueladoSND TroquelArt FechaLlegadaTroquel
-0          TEST1        01      C1   20/12/2025             5000                 No       No    Cartulina                   Si              No          Si         2025-12-12          NaN           NaN                            NaT
-1          TEST2        01      C2   20/12/2025             5000                 No       No    Cartulina                   No              Si         NaN                NaT           No            Si         Si          2025-12-15

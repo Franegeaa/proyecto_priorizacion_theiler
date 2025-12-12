@@ -6,7 +6,7 @@ from .priorities import _clave_prioridad_maquina
 
 def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     flujo = orden_std or [
-        "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
+        "Cortadora Bobina", "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
         "OPP", "Stamping", "Plastificado", "Encapado", "Cuño","Troquelado", 
         "Descartonado", "Ventana", "Pegado"
     ]
@@ -26,6 +26,8 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     fecha_troquel = orden.get("FechaLlegadaTroquel")
     bloqueado_por_troquel = tiene_troquel and (pd.isna(fecha_troquel) or str(fecha_troquel).strip() == "")
 
+    if es_si(orden.get("CorteSNDdp")): pendientes.append("Cortadora Bobina")
+    
     if es_si(orden.get("_PEN_Guillotina")): pendientes.append("Guillotina")
     # Impresión y posteriores bloqueados por Pelicula si falta fecha
     if es_si(orden.get("_PEN_ImpresionFlexo")) and not bloqueado_por_pelicula: pendientes.append("Impresión Flexo")
