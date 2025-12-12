@@ -7,15 +7,6 @@ import plotly.graph_objects as go
 from modules.config_loader import cargar_config, es_dia_habil, horas_por_dia
 from modules.scheduler import programar
 import streamlit.components.v1 as components
-# import platform
-
-# if platform.system() == "Windows":
-#     # Para Windows (puedes necesitar 'Spanish_Spain' o similar dependiendo de tu versión)
-#     locale.setlocale(locale.LC_TIME, 'Spanish_Spain.1252')
-# else:
-#     # Para sistemas Unix/Linux/macOS (comúnmente 'es_ES.UTF-8')
-#     # Asegúrate de que tu sistema tenga instalada esta locale.
-#     locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
 
 # Opcional: Plotly para Gantt
 try:
@@ -30,6 +21,7 @@ st.title("📦 Planificador de Producción – Theiler Packaging")
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
 color_map_procesos = {
+    "Cortadora Bobina": "lightgray", #Gris claro
     "Guillotina": "dimgray",        # Gris oscuro
     "Impresión Offset": "mediumseagreen", # Verde mar
     "Impresión Flexo": "darkorange",
@@ -49,22 +41,23 @@ color_map_procesos = {
 def ordenar_maquinas_personalizado(lista_maquinas):
     """Ordena máquinas según prioridad operativa definida por el usuario."""
     prioridades = [
-        (1, ["guillotina"]),
-        (2, ["offset"]),
-        (3, ["flexo"]),
-        (4, ["stamping"]),
-        (5, ["plastificadora"]),
-        (6, ["encapado"]),
-        (7, ["cuño"]),
-        (8, ["automat", "automát"]),
-        (9, ["manual 1", "manual-1", "manual1"]),
-        (10, ["manual 2", "manual-2", "manual2"]),
-        (11, ["manual 3", "manual-3", "manual3"]),
-        (12, ["descartonadora 1"]),
-        (13, ["descartonadora 2"]),
-        (14, ["descartonadora 3"]),
-        (15, ["ventana"]),
-        (16, ["pegadora", "pegado"]),
+        (1, ["bobina"]),
+        (2, ["guillotina"]),
+        (3, ["offset"]),
+        (4, ["flexo"]),
+        (5, ["stamping"]),
+        (6, ["plastificadora"]),
+        (7, ["encapado"]),
+        (8, ["cuño"]),
+        (9, ["automat", "automát"]),
+        (10, ["manual 1", "manual-1", "manual1"]),
+        (11, ["manual 2", "manual-2", "manual2"]),
+        (12, ["manual 3", "manual-3", "manual3"]),
+        (13, ["descartonadora 1"]),
+        (14, ["descartonadora 2"]),
+        (15, ["descartonadora 3"]),
+        (16, ["ventana"]),
+        (17, ["pegadora", "pegado"]),
     ]
 
     def clave(nombre):
@@ -376,6 +369,7 @@ if archivo is not None:
                 return df[c].astype(str).str.strip().str.lower().isin(["verdadero", "true", "si", "sí", "1", "x"])
         return pd.Series(False, index=df.index)
 
+    df["_PEN_Corte_Bobina"] = to_bool_series(["CorteSNDdp"])
     df["_PEN_Guillotina"]   = to_bool_series(["GuillotinadoSNDpd"])
     df["_PEN_Barnizado"]    = to_bool_series(["Barniz"])
     df["_PEN_Encapado"]     = to_bool_series(["Encapa", "EncapadoSND"])
@@ -887,18 +881,6 @@ if archivo is not None:
         else:
             st.info("No hay detalle por máquina disponible (verificá que se hayan generado tareas).")
             
-    # --- FIN DE LA CORRECCIÓN ---
-
-    # ==========================
-    # Carga por máquina / día
-    # ==========================
-
-    # st.subheader("⚙️ Carga por máquina y día")
-    # if not carga_md.empty:
-    #     st.dataframe(carga_md.sort_values(["Fecha","Maquina"]))
-    # else:
-    #     st.info("No hay carga registrada (puede que no haya tareas planificadas).")
-
     # ==========================
     # Resumen por OT
     # ==========================
