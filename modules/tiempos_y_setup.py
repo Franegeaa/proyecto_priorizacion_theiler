@@ -99,6 +99,16 @@ def usa_setup_menor(prev, curr, proceso):
             return True
 
 
+    # ---------------------------------------------------------
+    # 4. BOBINA (Misma Materia Prima)
+    # ---------------------------------------------------------
+    if "bobina" in proceso_lower:
+        mp_prev = str(prev.get("MateriaPrima", "")).strip().lower()
+        mp_curr = str(curr.get("MateriaPrima", "")).strip().lower()
+
+        if mp_prev and mp_curr and mp_prev == mp_curr:
+            return True
+
     return False
 
 # =========================================================

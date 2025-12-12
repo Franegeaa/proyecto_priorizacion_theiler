@@ -140,3 +140,54 @@ def _cola_troquelada(q):
         grupos.append((not es_urgente, due_min, troq, g_sorted.to_dict("records")))
     grupos.sort()
     return deque([item for _, _, _, recs in grupos for item in recs])
+
+def _cola_cortadora_bobina(q):
+    """
+    Agrupa por:
+    1. Materia Prima
+    2. Medida (Ancho y Largo)
+    3. Gramaje (Grs./Nº)
+    Dentro del grupo ordena por Urgente y DueDate.
+    """
+    if q.empty: return deque()
+    q = q.copy()
+    
+    # Normalización de claves
+    q["_mp_key"] = q.get("MateriaPrima", "").fillna("").astype(str).str.strip().str.lower()
+    
+    # Para medida, combinamos Ancho y Largo en un string o tupla para agrupar
+    # Asumimos que PliAnc y PliLar vienen como float o int
+    q["_medida_key"] = q.apply(lambda x: f"{float(x.get('PliAnc',0) or 0):.2f}x{float(x.get('PliLar',0) or 0):.2f}", axis=1)
+    
+    # Gramaje
+    q["_gramaje_key"] = q.get("Gramaje", 0).fillna(0).astype(float)
+
+    q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
+    
+    grupos = []
+    
+    # Agrupamos jerárquicamente
+    # GroupBy respeta el orden de las columnas dadas en la lista, creando un MultiIndex
+    for (mp, medida, gramaje), g in q.groupby(["_mp_key", "_medida_key", "_gramaje_key"], dropna=False):
+        
+        # Metadatos del grupo
+        due_min = g["DueDate"].min() or pd.Timestamp.max
+        es_urgente = g["Urgente"].any()
+        
+        # Orden interno del grupo (Para respetar FIFO/Urgencia dentro del mismo setup)
+        g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], ascending=[False, True, False])
+        
+        # Guardamos el grupo. 
+        # La tupla de ordenamiento será: (-Urgente, DueDate, ...)
+        # Así los grupos urgentes van primero.
+        # "not es_urgente" -> False < True, so Urgent (True) comes first if we sort by boolean? 
+        # False=0, True=1. So (False, ...) comes before (True, ...). We want True first.
+        # So we use "not es_urgente" (False if Urgent) to put Urgent first?
+        # Python sort: False (0) < True (1). 
+        # If Urgent is True, "not Urgent" is False (0). Earliest. Correct.
+        
+        grupos.append((not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
+        
+    grupos.sort()
+    
+    return deque([item for _, _, _, _, _, recs in grupos for item in recs])

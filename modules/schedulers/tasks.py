@@ -102,6 +102,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "FechaLlegadaTroquel": row.get("FechaLlegadaTroquel"), # Fecha disponiblidad Troquel
                 "PliAnc": row.get("PliAnc", 0),
                 "PliLar": row.get("PliLar", 0),
+                "Gramaje": row.get("Grs./Nº", 0), # Nuevo campo para agrupamiento Bobina
                 "Urgente": es_si(row.get("Urgente", False)) # Nueva bandera de urgencia
             })  
 
