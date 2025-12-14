@@ -863,6 +863,12 @@ if archivo is not None:
                     "OT_id", "Cliente-articulo", "PliAnc","PliLar", "Bocas","CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", 
                     "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate", 
                 ]
+            elif "bobina" in maquina_sel.lower():
+                 st.write("📜 Mostrando detalles de bobina (Materia Prima / Medidas).")
+                 cols = [
+                    "OT_id", "Cliente-articulo", "MateriaPrima", "PliAnc", "PliLar", "CantidadPliegos",
+                    "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
+                ]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
                 cols = [
