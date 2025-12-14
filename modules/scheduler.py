@@ -908,7 +908,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             fin = sumar_horas_habiles(inicio, total_h, cfg)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                                "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
+                                                                "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -943,7 +943,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         if tarea_robada: motivo = "Robado (Optimización)"
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar"]} |
+                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 

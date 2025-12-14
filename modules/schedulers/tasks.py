@@ -91,6 +91,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "Proceso": proceso, "Maquina": maquina,
                 "DueDate": row["FechaEntrega"], "GroupKey": _clave_prioridad_maquina(proceso, row),
                 "MateriaPrimaPlanta": row.get("MateriaPrimaPlanta", row.get("MPPlanta")),
+                "MateriaPrima": row.get("MateriaPrima", ""), # Fix for priorities.py
                 "CodigoTroquel": row.get("CodigoTroquel") or row.get("CodTroTapa") or row.get("CodTroCuerpo") or "",
                 "Colores": row.get("Colores", ""), 
                 "CantidadPliegos": pliegos,
