@@ -15,7 +15,7 @@ def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
     return tuple()
 
 def _cola_impresora_flexo(q): 
-    # Lógica Clustering REVISADA (Urgencia Estricta > Color)
+    # Lógica Clustering con Ventana de 1 Día
     if q.empty: return deque()
     q = q.copy()
     # Convertir Urgente a booleano real
@@ -27,24 +27,67 @@ def _cola_impresora_flexo(q):
         .str.replace("-", "", regex=False).str.strip()
     )
     q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
-
+    
     # Separar en Urgent y Normal
     q_urgente = q[q["Urgente"]].copy()
     q_normal = q[~q["Urgente"]].copy()
 
-    def _agrupar_subcola(sub_q):
+    def _agrupar_con_ventana(sub_q):
         if sub_q.empty: return []
-        grupos = []
-        for color, g in sub_q.groupby("_color_key", dropna=False):
-            due_min_del_color = g["DueDate"].min()
-            # Orden interno del grupo
-            g_sorted = g.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], ascending=[True, True, False])
-            grupos.append((due_min_del_color, g_sorted.to_dict("records")))
-        grupos.sort(key=lambda x: x[0]) # Ordenar por fecha del grupo
-        return [item for _, recs in grupos for item in recs]
+        
+        # 1. Orden inicial estricto por Fecha
+        # Usamos un índice temporal para controlar procesados
+        sub_q = sub_q.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], ascending=[True, True, False])
+        lista_items = sub_q.to_dict("records")
+        n = len(lista_items)
+        processed = [False] * n
+        resultado = []
+        
+        from datetime import timedelta
+        WINDOW = timedelta(days=1)
 
-    sorted_urgente = _agrupar_subcola(q_urgente)
-    sorted_normal = _agrupar_subcola(q_normal)
+        for i in range(n):
+            if processed[i]: continue
+            
+            # Tomamos el Anchor (el siguiente disponible más urgente/temprano)
+            anchor = lista_items[i]
+            resultado.append(anchor)
+            processed[i] = True
+            
+            anchor_date = anchor["DueDate"]
+            if pd.isna(anchor_date): continue # No podemos hacer comparaciones de ventana sin fecha
+            
+            anchor_color = anchor.get("_color_key", "")
+            
+            # Buscar siguientes compatibles dentro de la ventana
+            for j in range(i + 1, n):
+                if processed[j]: continue
+                
+                candidate = lista_items[j]
+                cand_date = candidate["DueDate"]
+                cand_color = candidate.get("_color_key", "")
+                
+                # Chequeo 1: Mismo Color
+                if cand_color != anchor_color: continue
+                
+                # Chequeo 2: Dentro de Ventana (Anchor Date + 1 Dia >= Candidate Date)
+                # Nota: Candidate Date siempre es >= Anchor Date porque ordenamos la lista al inicio.
+                # Solo verificamos el límite superior.
+                if pd.isna(cand_date):
+                     # Si no tiene fecha, ¿lo agrupamos? Asumimos que sí si es el mismo color (tratar como fecha lejana o cercana?)
+                     # Mejor no arriesgar: si no tiene fecha, sigue su curso natural (probablemente al final).
+                     continue
+                
+                diff = cand_date - anchor_date
+                if diff <= WINDOW:
+                    # Agrupar!
+                    resultado.append(candidate)
+                    processed[j] = True
+                    
+        return resultado
+
+    sorted_urgente = _agrupar_con_ventana(q_urgente)
+    sorted_normal = _agrupar_con_ventana(q_normal)
 
     return deque(sorted_urgente + sorted_normal)
 
