@@ -866,7 +866,7 @@ if archivo is not None:
             elif "bobina" in maquina_sel.lower():
                  st.write("📜 Mostrando detalles de bobina (Materia Prima / Medidas).")
                  cols = [
-                    "OT_id", "Cliente-articulo", "MateriaPrima", "PliAnc", "PliLar", "CantidadPliegos",
+                    "OT_id", "Cliente-articulo", "MateriaPrima", "Gramaje", "PliAnc", "PliLar", "CantidadPliegos",
                     "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"
                 ]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres"]):
@@ -944,8 +944,7 @@ if archivo is not None:
         
         # Mismas columnas que la hoja principal del Excel
         cols_export = [
-            "Maquina", "Inicio", "Fin", "Duracion_h", 
-            "OT_id", "Cliente", "Cliente-articulo", "CodigoProducto", 
+            "Maquina", "CodigoProducto", "Subcodigo","Cliente", "Cliente-articulo", "Inicio", "Fin", "Duracion_h", 
             "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
         ]
         cols_final = [c for c in cols_export if c in plan_csv.columns]
