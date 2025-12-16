@@ -11,7 +11,7 @@ def elegir_maquina(proceso, orden, cfg, plan_actual=None):
             flexos = [m for m in candidatos if "flexo" in m.lower()]
             return flexos[0] if flexos else candidatos[0]
         if "offset" in proc_lower and ("cartulin" in mat or "papel" in mat):
-            offsets = [m for m in candidatos if "offset" in m.lower()]
+            offsets = [m for m in candidatos if "heidel" in m.lower()]
             return offsets[0] if offsets else candidatos[0]
     if "ventan" in proc_lower:
         vent = [m for m in candidatos if "ventan" in m.lower()]

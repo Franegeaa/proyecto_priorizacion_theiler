@@ -197,27 +197,39 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         # Normalizar nombre
         m = str(maquina).lower().strip()
         
-        # Dimensiones de la tarea (STRICT CHECK - Sin rotación)
-        # El usuario especificó que PliAnc es Ancho y PliLar es Largo
-        w = float(anc or 0)
-        l = float(lar or 0)
+        # Dimensiones de la tarea (CON ROTACIÓN)
+        # Se compara el lado mayor del pliego con el lado mayor de la máquina
+        # y el lado menor del pliego con el lado menor de la máquina.
+        w_orig = float(anc or 0)
+        l_orig = float(lar or 0)
+        
+        pliego_min = min(w_orig, l_orig)
+        pliego_max = max(w_orig, l_orig)
 
         if "autom" in m or "duyan" in m:
             # Min 38x38 (Ambos lados deben ser >= 38)
-            return w >= 38 and l >= 38
+            # Como es minimo, ambos lados deben superar 38, asi que da igual la rotación si min(pliego) >= 38
+            return pliego_min >= 38
         
         # Manuales: Maximos definidos (Ancho y Largo)
+        
         # Manual 1 (Troq Nº 2 Ema): Max 80 x 105
         if "manual 1" in m or "manual1" in m or "ema" in m:
-            return w <= 105 and l <= 105
+             # Maquina: 80x105 -> Min: 80, Max: 105
+             mq_min, mq_max = 80, 105
+             return pliego_min <= mq_min and pliego_max <= mq_max
         
         # Manual 2 (Troq Nº 1 Gus): Max 66 x 90
+        # Maquina: 66x90 -> Min: 66, Max: 90
         if "manual 2" in m or "manual2" in m or "gus" in m:
-            return w <= 90 and l <= 90
+             mq_min, mq_max = 66, 90
+             return pliego_min <= mq_min and pliego_max <= mq_max
             
         # Manual 3: Max 70 x 100
+        # Maquina: 70x100 -> Min: 70, Max: 100
         if "manual 3" in m or "manual3" in m:
-            return w <= 100 and l <= 100
+             mq_min, mq_max = 70, 100
+             return pliego_min <= mq_min and pliego_max <= mq_max
             
         return True # Por defecto si no matchea nombre
 

@@ -857,7 +857,7 @@ if archivo is not None:
             df_maquina.sort_values(by="Inicio", inplace=True)
 
             # ... (Lógica de columnas dinámicas) ...
-            if any(k in maquina_sel.lower() for k in ["troquel", "manual", "autom", "duyan"]):
+            if any(k in maquina_sel.lower() for k in ["troq", "manual", "autom", "duyan"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
                 cols = [
                     "OT_id", "Cliente-articulo", "PliAnc","PliLar", "Bocas","CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", 
