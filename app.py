@@ -394,7 +394,7 @@ if archivo is not None:
     mat = df.get("MateriaPrima", "").astype(str).str.lower()
     imp_pend = to_bool_series(["ImpresionSNDpd", "ImpresionSND"])
     df["_PEN_ImpresionFlexo"]  = imp_pend & (mat.str.contains("micro", na=False) )
-    df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False) | mat.str.contains("carton", na=False) )
+    df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False) | mat.str.contains("carton", na=False) | mat.str.contains("papel", na=False) )
 
     # --- OT_ID ---
     if "OT_id" not in df.columns:
