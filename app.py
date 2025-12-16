@@ -41,23 +41,23 @@ color_map_procesos = {
 def ordenar_maquinas_personalizado(lista_maquinas):
     """Ordena máquinas según prioridad operativa definida por el usuario."""
     prioridades = [
-        (1, ["bobina"]),
+        (1, ["bobina", "cortadora de bobinas"]),
         (2, ["guillotina"]),
-        (3, ["offset"]),
-        (4, ["flexo"]),
+        (3, ["offset", "heidelberg"]),
+        (4, ["flexo", "flexo 2 col"]),
         (5, ["stamping"]),
         (6, ["plastificadora"]),
         (7, ["encapado"]),
         (8, ["cuño"]),
-        (9, ["automat", "automát"]),
-        (10, ["manual 1", "manual-1", "manual1"]),
-        (11, ["manual 2", "manual-2", "manual2"]),
+        (9, ["automat", "automát", "duyan"]),
+        (10, ["manual 1", "manual-1", "manual1", "troq nº 2 ema"]),
+        (11, ["manual 2", "manual-2", "manual2", "troq nº 1 gus"]),
         (12, ["manual 3", "manual-3", "manual3"]),
         (13, ["descartonadora 1"]),
         (14, ["descartonadora 2"]),
         (15, ["descartonadora 3"]),
-        (16, ["ventana"]),
-        (17, ["pegadora", "pegado"]),
+        (16, ["ventana", "pegadora ventana"]),
+        (17, ["pegadora", "pegado", "pegadora universal"]),
     ]
 
     def clave(nombre):

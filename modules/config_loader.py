@@ -21,6 +21,23 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
     cfg["feriados"] = set(pd.read_excel(path, sheet_name="Feriados")["Fecha"].dropna().astype(str))
     cfg["orden_std"] = pd.read_excel(path, sheet_name="OrdenEstandar").sort_values("Secuencia")["Proceso"].tolist() # Lista ordenada de procesos estándar
     cfg["maquinas"] = pd.read_excel(path, sheet_name="Maquinas")
+
+    # --- RENOMBRADO DE MÁQUINAS (HARDCODED) ---
+    # Mapa de Manguerazo solicitad por el usuario
+    rename_map = {
+        "Automatica": "Duyan",
+        "Offset": "Heidelberg",
+        "Flexo": "Flexo 2 col",
+        "Manual 2": "Troq Nº 1 Gus",
+        "Manual 1": "Troq Nº 2 Ema",
+        "Ventanas": "Pegadora Ventana",
+        "Pegadora 1": "Pegadora Universal",
+        "Encapadora": "Encapado",
+        "Bobina": "Cortadora de Bobinas"
+    }
+    cfg["maquinas"]["Maquina"] = cfg["maquinas"]["Maquina"].replace(rename_map)
+    # ------------------------------------------
+
     cfg["reglas"] = pd.read_excel(path, sheet_name="ReglasCambio")
     df_abbr = pd.read_excel(path, sheet_name="Abreviaturas")
     mapa = pd.Series(

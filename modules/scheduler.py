@@ -175,7 +175,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         # Desempate: Manuales (0) van ANTES que Automáticas (1)
         if "troquel" in proc.lower():
-            if "autom" in maquina.lower():
+            if "autom" in maquina.lower() or "duyan" in maquina.lower():
                 return (base_order, 1)
             else:
                 return (base_order, 0)
@@ -189,8 +189,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     # =================================================================
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
-    manuales = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower()]
-    auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower()]
+    manuales = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower() or "troq n" in str(m).lower()]
+    auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
 
     def _validar_medidas_troquel(maquina, anc, lar):
@@ -202,17 +202,17 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         w = float(anc or 0)
         l = float(lar or 0)
 
-        if "autom" in m:
+        if "autom" in m or "duyan" in m:
             # Min 38x38 (Ambos lados deben ser >= 38)
             return w >= 38 and l >= 38
         
-        # Manuales: Maximos definidos (Ancho x Largo)
-        # Manual 1: Max 80 x 105
-        if "manual 1" in m or "manual1" in m:
+        # Manuales: Maximos definidos (Ancho y Largo)
+        # Manual 1 (Troq Nº 2 Ema): Max 80 x 105
+        if "manual 1" in m or "manual1" in m or "ema" in m:
             return w <= 105 and l <= 105
         
-        # Manual 2: Max 66 x 90
-        if "manual 2" in m or "manual2" in m:
+        # Manual 2 (Troq Nº 1 Gus): Max 66 x 90
+        if "manual 2" in m or "manual2" in m or "gus" in m:
             return w <= 90 and l <= 90
             
         # Manual 3: Max 70 x 100
@@ -341,8 +341,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         m_lower = m.lower()
 
         if q.empty: colas[m] = deque()
-        elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower): colas[m] = _cola_troquelada(q)
-        elif "offset" in m_lower: colas[m] = _cola_impresora_offset(q)
+        elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower) or ("duyan" in m_lower): colas[m] = _cola_troquelada(q)
+        elif ("offset" in m_lower) or ("heidelberg" in m_lower): colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
         else: 
