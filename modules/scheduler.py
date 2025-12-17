@@ -1045,6 +1045,59 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         schedule["DueDate"] = pd.to_datetime(schedule["DueDate"]) 
         schedule.sort_values(["OT_id", "Inicio"], inplace=True, ignore_index=True)
 
+        # --- INYECCIÓN DE IDS DE MÁQUINA ---
+        # IDs provistos por el usuario:
+        # Guillotina - 1
+        # troq nº 1 gus - 5
+        # troq nº 2 ema - 7
+        # Duyan - 105
+        # Iberica - 104
+        # heidelberg - 31
+        # flexo 2 col - 32
+        # pegadora ventana - 110
+        # pegadora universal - 111
+        # encapado - 150
+        # cortadora de bobinas - 155
+        # manual 3 - 4
+        # descartonadora 1 - 40
+        # descartonadora 2 - 194
+        # descartonadora 3 - 247957750
+        
+        machine_ids_map = {
+            "guillotina": 1,
+            "troq nº 1 gus": 5, "manual 2": 5, "manual-2": 5,
+            "troq nº 2 ema": 7, "manual 1": 7, "manual-1": 7,
+            "duyan": 105,
+            "iberica": 104,
+            "heidelberg": 31, "offset": 31,
+            "flexo 2 col": 32, "flexo": 32,
+            "pegadora ventana": 110, "ventana": 110,
+            "pegadora universal": 111, "pegadora": 111, "pegado": 111,
+            "encapado": 150,
+            "cortadora de bobinas": 155, "bobina": 155,
+            "manual 3": 4, "manual-3": 4,
+            "descartonadora 1": 40,
+            "descartonadora 2": 194,
+            "descartonadora 3": 247957750
+        }
+
+        def get_machine_id(m_name):
+            m_lower = str(m_name).lower().strip()
+            # Búsqueda exacta primero
+            if m_lower in machine_ids_map:
+                return machine_ids_map[m_lower]
+            # Búsqueda parcial si falla
+            for k, v in machine_ids_map.items():
+                if k in m_lower: 
+                    return v
+            return 0 # Default si no encuentra
+
+        schedule["ID Maquina"] = schedule["Maquina"].apply(get_machine_id)
+        
+        # Mover "ID Maquina" al principio
+        cols = ["ID Maquina"] + [c for c in schedule.columns if c != "ID Maquina"]
+        schedule = schedule[cols]
+
     carga_md = pd.DataFrame(carga_reg)
     if not carga_md.empty:
         carga_md = carga_md.groupby(["Fecha", "Maquina", "CapacidadDia"], as_index=False)["HorasPlanificadas"].sum()

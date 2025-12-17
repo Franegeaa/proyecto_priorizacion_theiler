@@ -912,7 +912,7 @@ if archivo is not None:
             
             # Seleccionar y reordenar columnas amigables
             cols_export = [
-                "Maquina", "Inicio", "Fin", "Duracion_h", 
+                "ID Maquina", "Maquina", "Inicio", "Fin", "Duracion_h", 
                 "OT_id", "Cliente", "Cliente-articulo", "CodigoProducto", 
                 "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
             ]
@@ -945,7 +945,7 @@ if archivo is not None:
         
         # Mismas columnas que la hoja principal del Excel
         cols_export = [
-            "Maquina", "CodigoProducto", "Subcodigo","Cliente", "Cliente-articulo", "Inicio", "Fin", "Duracion_h", 
+            "ID Maquina", "Maquina", "CodigoProducto", "Subcodigo","Cliente", "Cliente-articulo", "Inicio", "Fin", "Duracion_h", 
             "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
         ]
         cols_final = [c for c in cols_export if c in plan_csv.columns]
