@@ -764,10 +764,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             pass # Se procesa abajo en el bloque común de robo
                         
                         # A: Auto roba a Manual o Iberica
-                        elif maquina in auto_names + iberica:
-                            for m_manual in manuales:
-                                if not colas.get(m_manual): continue
-                                for i, t_cand in enumerate(colas[m_manual]):
+                        elif maquina in auto_names:
+                            # Targets: Manuales + Iberica
+                            targets_robo = manuales + iberica
+                            for m_target in targets_robo:
+                                if not colas.get(m_target): continue
+                                for i, t_cand in enumerate(colas[m_target]):
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
 
                                     cant = float(t_cand.get("CantidadPliegos", 0) or 0)
@@ -783,11 +785,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     
                                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                                     if runnable and (not available_at or available_at <= current_agenda_dt):
-                                        tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
+                                        tarea_encontrada = t_cand; fuente_maquina = m_target; idx_robado = i; break
                                 if tarea_encontrada: break
 
                         # B y C: Manual roba a Auto o Manual o Iberica
-                        elif any(m in maquina for m in manuales + iberica):
+                        elif any(m in maquina for m in manuales):
                             # B: Robar a Auto
                             if auto_name and colas.get(auto_name):
                                 for i, t_cand in enumerate(colas[auto_name]):
@@ -809,10 +811,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     if runnable and (not available_at or available_at <= current_agenda_dt):
                                         tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
-                            # C: Robar a Vecina Manual (o Iberica)
+                            # C: Robar a Vecina Manual
                             if not tarea_encontrada:
-                                # Fix: Incluir Iberica como vecina válida para robar
-                                vecinas = [m for m in manuales + iberica if m != maquina]
+                                # Targets: Otras Manuales
+                                vecinas = [m for m in manuales if m != maquina]
                                 for vecina in vecinas:
                                     if not colas.get(vecina): continue
                                     for i, t_cand in enumerate(colas[vecina]):
@@ -830,7 +832,49 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         if runnable and (not available_at or available_at <= current_agenda_dt):
                                             tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                     if tarea_encontrada: break
-                        
+
+                        # Z: Iberica roba a Auto o Manual
+                        elif any(m in maquina for m in iberica):
+                            # Z.1: Robar a Auto
+                            if auto_name and colas.get(auto_name):
+                                for i, t_cand in enumerate(colas[auto_name]):
+                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    
+                                    # REGLA: Iberica roba lo que le sirva (asumimos lógica similar a Manual/Auto)
+                                    # Preferencia: Si hay algo en auto, intentar robarlo?
+                                    # User dijo: "para el robo de la automatica hay que poner que la iberica este como opcion para robar"
+                                    # AND "Iberica puede robar a las manuales y a la automatica".
+                                    
+                                    anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                    if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                    
+                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                    if not mp_ok: continue
+                                    
+                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                    if runnable and (not available_at or available_at <= current_agenda_dt):
+                                        tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
+                            
+                            # Z.2: Robar a Manuales
+                            if not tarea_encontrada:
+                                for m_manual in manuales:
+                                    if not colas.get(m_manual): continue
+                                    for i, t_cand in enumerate(colas[m_manual]):
+                                        if t_cand["Proceso"].strip() != "Troquelado": continue
+                                    
+                                        anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                        if not _validar_medidas_troquel(maquina, anc, lar): continue
+
+                                        mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                        if not mp_ok: continue
+                                        
+                                        runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                        if runnable and (not available_at or available_at <= current_agenda_dt):
+                                            tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
+                                    if tarea_encontrada: break
+
                         # D: Robo entre Descartonadoras
                         elif "descartonad" in maquina.lower():
                             vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
