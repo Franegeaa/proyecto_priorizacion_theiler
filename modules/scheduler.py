@@ -190,13 +190,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
     manuales = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower() or "troq n" in str(m).lower()]
+    iberica = [m for m in troq_cfg["Maquina"].tolist() if "iberica" in str(m).lower()]
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
+
 
     def _validar_medidas_troquel(maquina, anc, lar):
         # Normalizar nombre
         m = str(maquina).lower().strip()
-        
         # Dimensiones de la tarea (CON ROTACIÓN)
         # Se compara el lado mayor del pliego con el lado mayor de la máquina
         # y el lado menor del pliego con el lado menor de la máquina.
@@ -230,7 +231,14 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         if "manual 3" in m or "manual3" in m:
              mq_min, mq_max = 70, 100
              return pliego_min <= mq_min and pliego_max <= mq_max
-            
+        
+        # Iberica: Max 70 x 100
+        #          Min 35 x 50
+        # Maquina: 70x100 -> Min: 86, Max: 110
+        if "iberica" in m:
+            mq_min, mq_max, mq_min2, mq_max2 = 86, 110, 35, 50
+            return (pliego_min <= mq_min and pliego_max <= mq_max) and (pliego_min >= mq_min2 and pliego_max >= mq_max2)
+        
         return True # Por defecto si no matchea nombre
 
     if not tasks.empty and manuales: 
@@ -238,7 +246,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
         
         cap = {} 
-        for m in manuales + ([auto_name] if auto_name else []):
+        for m in manuales + ([auto_name] if auto_name else []) + iberica:
             if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg))
         load_h = {m: 0.0 for m in cap.keys()} 
 
@@ -271,7 +279,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 candidatas = []
                 
                 # 1. Validar candidatos por TAMAÑO primero
-                posibles = manuales + ([auto_name] if auto_name else [])
+                posibles = manuales + ([auto_name] if auto_name else []) + iberica
                 candidatos_tamano = []
                 for m in posibles:
                     if "autom" in str(m).lower():
@@ -279,6 +287,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # Si la hoja más chica es < 38, NO entra en Auto.
                         if _validar_medidas_troquel(m, min_anc, min_lar):
                             candidatos_tamano.append(m)
+                    elif "iberica" in str(m).lower():
+                        # Para Iberica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
+                        # Si la hoja más chica es < 38, NO entra en Auto.
+                        if _validar_medidas_troquel(m, min_anc, min_lar):
+                            candidatos_tamano.append(m) 
                     else:
                         # Para Manuales (Restricción de MAXIMO), usamos las dimensiones MAXIMAS del grupo
                         # Si la hoja más grande es > 80, NO entra en Manual.
@@ -299,19 +312,28 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 elif total_pliegos > 2500:
                     if auto_name and (auto_name in candidatos_tamano):
                         candidatas = [auto_name]
+                        # Fix: Iterar sobre la lista iberica para ver si alguna es candidata
+                        for ib in iberica:
+                            if ib in candidatos_tamano:
+                                candidatas.append(ib)
                     else:
                         candidatas = [m for m in candidatos_tamano if m != auto_name]
                 
-                # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Preferencia Manual
+                # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Preferencia Manual Standard > Iberica > Auto
                 else:
-                    # Intentar filtrar solo manuales (excluir Auto)
-                    manuales_compatibles = [m for m in candidatos_tamano if m != auto_name]
+                    # Preference 1: Manuales Standard
+                    manuales_std = [m for m in candidatos_tamano if m in manuales]
                     
-                    if manuales_compatibles:
-                        candidatas = manuales_compatibles
+                    if manuales_std:
+                        candidatas = manuales_std
                     else:
-                        # Si no entra en ninguna manual (por tamaño), permitimos Auto
-                        candidatas = candidatos_tamano
+                        # Preference 2: Iberica (Si no entra en ninguna standard)
+                        manuales_todas = [m for m in candidatos_tamano if m != auto_name]
+                        if manuales_todas:
+                            candidatas = manuales_todas
+                        else:
+                            # Preference 3: Auto (Si no entra en ninguna manual)
+                            candidatas = candidatos_tamano
 
                 if not candidatas: continue
 
@@ -353,7 +375,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         m_lower = m.lower()
 
         if q.empty: colas[m] = deque()
-        elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower) or ("duyan" in m_lower): colas[m] = _cola_troquelada(q)
+        elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower) or ("duyan" in m_lower) or ("iberica" in m_lower): colas[m] = _cola_troquelada(q)
         elif ("offset" in m_lower) or ("heidelberg" in m_lower): colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
@@ -741,8 +763,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                             # Ejecutar robo del POOL inmediatamente
                             pass # Se procesa abajo en el bloque común de robo
                         
-                        # A: Auto roba a Manual
-                        elif maquina in auto_names:
+                        # A: Auto roba a Manual o Iberica
+                        elif maquina in auto_names + iberica:
                             for m_manual in manuales:
                                 if not colas.get(m_manual): continue
                                 for i, t_cand in enumerate(colas[m_manual]):
@@ -764,8 +786,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                         tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
                                 if tarea_encontrada: break
 
-                        # B y C: Manual roba a Auto o Manual
-                        elif any(m in maquina for m in manuales):
+                        # B y C: Manual roba a Auto o Manual o Iberica
+                        elif any(m in maquina for m in manuales + iberica):
                             # B: Robar a Auto
                             if auto_name and colas.get(auto_name):
                                 for i, t_cand in enumerate(colas[auto_name]):
@@ -787,9 +809,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                     if runnable and (not available_at or available_at <= current_agenda_dt):
                                         tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
-                            # C: Robar a Vecina Manual
+                            # C: Robar a Vecina Manual (o Iberica)
                             if not tarea_encontrada:
-                                vecinas = [m for m in manuales if m != maquina]
+                                # Fix: Incluir Iberica como vecina válida para robar
+                                vecinas = [m for m in manuales + iberica if m != maquina]
                                 for vecina in vecinas:
                                     if not colas.get(vecina): continue
                                     for i, t_cand in enumerate(colas[vecina]):

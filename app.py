@@ -53,11 +53,12 @@ def ordenar_maquinas_personalizado(lista_maquinas):
         (10, ["manual 1", "manual-1", "manual1", "troq nº 2 ema"]),
         (11, ["manual 2", "manual-2", "manual2", "troq nº 1 gus"]),
         (12, ["manual 3", "manual-3", "manual3"]),
-        (13, ["descartonadora 1"]),
-        (14, ["descartonadora 2"]),
-        (15, ["descartonadora 3"]),
-        (16, ["ventana", "pegadora ventana"]),
-        (17, ["pegadora", "pegado", "pegadora universal"]),
+        (13, ["iberica"]),
+        (14, ["descartonadora 1"]),
+        (15, ["descartonadora 2"]),
+        (16, ["descartonadora 3"]),
+        (17, ["ventana", "pegadora ventana"]),
+        (18, ["pegadora", "pegado", "pegadora universal"]),
     ]
 
     def clave(nombre):
@@ -160,7 +161,7 @@ if archivo is not None:
     maquinas_activas = st.multiselect(
         "Seleccioná las máquinas que se usarán en esta planificación:",
         options=maquinas_todas,
-        default=[m for m in maquinas_todas if "Manual 3" not in m and "Descartonadora 3" not in m]
+        default=[m for m in maquinas_todas if "Manual 3" not in m and "Descartonadora 3" not in m and "Iberica" not in m]
     )
     
     # Filtramos la configuración ANTES de pasarla al scheduler
@@ -857,7 +858,7 @@ if archivo is not None:
             df_maquina.sort_values(by="Inicio", inplace=True)
 
             # ... (Lógica de columnas dinámicas) ...
-            if any(k in maquina_sel.lower() for k in ["troq", "manual", "autom", "duyan"]):
+            if any(k in maquina_sel.lower() for k in ["troq", "manual", "autom", "duyan", "iberica"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
                 cols = [
                     "OT_id", "Cliente-articulo", "PliAnc","PliLar", "Bocas","CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", 
