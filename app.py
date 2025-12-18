@@ -321,7 +321,7 @@ if archivo is not None:
         "MPPlanta": "MateriaPrimaPlanta",
         "CodTroTapa": "CodigoTroquelTapa",
         "CodTroCuerpo": "CodigoTroquelCuerpo",
-        "FechaChaDpv": "FechaLlegadaChapas",
+        "FechaDisDpv": "FechaLlegadaChapas",
         "FechaTroDpv": "FechaLlegadaTroquel",
         "Pli Anc": "PliAnc",
         "Pli Lar": "PliLar",
