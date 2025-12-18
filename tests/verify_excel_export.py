@@ -1,50 +1,9 @@
 import pandas as pd
 from io import BytesIO
-
-# Mock function from app.py
-def generar_excel_ot_horizontal(schedule_df):
-    """
-    Genera un DataFrame donde cada fila es una OT y los procesos se listan horizontalmente.
-    """
-    if schedule_df.empty:
-        return pd.DataFrame()
-
-    # 1. Copiamos y ordenamos cronológicamente por OT
-    df_proc = schedule_df.copy()
-    df_proc.sort_values(by=["OT_id", "Inicio"], inplace=True)
-
-    # 2. Agrupamos por OT
-    data_rows = []
-    
-    # Columnas fijas de la OT (tomamos la primera aparición)
-    cols_estaticas = [
-        "OT_id", "CodigoProducto", "Subcodigo", "Cliente", 
-        "Cliente-articulo", "CantidadPliegos", "DueDate", 
-        "Colores", "CodigoTroquel", "EnRiesgo", "Atraso_h"
-    ]
-    
-    cols_estaticas = [c for c in cols_estaticas if c in df_proc.columns]
-
-    for ot_id, grupo in df_proc.groupby("OT_id"):
-        # Datos base de la fila
-        row_data = grupo.iloc[0][cols_estaticas].to_dict()
-        
-        # Iteramos los procesos (pasos)
-        for i, (idx, row) in enumerate(grupo.iterrows()):
-            step_num = i + 1
-            prefix = f"Paso {step_num}"
-            
-            row_data[f"{prefix} - Proceso"] = row.get("Proceso", "")
-            row_data[f"{prefix} - Maquina"] = row.get("Maquina", "")
-            row_data[f"{prefix} - Inicio"]  = row.get("Inicio", "")
-            row_data[f"{prefix} - Fin"]     = row.get("Fin", "")
-            row_data[f"{prefix} - Duracion"] = row.get("Duracion_h", 0)
-        
-        data_rows.append(row_data)
-
-    # 3. Creamos el DF final
-    df_horizontal = pd.DataFrame(data_rows)
-    return df_horizontal
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from modules.exporters import generar_excel_ot_horizontal
 
 # Verification Logic
 def test_export():
@@ -62,13 +21,7 @@ def test_export():
     }
     df = pd.DataFrame(data)
     
-    # print("Testing with dataframe:")
-    # print(df)
-    
     result = generar_excel_ot_horizontal(df)
-    
-    # print("\nResult DataFrame:")
-    # print(result)
     
     # Assertions
     assert "Paso 1 - Proceso" in result.columns

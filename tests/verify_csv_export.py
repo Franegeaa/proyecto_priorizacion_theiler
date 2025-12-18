@@ -1,25 +1,9 @@
 import pandas as pd
 from io import BytesIO
-
-# Mock logic
-def generar_excel_ot_horizontal(schedule_df):
-    if schedule_df.empty:
-        return pd.DataFrame()
-    df_proc = schedule_df.copy()
-    df_proc.sort_values(by=["OT_id", "Inicio"], inplace=True)
-    data_rows = []
-    cols_estaticas = ["OT_id", "CodigoProducto"]
-    cols_estaticas = [c for c in cols_estaticas if c in df_proc.columns]
-
-    for ot_id, grupo in df_proc.groupby("OT_id"):
-        row_data = grupo.iloc[0][cols_estaticas].to_dict()
-        for i, (idx, row) in enumerate(grupo.iterrows()):
-            step_num = i + 1
-            prefix = f"Paso {step_num}"
-            row_data[f"{prefix} - Proceso"] = row.get("Proceso", "")
-        data_rows.append(row_data)
-    return pd.DataFrame(data_rows)
-
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from modules.exporters import generar_excel_ot_horizontal
 
 def test_csv_export():
     data = {"OT_id": ["OT1"], "CodigoProducto": ["P1"], "Inicio": [1], "Proceso": ["Corte"]}
@@ -28,11 +12,9 @@ def test_csv_export():
     # Generate horizontal dataframe
     df_horiz = generar_excel_ot_horizontal(df)
     
-    # Simulate CSV export
+    # Simulate CSV export logic (inline here, or could import from exporters if I exposed it)
+    # But since generar_csv_ot_str takes df_horiz, I can just test the dataframe structure which is what matters mostly.
     csv_data = df_horiz.to_csv(index=False, sep=';', decimal=',')
-    
-    # print("CSV Data Preview:")
-    # print(csv_data)
     
     assert "OT1" in csv_data
     assert ";" in csv_data
@@ -54,8 +36,6 @@ def test_many_steps():
     
     df_horiz = generar_excel_ot_horizontal(df)
     
-    print("Columns found:", df_horiz.columns.tolist())
-    
     # Assert we have up to Paso 6
     assert "Paso 1 - Proceso" in df_horiz.columns
     assert "Paso 6 - Proceso" in df_horiz.columns
@@ -66,4 +46,3 @@ def test_many_steps():
 if __name__ == "__main__":
     test_csv_export()
     test_many_steps()
-
