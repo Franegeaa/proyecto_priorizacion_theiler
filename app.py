@@ -902,6 +902,55 @@ if archivo is not None:
     # ==========================
 
     st.subheader("💾 Exportar")
+
+    def generar_excel_ot_horizontal(schedule_df):
+        """
+        Genera un DataFrame donde cada fila es una OT y los procesos se listan horizontalmente.
+        """
+        if schedule_df.empty:
+            return pd.DataFrame()
+
+        # 1. Copiamos y ordenamos cronológicamente por OT
+        df_proc = schedule_df.copy()
+        df_proc.sort_values(by=["OT_id", "Inicio"], inplace=True)
+
+        # 2. Agrupamos por OT
+        data_rows = []
+        
+        # Columnas fijas de la OT (tomamos la primera aparición)
+        # Ajustá estas columnas según lo que quieras mostrar fijo a la izquierda
+        cols_estaticas = [
+            "OT_id", "CodigoProducto", "Subcodigo", "Cliente", 
+            "Cliente-articulo", "CantidadPliegos", "DueDate", 
+            "Colores", "CodigoTroquel", "EnRiesgo", "Atraso_h"
+        ]
+        
+        # Filtramos para que no explote si falta alguna columna
+        cols_estaticas = [c for c in cols_estaticas if c in df_proc.columns]
+
+        for ot_id, grupo in df_proc.groupby("OT_id"):
+            # Datos base de la fila
+            row_data = grupo.iloc[0][cols_estaticas].to_dict()
+            
+            # Iteramos los procesos (pasos)
+            # paso 1, paso 2, paso 3...
+            for i, (idx, row) in enumerate(grupo.iterrows()):
+                step_num = i + 1
+                prefix = f"Paso {step_num}"
+                
+                # Agregamos info del proceso
+                row_data[f"{prefix} - Proceso"] = row.get("Proceso", "")
+                row_data[f"{prefix} - Maquina"] = row.get("Maquina", "")
+                row_data[f"{prefix} - Inicio"]  = row.get("Inicio", "")
+                row_data[f"{prefix} - Fin"]     = row.get("Fin", "")
+                row_data[f"{prefix} - Duracion"] = row.get("Duracion_h", 0)
+            
+            data_rows.append(row_data)
+
+        # 3. Creamos el DF final
+        df_horizontal = pd.DataFrame(data_rows)
+        return df_horizontal
+
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         # 1. Plan por Máquina (Lo que pidió el usuario)
@@ -920,6 +969,18 @@ if archivo is not None:
             cols_final = [c for c in cols_export if c in plan_por_maquina.columns]
             
             plan_por_maquina[cols_final].to_excel(w, index=False, sheet_name="Plan por Máquina")
+            
+            # --- NUEVA HOJA: Por Orden de Trabajo (Horizontal) ---
+            try:
+                df_ot_horiz = generar_excel_ot_horizontal(schedule)
+                if not df_ot_horiz.empty:
+                    df_ot_horiz.to_excel(w, index=False, sheet_name="Plan por OT (Horizontal)")
+            except Exception as e:
+                print(f"Error generando export por OT: {e}")
+                # Opcional: escribir el error en una hoja para debug
+                pd.DataFrame({"Error": [str(e)]}).to_excel(w, sheet_name="Error Export OT")
+        
+        # 2. Otras hojas útiles
         
         # 2. Otras hojas útiles
         schedule.to_excel(w, index=False, sheet_name="Datos Crudos (Schedule)") 
@@ -930,36 +991,96 @@ if archivo is not None:
             
     buf.seek(0)
     
+    # ==========================
+    # BOTONES DE DESCARGA
+    # ==========================
     
-    st.download_button(
-        "⬇️ Descargar Excel (.xlsx)",
-        data=buf,
-        file_name="Plan_Produccion_Theiler.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-    # 3. Opción CSV para Excel viejo / Configuración regional Argentina
-    if not schedule.empty:
-        plan_csv = schedule.copy()
-        plan_csv.sort_values(by=["Maquina", "Inicio"], inplace=True)
+    st.write("---")
+    col_maq, col_ot = st.columns(2)
+    
+    # --- COLUMNA IZQUIERDA: POR MÁQUINA (GRANULAR) ---
+    with col_maq:
+        st.markdown("#### 🏭 Por Máquina")
+        st.caption("Planificación vertical, ideal para operarios (lista de tareas por máquina).")
         
-        # Mismas columnas que la hoja principal del Excel
-        cols_export = [
-            "ID Maquina", "Maquina", "CodigoProducto", "Subcodigo","Cliente", "Cliente-articulo", "Inicio", "Fin", "Duracion_h", 
-            "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
-        ]
-        cols_final = [c for c in cols_export if c in plan_csv.columns]
-        
-        # Generar CSV con ; como separador y , para decimales
-        csv_data = plan_csv[cols_final].to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
-        
+        # 1. Excel Completo (Por Máquina)
         st.download_button(
-            "⬇️ Descargar CSV (Compatible Excel 2010)",
-            data=csv_data,
-            file_name="Plan_Produccion_Theiler.csv",
-            mime="text/csv",
-            help="Usá esta opción si el Excel normal te sale todo en una sola celda."
+            "⬇️ Excel (Por Máquina + Datos)",
+            data=buf,
+            file_name="Plan_Produccion_Theiler.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_excel_maq"
         )
+
+        # 2. CSV (Excel 2010 / Viejo)
+        if not schedule.empty:
+            plan_csv = schedule.copy()
+            plan_csv.sort_values(by=["Maquina", "Inicio"], inplace=True)
+            
+            # Mismas columnas que la hoja principal del Excel
+            cols_export = [
+                "ID Maquina", "Maquina", "CodigoProducto", "Subcodigo","Cliente", "Cliente-articulo", "Inicio", "Fin", "Duracion_h", 
+                "Proceso", "CantidadPliegos", "Colores", "CodigoTroquel", "DueDate"
+            ]
+            cols_final = [c for c in cols_export if c in plan_csv.columns]
+            
+            # Generar CSV con ; como separador y , para decimales
+            csv_data = plan_csv[cols_final].to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+            
+            st.download_button(
+                "⬇️ CSV (Compatible Excel 2010)",
+                data=csv_data,
+                file_name="Plan_Produccion_Theiler.csv",
+                mime="text/csv",
+                help="Usá esta opción si el Excel normal te sale todo en una sola celda.",
+                key="btn_csv_maq"
+            )
+
+    # --- COLUMNA DERECHA: POR OT (HORIZONTAL) ---
+    with col_ot:
+        st.markdown("#### 📦 Por Orden de Trabajo")
+        st.caption("Visión de flujo (seguimiento). Una fila por OT con todos sus procesos.")
+
+        if not schedule.empty:
+            # Preparamos el Buffer de Excel
+            buf_ot = BytesIO()
+            df_ot_horiz = pd.DataFrame() # Init vacío
+            
+            with pd.ExcelWriter(buf_ot, engine="openpyxl") as w_ot:
+                try:
+                    # Generamos el DF horizontal
+                    df_ot_horiz = generar_excel_ot_horizontal(schedule)
+                    if not df_ot_horiz.empty:
+                        df_ot_horiz.to_excel(w_ot, index=False, sheet_name="Plan por OT")
+                    else:
+                        pd.DataFrame({"Info": ["No hay datos"]}).to_excel(w_ot, sheet_name="Vacio")
+                except Exception as e:
+                     pd.DataFrame({"Error": [str(e)]}).to_excel(w_ot, sheet_name="Error")
+            
+            buf_ot.seek(0)
+            
+            # 3. Excel Por OT
+            st.download_button(
+                "⬇️ Excel (Horizontal por OT)",
+                data=buf_ot,
+                file_name="Plan_Produccion_Por_OT.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Descarga un Excel donde cada fila es una OT y sus procesos están en columnas consecutivas.",
+                key="btn_excel_ot"
+            )
+            
+            # 4. CSV Por OT (Nuevo)
+            if not df_ot_horiz.empty:
+                csv_data_ot = df_ot_horiz.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+                st.download_button(
+                    "⬇️ CSV (Horizontal compatible 2010)",
+                    data=csv_data_ot,
+                    file_name="Plan_Produccion_Por_OT.csv",
+                    mime="text/csv",
+                    help="Versión CSV del reporte horizontal, ideal para Excel viejos.",
+                    key="btn_csv_ot"
+                )
+
 
 else:
     st.info("⬆️ Subí el archivo Excel de órdenes para comenzar.")
