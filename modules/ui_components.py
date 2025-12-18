@@ -410,13 +410,13 @@ def render_download_section(schedule, resumen_ot, carga_md):
             key="btn_excel_maq"
         )
         
-        st.download_button(
-            "⬇️ CSV (Compatible Excel 2010)",
-            data=csv_str_maq,
-            file_name="Plan_Produccion_Theiler.csv",
-            mime="text/csv",
-            key="btn_csv_maq"
-        )
+        # st.download_button(
+        #     "⬇️ CSV (Compatible Excel 2010)",
+        #     data=csv_str_maq,
+        #     file_name="Plan_Produccion_Theiler.csv",
+        #     mime="text/csv",
+        #     key="btn_csv_maq"
+        # )
 
     with col_ot:
         st.markdown("#### 📦 Por Orden de Trabajo")
@@ -430,11 +430,11 @@ def render_download_section(schedule, resumen_ot, carga_md):
             key="btn_excel_ot"
         )
         
-        if csv_str_ot:
-            st.download_button(
-                "⬇️ CSV (Horizontal compatible 2010)",
-                data=csv_str_ot,
-                file_name="Plan_Produccion_Por_OT.csv",
-                mime="text/csv",
-                key="btn_csv_ot"
-            )
+        # if csv_str_ot:
+        #     st.download_button(
+        #         "⬇️ CSV (Horizontal compatible 2010)",
+        #         data=csv_str_ot,
+        #         file_name="Plan_Produccion_Por_OT.csv",
+        #         mime="text/csv",
+        #         key="btn_csv_ot"
+        #     )
