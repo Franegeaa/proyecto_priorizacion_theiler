@@ -38,6 +38,7 @@ def generar_excel_ot_horizontal(schedule_df):
             
             # Agregamos info del proceso
             row_data[f"{prefix} - Proceso"] = row.get("Proceso", "")
+            row_data[f"{prefix} - ID Maquina"] = row.get("ID Maquina", "")
             row_data[f"{prefix} - Maquina"] = row.get("Maquina", "")
             row_data[f"{prefix} - Inicio"]  = row.get("Inicio", "")
             row_data[f"{prefix} - Fin"]     = row.get("Fin", "")
