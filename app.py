@@ -114,47 +114,48 @@ if archivo is not None:
             else:
                 st.warning("El setup menor debe ser mayor que 0.")
             
-    st.subheader("⚙️ Parámetros de jornada")
-
-    hoy = date.today()
-    fecha_inicio_plan = st.date_input(
-        "📅 Fecha de inicio de la planificación:",
-        value=hoy,
-        min_value=hoy,
-    )
-
-    hora_inicio_plan = st.time_input(
-        "⏰ Hora de inicio de la planificación:",
-        value=pd.to_datetime("07:00").time()
-    )
-
-    # --- NUEVO: Input de Feriados ---
-    placeholder_feriados = "Pega una lista de fechas (ej. 21/11/2025), una por línea o separadas por coma."
-    feriados_texto = st.text_area(
-        "Días feriados (opcional):",
-        placeholder_feriados,
-        height=100
-    )
+    st.subheader("⚙️ Parámetros de jornada") # Reemplazado por expander
     
-    feriados_lista = []
-    # Revisa que el texto no esté vacío y no sea el placeholder
-    if feriados_texto and feriados_texto.strip() != placeholder_feriados:
-        # Limpia el texto, reemplaza comas por saltos de línea
-        texto_limpio = feriados_texto.replace(",", "\n")
-        fechas_str = [f.strip() for f in texto_limpio.split("\n") if f.strip()]
+    with st.expander("Añadir Parámetros de Jornada", expanded=False):
+        hoy = date.today()
+        fecha_inicio_plan = st.date_input(
+            "📅 Fecha de inicio de la planificación:",
+            value=hoy,
+            min_value=hoy,
+        )
+
+        hora_inicio_plan = st.time_input(
+            "⏰ Hora de inicio de la planificación:",
+            value=pd.to_datetime("07:00").time()
+        )
+
+        # --- NUEVO: Input de Feriados ---
+        placeholder_feriados = "Pega una lista de fechas (ej. 21/11/2025), una por línea o separadas por coma."
+        feriados_texto = st.text_area(
+            "Días feriados (opcional):",
+            placeholder_feriados,
+            height=100
+        )
         
-        for f_str in fechas_str:
-            try:
-                # Intenta parsear la fecha (acepta varios formatos como AAAA-MM-DD o DD/MM/AAAA)
-                feriados_lista.append(pd.to_datetime(f_str, dayfirst=True, errors='raise').date())
-            except Exception as e:
-                st.warning(f"No se pudo entender la fecha feriado: '{f_str}'. Ignorando.")
-    
-    # Inyectamos los feriados en la configuración
-    cfg["feriados"] = feriados_lista
-    if feriados_lista:
-        st.info(f"Se registrarán {len(feriados_lista)} días feriados que no se planificarán.")
-    # --- FIN NUEVO ---
+        feriados_lista = []
+        # Revisa que el texto no esté vacío y no sea el placeholder
+        if feriados_texto and feriados_texto.strip() != placeholder_feriados:
+            # Limpia el texto, reemplaza comas por saltos de línea
+            texto_limpio = feriados_texto.replace(",", "\n")
+            fechas_str = [f.strip() for f in texto_limpio.split("\n") if f.strip()]
+            
+            for f_str in fechas_str:
+                try:
+                    # Intenta parsear la fecha (acepta varios formatos como AAAA-MM-DD o DD/MM/AAAA)
+                    feriados_lista.append(pd.to_datetime(f_str, dayfirst=True, errors='raise').date())
+                except Exception as e:
+                    st.warning(f"No se pudo entender la fecha feriado: '{f_str}'. Ignorando.")
+        
+        # Inyectamos los feriados en la configuración
+        cfg["feriados"] = feriados_lista
+        if feriados_lista:
+            st.info(f"Se registrarán {len(feriados_lista)} días feriados que no se planificarán.")
+        # --- FIN NUEVO ---
 
     # --- NUEVO: SELECCIÓN DE MÁQUINAS ACTIVAS ---
     st.subheader("🏭 Máquinas Disponibles")
