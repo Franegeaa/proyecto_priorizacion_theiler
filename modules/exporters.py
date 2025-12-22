@@ -4,49 +4,80 @@ from io import BytesIO
 def generar_excel_ot_horizontal(schedule_df):
     """
     Genera un DataFrame donde cada fila es una OT y los procesos se listan horizontalmente.
+    Las columnas de procesos son FIJAS, existan o no en la OT.
     """
     if schedule_df.empty:
         return pd.DataFrame()
 
-    # 1. Copiamos y ordenamos cronológicamente por OT
+    # 1. Copiamos y ordenamos por OT para consistencia
     df_proc = schedule_df.copy()
     df_proc.sort_values(by=["OT_id", "Inicio"], inplace=True)
 
-    # 2. Agrupamos por OT
-    data_rows = []
+    # 2. Definimos la lista maestra de procesos en orden lógico
+    PROCESS_ORDER = [
+        "Cortadora Bobina", 
+        "Guillotina", 
+        "Impresión Flexo", 
+        "Impresión Offset", 
+        "Barnizado",
+        "OPP",
+        "Stamping", 
+        "Plastificado", 
+        "Encapado", 
+        "Cuño",
+        "Troquelado", 
+        "Descartonado", 
+        "Ventana", 
+        "Pegado"
+    ]
     
-    # Columnas fijas de la OT (tomamos la primera aparición)
-    # Ajustá estas columnas según lo que quieras mostrar fijo a la izquierda
+    # 3. Columnas fijas de la OT (Metadatos)
     cols_estaticas = [
         "OT_id", "CodigoProducto", "Subcodigo", "Cliente", 
         "Cliente-articulo", "CantidadPliegos", "DueDate", 
         "Colores", "CodigoTroquel", "EnRiesgo", "Atraso_h"
     ]
-    
-    # Filtramos para que no explote si falta alguna columna
     cols_estaticas = [c for c in cols_estaticas if c in df_proc.columns]
 
+    data_rows = []
+
     for ot_id, grupo in df_proc.groupby("OT_id"):
-        # Datos base de la fila
+        # Datos base de la fila (de la primera aparición)
         row_data = grupo.iloc[0][cols_estaticas].to_dict()
         
-        # Iteramos los procesos (pasos)
-        # paso 1, paso 2, paso 3...
-        for i, (idx, row) in enumerate(grupo.iterrows()):
-            step_num = i + 1
-            prefix = f"Paso {step_num}"
+        # Mapa de procesos de esta OT para acceso rápido
+        # Usamos el nombre del proceso como clave. 
+        # Si hubiera duplicados (mismo proceso 2 veces), tomamos el primero o el último?
+        # Asumiremos el primero que aparece cronológicamente (ya que ordenamos por Inicio)
+        proc_map = {}
+        for idx, row in grupo.iterrows():
+            p_name = str(row.get("Proceso", "")).strip()
+            if p_name not in proc_map:
+                proc_map[p_name] = row
+        
+        # Iteramos sobre la lista maestra para crear las columnas en orden
+        for proc in PROCESS_ORDER:
+            # Prefijo para encabezados
+            prefix = proc
             
-            # Agregamos info del proceso
-            row_data[f"{prefix} - Proceso"] = row.get("Proceso", "")
-            row_data[f"{prefix} - ID Maquina"] = row.get("ID Maquina", "")
-            row_data[f"{prefix} - Maquina"] = row.get("Maquina", "")
-            row_data[f"{prefix} - Inicio"]  = row.get("Inicio", "")
-            row_data[f"{prefix} - Fin"]     = row.get("Fin", "")
-            row_data[f"{prefix} - Duracion"] = row.get("Duracion_h", 0)
+            # Datos del proceso si existe en esta OT
+            row = proc_map.get(proc) 
+            
+            if row is not None:
+                row_data[f"{prefix} - Maquina"]   = row.get("Maquina", "")
+                row_data[f"{prefix} - Inicio"]    = row.get("Inicio", "")
+                row_data[f"{prefix} - Fin"]       = row.get("Fin", "")
+                row_data[f"{prefix} - Duracion"]  = row.get("Duracion_h", 0)
+            else:
+                # Celdas vacías si no hay proceso
+                row_data[f"{prefix} - Maquina"]   = ""
+                row_data[f"{prefix} - Inicio"]    = ""
+                row_data[f"{prefix} - Fin"]       = ""
+                row_data[f"{prefix} - Duracion"]  = ""
         
         data_rows.append(row_data)
 
-    # 3. Creamos el DF final
+    # 4. Creamos el DF final
     df_horizontal = pd.DataFrame(data_rows)
     return df_horizontal
 
