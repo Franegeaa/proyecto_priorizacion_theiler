@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, time, timedelta
 from .app_utils import ordenar_maquinas_personalizado
-from .exporters import generar_excel_bytes, generar_csv_maquina_str, generar_csv_ot_str, generar_excel_ot_bytes
+from .exporters import generar_excel_bytes, generar_csv_maquina_str, generar_csv_ot_str, generar_excel_ot_bytes, dataframe_to_excel_bytes
 
 def render_machine_speed_inputs(cfg):
     """Renders the section to adjust machine speeds and setup times."""
@@ -333,7 +333,18 @@ def render_details_section(schedule, detalle_maquina, df):
             elegido = st.selectbox("Elegí OT:", opciones)
             df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido]
             df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
-            st.dataframe(df_show)
+            st.dataframe(df_show, use_container_width=True)
+            
+            # --- Custom Download Button ---
+            buf = dataframe_to_excel_bytes(df_show, sheet_name="Detalle OT")
+            st.download_button(
+                label="⬇️ Descargar Datos en Excel",
+                data=buf,
+                file_name=f"Detalle_OT_{elegido if elegido != '(Todas)' else 'Todas'}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="btn_dl_ot_detail"
+            )
+            # ------------------------------
         else:
             st.info("No hay tareas planificadas.")
 
@@ -377,7 +388,19 @@ def render_details_section(schedule, detalle_maquina, df):
 
             cols_exist = [c for c in cols if c in df_maquina.columns]
             df_maquina_display = df_maquina[cols_exist].drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
-            st.dataframe(df_maquina_display)
+            st.dataframe(df_maquina_display, use_container_width=True)
+            
+            # --- Custom Download Button ---
+            buf = dataframe_to_excel_bytes(df_maquina_display, sheet_name=f"Detalle {maquina_sel[:25]}")
+            safe_name = maquina_sel.replace("/", "_").replace("\\", "_")
+            st.download_button(
+                label="⬇️ Descargar Datos en Excel",
+                data=buf,
+                file_name=f"Detalle_Maquina_{safe_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="btn_dl_maq_detail"
+            )
+            # ------------------------------
         else:
             st.info("No hay detalle por máquina disponible.")
 

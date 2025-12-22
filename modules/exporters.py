@@ -146,3 +146,11 @@ def generar_csv_ot_str(df_ot_horiz):
     if df_ot_horiz.empty:
         return ""
     return df_ot_horiz.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+
+def dataframe_to_excel_bytes(df, sheet_name="Datos"):
+    """Convierte un DataFrame cualquiera a un archivo Excel en memoria."""
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name=sheet_name)
+    buf.seek(0)
+    return buf
