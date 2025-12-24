@@ -94,7 +94,7 @@ def render_active_machines_selector(cfg):
     maquinas_activas = st.multiselect(
         "Seleccioná las máquinas que se usarán en esta planificación:",
         options=maquinas_todas,
-        default=[m for m in maquinas_todas if "Manual 3" not in m and "Descartonadora 3" not in m and "Iberica" not in m]
+        default=[m for m in maquinas_todas if "Manual 3" not in m and "Descartonadora 3" not in m and "Iberica" not in m and "Descartonadora 4" not in m]
     )
     
     if len(maquinas_activas) < len(maquinas_todas):
