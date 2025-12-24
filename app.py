@@ -81,8 +81,24 @@ if archivo is not None:
     col2.metric("Órdenes atrasadas", atrasadas)
     col3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
     col4.metric("Jornada (h/día)", f"{horas_por_dia(cfg):.1f}")
-
-    # 10. Visualization (Gantt)
+    
+    # --- METRICA DE RETRASO POR MAQUINA (Solicitado por Usuario) ---
+    if not schedule.empty and "Atraso_h" in schedule.columns:
+        retraso_maq = schedule.groupby("Maquina")["Atraso_h"].sum().sort_values(ascending=False)
+        retraso_maq = retraso_maq[retraso_maq > 0]
+        
+        if not retraso_maq.empty:
+            st.markdown("##### 🚨 Máquinas con retraso acumulado (Necesitan Horas Extras?)")
+            st.caption("Suma de horas de retraso de todas las tareas en cada máquina (respecto al DueDate de la OT).")
+            
+            # Display clearly all machines
+            # We use a grid of 4 columns
+            for i in range(0, len(retraso_maq), 4):
+                cols = st.columns(4)
+                chunk = retraso_maq.iloc[i : i+4]
+                for j, (maq, atraso) in enumerate(chunk.items()):
+                    with cols[j]:
+                         st.metric(f"{maq}", f"{atraso:.1f} h", delta="-Retraso", delta_color="inverse")
     render_gantt_chart(schedule, cfg)
 
     # 11. Details Section

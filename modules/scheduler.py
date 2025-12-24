@@ -1112,10 +1112,33 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 DueDate=('DueDate', 'max')
             ).reset_index()
         )
-        due_date_deadline = pd.to_datetime(resumen_ot["DueDate"].dt.date) + timedelta(hours=18)
-        resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - due_date_deadline).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2) 
+        due_date_deadline_ot = pd.to_datetime(resumen_ot["DueDate"].dt.date) + timedelta(hours=18)
+        resumen_ot["Fin_OT"] = pd.to_datetime(resumen_ot["Fin_OT"]) # Ensure datetime
+        
+        resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - due_date_deadline_ot).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2) 
         resumen_ot["EnRiesgo"] = resumen_ot["Atraso_h"] > 0
-        schedule = schedule.merge(resumen_ot[["OT_id", "Atraso_h"]], on="OT_id", how="left")
+        
+        # --- NUEVO: CÁLCULO DE RETRASO POR TAREA (POR MÁQUINA) ---
+        # Calculamos el retraso individual de cada tarea respecto a la fecha final de la OT.
+        # Esto permite identificar qué máquinas están entregando fuera de término.
+        
+        # Fecha límite de la OT (mismo deadline para todas las tareas de la OT)
+        # Ojo: schedule["DueDate"] ya viene del merge/append y tiene hora 00:00 (timestamp)
+        # Queremos Deadline = DueDate (date) + 18:00
+        
+        if not schedule.empty:
+            schedule_deadline = pd.to_datetime(schedule["DueDate"].dt.date) + timedelta(hours=18)
+            
+            schedule["Atraso_h"] = ((schedule["Fin"] - schedule_deadline).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2)
+            schedule["EnRiesgo"] = schedule["Atraso_h"] > 0
+        
+        # Ya no necesitamos hacer merge de Atraso_h desde resumen_ot porque ya lo calculamos,
+        # PERO resumen_ot tiene el atraso FINAL de la OT (que es lo que importa al cliente).
+        # El Atraso_h en schedule es "cuánto se pasó esta tarea del deadline final".
+        # A veces una tarea intermedia se pasa, pero la OT se recupera? Dificil si el deadline es fijo.
+        # Si Tarea1 termina dia 6 y Deadline es dia 5 -> Atraso.
+        
+        # Mantenemos Atraso_h en schedule para saber "Retraso generado/sufrido por esta máquina".
     else:
         resumen_ot = pd.DataFrame(columns=["OT_id", "Fin_OT", "DueDate", "Atraso_h", "EnRiesgo"])
 
