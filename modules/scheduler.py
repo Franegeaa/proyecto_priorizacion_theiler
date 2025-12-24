@@ -1081,6 +1081,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             "descartonadora 3": 247957750
         }
 
+        if "custom_ids" in cfg:
+            machine_ids_map.update({k.lower(): v for k, v in cfg["custom_ids"].items()})
+        
         def get_machine_id(m_name):
             m_lower = str(m_name).lower().strip()
             # Búsqueda exacta primero

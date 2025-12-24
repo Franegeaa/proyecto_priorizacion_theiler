@@ -14,7 +14,8 @@ from modules.ui_components import (
     render_overtime_section,
     render_pending_processes_section,
     render_details_section,
-    render_download_section
+    render_download_section,
+    render_descartonador_ids_section # New import
 )
 from modules.visualizations import render_gantt_chart
 
@@ -44,7 +45,13 @@ if archivo is not None:
     # Filter config for scheduler
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
-
+    
+    # 3.1 UI: Descartonador IDs (New)
+    cfg["custom_ids"] = render_descartonador_ids_section(cfg_plan) # Pass filtered config or full config? Full config has all machines. Better to use cfg_plan if we only care about active ones? 
+    # Actually logic uses cfg["maquinas"] so it will see filtered ones.
+    # But wait, render function uses cfg["maquinas"]. 
+    # Let's pass cfg_plan so we only edit IDs for ACTIVE machines.
+    
     # 4. UI: Downtimes
     # Returns the list of downtimes (dicts)
     cfg["downtimes"] = render_downtime_section(maquinas_activas, fecha_inicio_plan)
