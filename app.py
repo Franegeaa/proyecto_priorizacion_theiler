@@ -89,6 +89,31 @@ if archivo is not None:
     col3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
     col4.metric("Jornada (h/día)", f"{horas_por_dia(cfg):.1f}")
     
+    # --- VISUALIZACIÓN DE CARGA DE TRABAJO (REQ. USUARIO) ---
+    if not schedule.empty:
+        st.markdown("### 📊 Carga de Trabajo por Máquina (Horas Necesarias)")
+        st.caption("Total de horas de producción requeridas (Setup + Operación) para cumplir con las órdenes asignadas.")
+        
+        # 1. Calcular Horas Necesarias
+        carga_maq = schedule.groupby("Maquina")["Duracion_h"].sum().reset_index()
+        carga_maq.rename(columns={"Duracion_h": "Horas Necesarias"}, inplace=True)
+        carga_maq = carga_maq.sort_values("Horas Necesarias", ascending=False)
+        
+        # 2. Visualizar
+        import plotly.express as px
+        fig_carga = px.bar(
+            carga_maq, 
+            x="Maquina", 
+            y="Horas Necesarias",
+            text="Horas Necesarias",
+            title="Horas Totales Requeridas por Máquina",
+            color="Horas Necesarias",
+            color_continuous_scale="Blues"
+        )
+        fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
+        fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
+        st.plotly_chart(fig_carga, use_container_width=True)
+
     render_gantt_chart(schedule, cfg)
 
     # 11. Details Section

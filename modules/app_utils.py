@@ -37,8 +37,9 @@ def ordenar_maquinas_personalizado(lista_maquinas):
         (14, ["descartonadora 1"]),
         (15, ["descartonadora 2"]),
         (16, ["descartonadora 3"]),
-        (17, ["ventana", "pegadora ventana"]),
-        (18, ["pegadora", "pegado", "pegadora universal"]),
+        (17, ["descartonadora 4"]),
+        (18, ["ventana", "pegadora ventana"]),
+        (19, ["pegadora", "pegado", "pegadora universal"]),
     ]
 
     def clave(nombre):
