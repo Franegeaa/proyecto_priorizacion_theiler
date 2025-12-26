@@ -174,7 +174,7 @@ def render_gantt_chart(schedule, cfg):
                         y="OT_id", color="Proceso",
                         color_discrete_map=color_map_procesos,
                         category_orders={"OT_id": categorias_ot},
-                        hover_data=["Maquina", "Cliente", "Atraso_h", "DueDate"],
+                        hover_data=["Maquina", "Cliente", "DueDate"],
                         title="Procesos por Orden de Trabajo",
                     )
                     if tipo_filtro == "Día":
@@ -203,7 +203,7 @@ def render_gantt_chart(schedule, cfg):
                     y="Maquina", color="Proceso",
                     color_discrete_map=color_map_procesos,
                     category_orders={"Maquina": maquinas_ordenadas},
-                    hover_data=["OT_id", "Cliente", "Atraso_h", "DueDate"],
+                    hover_data=["OT_id", "Cliente", "DueDate"],
                     title="Procesos por Máquina", 
                 )
                 categorias_maquinas = maquinas_ordenadas

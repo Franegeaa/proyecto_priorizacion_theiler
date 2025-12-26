@@ -1121,20 +1121,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         resumen_ot["Atraso_h"] = ((resumen_ot["Fin_OT"] - due_date_deadline_ot).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2) 
         resumen_ot["EnRiesgo"] = resumen_ot["Atraso_h"] > 0
         
-        # --- NUEVO: CÁLCULO DE RETRASO POR TAREA (POR MÁQUINA) ---
-        # Calculamos el retraso individual de cada tarea respecto a la fecha final de la OT.
-        # Esto permite identificar qué máquinas están entregando fuera de término.
-        
-        # Fecha límite de la OT (mismo deadline para todas las tareas de la OT)
-        # Ojo: schedule["DueDate"] ya viene del merge/append y tiene hora 00:00 (timestamp)
-        # Queremos Deadline = DueDate (date) + 18:00
-        
-        if not schedule.empty:
-            schedule_deadline = pd.to_datetime(schedule["DueDate"].dt.date) + timedelta(hours=18)
-            
-            schedule["Atraso_h"] = ((schedule["Fin"] - schedule_deadline).dt.total_seconds() / 3600.0).clip(lower=0).fillna(0.0).round(2)
-            schedule["EnRiesgo"] = schedule["Atraso_h"] > 0
-        
         # Ya no necesitamos hacer merge de Atraso_h desde resumen_ot porque ya lo calculamos,
         # PERO resumen_ot tiene el atraso FINAL de la OT (que es lo que importa al cliente).
         # El Atraso_h en schedule es "cuánto se pasó esta tarea del deadline final".
