@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
-from modules.config_loader import cargar_config, horas_por_dia
+from datetime import date, datetime, timedelta
+from modules.config_loader import cargar_config, horas_por_dia, get_horas_totales_dia
 from modules.scheduler import programar
 
 # New modules
@@ -91,28 +91,172 @@ if archivo is not None:
     
     # --- VISUALIZACIÓN DE CARGA DE TRABAJO (REQ. USUARIO) ---
     if not schedule.empty:
-        st.markdown("### 📊 Carga de Trabajo por Máquina (Horas Necesarias)")
-        st.caption("Total de horas de producción requeridas (Setup + Operación) para cumplir con las órdenes asignadas.")
+        st.markdown("### 📊 Análisis de Capacidad (Cuello de Botella)")
+        st.caption("Muestra el 'Punto Crítico' de cada máquina: el momento donde la diferencia entre la carga acumulada y la capacidad disponible es más desfavorable (o más ajustada).")
+        st.info("💡 Si una barra roja supera a la azul, significa que en algún momento del plan **faltarán horas** para cumplir con una entrega, aunque luego sobre tiempo.")
+
+        # Filtrar procesos tercerizados
+        outsourced = {"stamping", "plastificado", "encapado", "cuño"}
+        schedule_viz = schedule[~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
         
-        # 1. Calcular Horas Necesarias
-        carga_maq = schedule.groupby("Maquina")["Duracion_h"].sum().reset_index()
-        carga_maq.rename(columns={"Duracion_h": "Horas Necesarias"}, inplace=True)
-        carga_maq = carga_maq.sort_values("Horas Necesarias", ascending=False)
+        # Pre-calcular el mapa de capacidad diaria para el rango completo del plan
+        # Esto optimiza no llamar a get_horas_totales_dia millones de veces
+        fecha_min = schedule_viz["Inicio"].min().date() if not schedule_viz.empty else fecha_inicio_plan
+        fecha_max = schedule_viz["DueDate"].max().date() if not schedule_viz.empty and pd.notna(schedule_viz["DueDate"].max()) else fecha_inicio_plan
         
-        # 2. Visualizar
-        import plotly.express as px
-        fig_carga = px.bar(
-            carga_maq, 
-            x="Maquina", 
-            y="Horas Necesarias",
-            text="Horas Necesarias",
-            title="Horas Totales Requeridas por Máquina",
-            color="Horas Necesarias",
-            color_continuous_scale="Blues"
-        )
-        fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
-        fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-        st.plotly_chart(fig_carga, use_container_width=True)
+        # Extendemos un poco el horizonte por seguridad
+        fecha_max = max(fecha_max, (pd.Timestamp(fecha_inicio_plan) + timedelta(days=30)).date())
+        
+        dias_rango = pd.date_range(start=fecha_inicio_plan, end=fecha_max)
+        capacity_map = {} # { (maquina, fecha): horas }
+        
+        # Identificar maquinas relevantes
+        maquinas_viz = schedule_viz["Maquina"].unique()
+        
+        # Llenar mapa de capacidad
+        for maq in maquinas_viz:
+            for d in dias_rango:
+                capacity_map[(maq, d.date())] = get_horas_totales_dia(d.date(), cfg, maquina=maq)
+
+        data_bottleneck = []
+
+        for maq in maquinas_viz:
+            # 1. Obtener tareas y ordenar por Fecha Compromiso (DueDate)
+            tasks_m = schedule_viz[schedule_viz["Maquina"] == maq].copy()
+            if tasks_m.empty: continue
+            
+            tasks_m.sort_values("DueDate", inplace=True)
+            
+            # 2. Calcular Carga Acumulada
+            tasks_m["CargaAcumulada"] = tasks_m["Duracion_h"].cumsum()
+            
+            max_deficit = -float('inf')
+            critical_point = None # (Carga, Capacidad, Balance, FechaCritica)
+            
+            # 3. Analizar tarea por tarea (Punto de chequeo)
+            current_capacity = 0.0
+            last_date_checked = pd.Timestamp(fecha_inicio_plan).date() - timedelta(days=1)
+            
+            # Optimizacion: Iterar fechas en lugar de tareas si hay muchas tareas? 
+            # Mejor iterar tareas, son los deadlines los que importan.
+            
+            cumulative_cap = 0.0
+            # Pre-calcular vector de capacidad acumulada seria mejor, pero vamos simple
+            
+            for idx, task in tasks_m.iterrows():
+                due_dt = task["DueDate"]
+                if pd.isna(due_dt): continue
+                
+                # Deadline efectivo: DueDate y asumimos hasta fin del turno o final del dia?
+                # Para ser seguros, contemos capacidad hasta ese día inclusive.
+                due_date = due_dt.date()
+                
+                if due_date < fecha_inicio_plan:
+                    due_date = fecha_inicio_plan # Ya estamos jugados
+                
+                # Sumar capacidad desde inicio hasta due_date
+                # (Podríamos optimizar no recalculando desde cero siempre)
+                # Vamos a calcular incrementalmente
+                cap_hasta_deadline = 0.0
+                
+                # Calculo rapido usando el mapa y rango de fechas
+                # Generamos rango desde inicio hasta due_date
+                # Cuidado: esto puede ser lento si hay muchas tareas.
+                # Mejor estrategia:
+                # 1. Tener un array de dias y sus capacidades.
+                # 2. Sumar slice del array.
+                
+                # Version Correcta y Simple para este volumen de datos:
+                # Sumar capacidad disponible en el rango [fecha_inicio_plan, due_date]
+                # usando el mapa pre-calculado
+                
+                # Optimizacion local: Sumar solo lo nuevo si las fechas avanzan (que deberían por el sort)
+                # Pero si hay varias tareas mismo dia, es igual.
+                
+                # Reset para cada maq? No, incremental es mejor.
+                # Si due_date > last_date_checked: sumar dias intermedios
+                
+                if due_date > last_date_checked:
+                    delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=due_date)
+                    for d in delta_dias:
+                        current_capacity += capacity_map.get((maq, d.date()), 0.0)
+                    last_date_checked = due_date
+                
+                # Ahora current_capacity tiene la capacidad acumulada hasta task.DueDate
+                # CargaAcumulada tiene la carga hasta task inclusive
+                
+                load = task["CargaAcumulada"]
+                capacity = current_capacity
+                balance = capacity - load # Negativo es malo
+                deficit = load - capacity # Positivo es malo
+                
+                if deficit > max_deficit:
+                    max_deficit = deficit
+                    critical_point = {
+                        "Maquina": maq,
+                        "Horas Necesarias": load,
+                        "Horas Disponibles": capacity,
+                        "Balance": balance,
+                        "Fecha Critica": due_date
+                    }
+            
+            # Si encontramos punto critico, lo guardamos.
+            # Si todo sobra (max_deficit < 0), guardamos el punto final (última tarea) 
+            # para mostrar el estado general "sano".
+            if max_deficit <= 0:
+                # Tomar la ultima tarea
+                last_task = tasks_m.iloc[-1]
+                critical_point = {
+                    "Maquina": maq,
+                    "Horas Necesarias": last_task["CargaAcumulada"],
+                    "Horas Disponibles": current_capacity, # Capacidad hasta el final
+                    "Balance": current_capacity - last_task["CargaAcumulada"],
+                    "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A"
+                }
+
+            if critical_point:
+                data_bottleneck.append(critical_point)
+
+        df_disp = pd.DataFrame(data_bottleneck)
+        
+        if not df_disp.empty:
+            df_chart = df_disp.sort_values("Horas Necesarias", ascending=False)
+            
+            # Transformar a formato largo
+            df_long = df_chart.melt(id_vars=["Maquina", "Balance", "Fecha Critica"], 
+                                    value_vars=["Horas Necesarias", "Horas Disponibles"], 
+                                    var_name="Tipo", value_name="Horas")
+            
+            import plotly.express as px
+            fig_carga = px.bar(
+                df_long, 
+                x="Maquina", 
+                y="Horas",
+                color="Tipo",
+                barmode="group",
+                text="Horas",
+                title="Punto Crítico: Carga vs Capacidad",
+                color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
+                hover_data=["Balance", "Fecha Critica"]
+            )
+            fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
+            fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
+            st.plotly_chart(fig_carga, use_container_width=True)
+            
+            # Alerta de Riesgo Global
+            maquinas_riesgo = df_chart[df_chart["Balance"] < 0]
+            if not maquinas_riesgo.empty:
+                st.error(f"🚨 Crítico: {len(maquinas_riesgo)} máquinas no llegan a tiempo con sus entregas en el peor escenario.")
+                st.markdown("**Detalle del Cuello de Botella (Peor Momento):**")
+                
+                st.dataframe(maquinas_riesgo[["Maquina", "Fecha Critica", "Horas Necesarias", "Horas Disponibles", "Balance"]].style.format({
+                    "Horas Necesarias": "{:.1f}", 
+                    "Horas Disponibles": "{:.1f}", 
+                    "Balance": "{:.1f}",
+                    "Fecha Critica": "{:%Y-%m-%d}"
+                }))
+            else:
+                st.success("✅ Todas las máquinas tienen capacidad suficiente para cumplir sus plazos.")
 
     render_gantt_chart(schedule, cfg)
 
