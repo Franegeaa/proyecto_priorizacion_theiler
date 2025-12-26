@@ -91,9 +91,9 @@ if archivo is not None:
     
     # --- VISUALIZACIÓN DE CARGA DE TRABAJO (REQ. USUARIO) ---
     if not schedule.empty:
-        st.markdown("### 📊 Análisis de Capacidad (Cuello de Botella)")
-        st.caption("Muestra el 'Punto Crítico' de cada máquina: el momento donde la diferencia entre la carga acumulada y la capacidad disponible es más desfavorable (o más ajustada).")
-        st.info("💡 Si una barra roja supera a la azul, significa que en algún momento del plan **faltarán horas** para cumplir con una entrega, aunque luego sobre tiempo.")
+        st.markdown("### 📊 Análisis de Capacidad (Próximo Cuello de Botella)")
+        st.caption("Muestra el **Primer Punto Crítico** cronológico de cada máquina. Es decir, la primera orden que no llegaría a tiempo según la capacidad actual.")
+        st.info("💡 La barra roja indica las horas necesarias acumuladas hasta ese primer vencimiento fallido.")
 
         # Filtrar procesos tercerizados
         outsourced = {"stamping", "plastificado", "encapado", "cuño"}
@@ -130,86 +130,58 @@ if archivo is not None:
             # 2. Calcular Carga Acumulada
             tasks_m["CargaAcumulada"] = tasks_m["Duracion_h"].cumsum()
             
-            max_deficit = -float('inf')
             critical_point = None # (Carga, Capacidad, Balance, FechaCritica)
+            found_bottleneck = False
             
             # 3. Analizar tarea por tarea (Punto de chequeo)
             current_capacity = 0.0
             last_date_checked = pd.Timestamp(fecha_inicio_plan).date() - timedelta(days=1)
             
-            # Optimizacion: Iterar fechas en lugar de tareas si hay muchas tareas? 
-            # Mejor iterar tareas, son los deadlines los que importan.
-            
-            cumulative_cap = 0.0
-            # Pre-calcular vector de capacidad acumulada seria mejor, pero vamos simple
-            
             for idx, task in tasks_m.iterrows():
                 due_dt = task["DueDate"]
                 if pd.isna(due_dt): continue
                 
-                # Deadline efectivo: DueDate y asumimos hasta fin del turno o final del dia?
-                # Para ser seguros, contemos capacidad hasta ese día inclusive.
                 due_date = due_dt.date()
-                
                 if due_date < fecha_inicio_plan:
-                    due_date = fecha_inicio_plan # Ya estamos jugados
+                    due_date = fecha_inicio_plan 
                 
-                # Sumar capacidad desde inicio hasta due_date
-                # (Podríamos optimizar no recalculando desde cero siempre)
-                # Vamos a calcular incrementalmente
-                cap_hasta_deadline = 0.0
-                
-                # Calculo rapido usando el mapa y rango de fechas
-                # Generamos rango desde inicio hasta due_date
-                # Cuidado: esto puede ser lento si hay muchas tareas.
-                # Mejor estrategia:
-                # 1. Tener un array de dias y sus capacidades.
-                # 2. Sumar slice del array.
-                
-                # Version Correcta y Simple para este volumen de datos:
-                # Sumar capacidad disponible en el rango [fecha_inicio_plan, due_date]
-                # usando el mapa pre-calculado
-                
-                # Optimizacion local: Sumar solo lo nuevo si las fechas avanzan (que deberían por el sort)
-                # Pero si hay varias tareas mismo dia, es igual.
-                
-                # Reset para cada maq? No, incremental es mejor.
-                # Si due_date > last_date_checked: sumar dias intermedios
-                
+                # Actualizar capacidad acumulada hasta due_date
                 if due_date > last_date_checked:
                     delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=due_date)
                     for d in delta_dias:
                         current_capacity += capacity_map.get((maq, d.date()), 0.0)
                     last_date_checked = due_date
                 
-                # Ahora current_capacity tiene la capacidad acumulada hasta task.DueDate
-                # CargaAcumulada tiene la carga hasta task inclusive
-                
                 load = task["CargaAcumulada"]
                 capacity = current_capacity
-                balance = capacity - load # Negativo es malo
-                deficit = load - capacity # Positivo es malo
+                deficit = load - capacity 
                 
-                if deficit > max_deficit:
-                    max_deficit = deficit
+                # TOLERANCIA DE 0.1 HORAS (6 minutos) para no alertar por redondeos
+                if deficit > 0.1:
+                    found_bottleneck = True
                     critical_point = {
                         "Maquina": maq,
                         "Horas Necesarias": load,
                         "Horas Disponibles": capacity,
-                        "Balance": balance,
+                        "Balance": capacity - load, # Será negativo
                         "Fecha Critica": due_date
                     }
+                    break # STOP at FIRST bottleneck!
             
-            # Si encontramos punto critico, lo guardamos.
-            # Si todo sobra (max_deficit < 0), guardamos el punto final (última tarea) 
-            # para mostrar el estado general "sano".
-            if max_deficit <= 0:
-                # Tomar la ultima tarea
+            # Si NO encontramos cuello de botella (todo ok), mostramos el final
+            if not found_bottleneck:
                 last_task = tasks_m.iloc[-1]
+                # Asegurar que capacity llegue hasta el ultimo due date
+                last_due = last_task["DueDate"].date()
+                if last_due > last_date_checked:
+                     delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=last_due)
+                     for d in delta_dias:
+                        current_capacity += capacity_map.get((maq, d.date()), 0.0)
+                
                 critical_point = {
                     "Maquina": maq,
                     "Horas Necesarias": last_task["CargaAcumulada"],
-                    "Horas Disponibles": current_capacity, # Capacidad hasta el final
+                    "Horas Disponibles": current_capacity,
                     "Balance": current_capacity - last_task["CargaAcumulada"],
                     "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A"
                 }
@@ -235,7 +207,7 @@ if archivo is not None:
                 color="Tipo",
                 barmode="group",
                 text="Horas",
-                title="Punto Crítico: Carga vs Capacidad",
+                title="Próximo Cuello de Botella (Carga vs Capacidad)",
                 color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
                 hover_data=["Balance", "Fecha Critica"]
             )
@@ -244,10 +216,10 @@ if archivo is not None:
             st.plotly_chart(fig_carga, use_container_width=True)
             
             # Alerta de Riesgo Global
-            maquinas_riesgo = df_chart[df_chart["Balance"] < 0]
+            maquinas_riesgo = df_chart[df_chart["Balance"] < -0.1]
             if not maquinas_riesgo.empty:
-                st.error(f"🚨 Crítico: {len(maquinas_riesgo)} máquinas no llegan a tiempo con sus entregas en el peor escenario.")
-                st.markdown("**Detalle del Cuello de Botella (Peor Momento):**")
+                st.error(f"🚨 Crítico: Se detectaron cuellos de botella inmediatos en {len(maquinas_riesgo)} máquinas.")
+                st.markdown("**Detalle del Primer Vencimiento en Riesgo:**")
                 
                 st.dataframe(maquinas_riesgo[["Maquina", "Fecha Critica", "Horas Necesarias", "Horas Disponibles", "Balance"]].style.format({
                     "Horas Necesarias": "{:.1f}", 
