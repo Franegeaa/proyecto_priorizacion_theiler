@@ -172,17 +172,37 @@ if archivo is not None:
             if not found_bottleneck:
                 last_task = tasks_m.iloc[-1]
                 # Asegurar que capacity llegue hasta el ultimo due date
+                # Y ademas, aseguramos mirar al menos 1 semana hacia adelante para que la barra
+                # de "Horas Disponibles" muestre el potencial de la semana (ej 42.5h) y no quede corta
+                # si las ordenes terminan mañana.
                 last_due = last_task["DueDate"].date()
-                if last_due > last_date_checked:
-                     delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=last_due)
+                min_lookahead = pd.Timestamp(fecha_inicio_plan).date() + timedelta(days=7)
+                target_date = max(last_due, min_lookahead)
+
+                if target_date > last_date_checked:
+                     delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=target_date)
                      for d in delta_dias:
                         current_capacity += capacity_map.get((maq, d.date()), 0.0)
                 
+                # --- VISUAL ADJUSTMENT: Cap displayed available hours ---
+                # Si sobra mucha capacidad, cortamos la visualizacion a 1 semana (aprox 5 dias)
+                # para que la barra no quede gigante.
+                req_hours = last_task["CargaAcumulada"]
+                true_balance = current_capacity - req_hours
+                
+                visual_capacity = current_capacity
+                if current_capacity > req_hours:
+                    weekly_cap = horas_por_dia(cfg) * 5.0
+                    # Mostramos como maximo max(Req * 1.2, Weekly) para que se vea que sobra
+                    # pero no deforme el grafico con 1000 horas.
+                    limit_visual = max(req_hours * 1.2, weekly_cap)
+                    visual_capacity = min(current_capacity, limit_visual)
+
                 critical_point = {
                     "Maquina": maq,
-                    "Horas Necesarias": last_task["CargaAcumulada"],
-                    "Horas Disponibles": current_capacity,
-                    "Balance": current_capacity - last_task["CargaAcumulada"],
+                    "Horas Necesarias": req_hours,
+                    "Horas Disponibles": visual_capacity, # Visualmente topeado
+                    "Balance": true_balance, # Balance REAL para tooltip
                     "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A"
                 }
 
