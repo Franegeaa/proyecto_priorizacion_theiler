@@ -432,6 +432,40 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         ot = t["OT_id"]
         flujo_clean = [clean(p) for p in flujo_estandar]
         
+        # --- REORDENAMIENTO DINAMICO (TROQ ANTES) ---
+        if t.get("_TroqAntes"):
+             # Mover 'troquelado' antes de 'impresion flexo'/'impresion offset'
+             # NO ponerlo en index 0 ciegamente, porque puede haber Guillotina/Cortadora Bobina antes.
+             if "troquelado" in flujo_clean:
+                 # Identificar donde está la impresion
+                 # Buscamos el PRIMER proceso de impresión
+                 idx_imp = 999
+                 for i, p in enumerate(flujo_clean):
+                     if "impres" in p: # impresion flexo / impresion offset
+                         idx_imp = i
+                         break
+                 
+                 # Si encontramos impresión, movemos Troquelado justo antes
+                 if idx_imp != 999:
+                     flujo_clean.remove("troquelado") # Sacarlo de su pos original (probablemente al final)
+                     # Al sacarlo, los indices cambian. Pero idx_imp era el indice original.
+                     # Si troquelado estaba DESPUES de impresion (lo normal), idx_imp sigue siendo valido para insercion.
+                     # Si estaba ANTES (raro), al sacarlo, idx_imp baja 1. 
+                     # Para seguridad, buscamos de nuevo la insercion.
+                     
+                     idx_imp_new = 999
+                     for i, p in enumerate(flujo_clean):
+                         if "impres" in p:
+                             idx_imp_new = i
+                             break
+                     
+                     if idx_imp_new != 999:
+                        flujo_clean.insert(idx_imp_new, "troquelado")
+                     else:
+                        # Si por alguna razon no hay impresion despues de borrar troquelado (?)
+                        # Lo ponemos al final o donde sea.
+                        flujo_clean.append("troquelado") # Fallback
+        
         # Si no está en el flujo estándar, asumimos que no tiene dependencias previas en este flujo
         if proc_actual_clean not in flujo_clean: 
             return (True, None)
@@ -439,9 +473,37 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         idx = flujo_clean.index(proc_actual_clean)
         pendientes_clean = {clean(p) for p in pendientes_por_ot[ot]}
         prev_procs_names = []
-        for p_raw in flujo_estandar[:idx]:
-            if clean(p_raw) in pendientes_clean:
-                prev_procs_names.append(p_raw)
+        
+        # Reconstruimos prev_procs usando el flujo (posiblemente modificado)
+        # Ojo: flujo_estandar original tiene los nombres Raw. flujo_clean tiene los normalizados.
+        # Debemos mapear de vuelta si queremos usar fin_proceso[ot].get(p_raw).
+        # Pero fin_proceso usa nombres Raw (como vienen de tasks).
+        # Mejor estrategia: Iterar indices hasta idx en flujo_clean, y buscar si ese clean name
+        # matchea con algun raw name en pendientes_ot.
+        
+        # Simplificacion: tasks guarda nombres Raw. pendientes_clean son nombres Clean.
+        # Necesitamos saber si "troquelado" (clean) está pendiente. Si lo está, bloquea.
+        # Pero fin_proceso se indexa por nombre Raw.
+        
+        # Mapa de Clean -> Raw para esta orden (o general)
+        # Es costoso construirlo siempre. 
+        # Pero flujo_clean ya está alineado.
+        
+        for p_clean in flujo_clean[:idx]:
+            if p_clean in pendientes_clean:
+                # Si está pendiente, BUSCAMOS SU NOMBRE RAW para ver si terminó (si estuviera en completados).
+                # Pero la logica aqui es: Si está en pendientes_clean y NO en completados, return False.
+                
+                # Check simple: ¿Está completado?
+                completados_clean = {clean(c) for c in completado[ot]}
+                if p_clean not in completados_clean:
+                    return (False, None)
+                
+                # Si está completado, necesitamos su nombre Raw para buscar fecha fin.
+                # Buscamos en completado[ot] cual matchea.
+                raw_match = next((c for c in completado[ot] if clean(c) == p_clean), None)
+                if raw_match:
+                    prev_procs_names.append(raw_match)
 
         if not prev_procs_names: 
             return (True, None)

@@ -49,6 +49,27 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(dict.fromkeys(pendientes))
     pendientes_limpios.sort(key=lambda p: orden_idx.get(p, 999))
+
+    # --- REORDENAMIENTO POR FLAG '_TroqAntes' ---
+    if es_si(orden.get("_TroqAntes")):
+        # Mover Troquelado antes de Impresion (Flexo/Offset)
+        # Estrategia: Buscar indices y mover elemento
+        try:
+            # Identificar items
+            troq = next((p for p in pendientes_limpios if "Troquelado" in p), None)
+            impres = [p for p in pendientes_limpios if "Impresi" in p] # Flexo u Offset
+            
+            if troq and impres:
+                # Si existen ambos, poner Troquelado antes del primero de impresion
+                idx_imp = min(pendientes_limpios.index(i) for i in impres)
+                idx_troq = pendientes_limpios.index(troq)
+                
+                # Solo mover si Troquelado está despues de Impresion (lo normal)
+                if idx_troq > idx_imp:
+                    pendientes_limpios.pop(idx_troq)
+                    pendientes_limpios.insert(idx_imp, troq)
+        except:
+            pass # Si falla algo raro, manter orden std
     
     return pendientes_limpios
 
@@ -104,7 +125,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "PliAnc": row.get("PliAnc", 0),
                 "PliLar": row.get("PliLar", 0),
                 "Gramaje": row.get("Grs./Nº", 0), # Nuevo campo para agrupamiento Bobina
-                "Urgente": es_si(row.get("Urgente", False)) # Nueva bandera de urgencia
+                "Urgente": es_si(row.get("Urgente", False)), # Nueva bandera de urgencia
+                "_TroqAntes": es_si(row.get("_TroqAntes", False)) # <--- NUEVO FLAG
             })  
 
     tasks = pd.DataFrame(tareas)

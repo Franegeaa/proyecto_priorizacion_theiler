@@ -80,7 +80,12 @@ def process_uploaded_dataframe(df):
     df["_PEN_Ventana"]      = to_bool_series(["PegadoVSNDpd", "PegadoVSND"])
     df["_PEN_Pegado"]       = to_bool_series(["PegadoSNDpd", "PegadoSND"])
     df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada
+    df["_PEN_Pegado"]       = to_bool_series(["PegadoSNDpd", "PegadoSND"])
+    df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada
     df["_IMP_FreyDorDpd"] = to_bool_series(["FreyDorDpd"])    # Offset → doble pasada
+    
+    # --- FLAGO DE REORDENAMIENTO (TROQUEL ANTES DE IMPRESION) ---
+    df["_TroqAntes"] = to_bool_series(["TroqAntes", "TroquelAntes", "TroqueladoAntes"])
 
     # --- TROQUEL PREFERIDO ---
     for c in ["CodigoTroquel", "CodigoTroquelTapa", "CodigoTroquelCuerpo", "CodTroTapa", "CodTroCuerpo"]:
