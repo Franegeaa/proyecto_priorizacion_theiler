@@ -198,15 +198,40 @@ if archivo is not None:
                     limit_visual = max(req_hours * 1.2, weekly_cap)
                     visual_capacity = min(current_capacity, limit_visual)
 
+                # Calcular Dias Habiles Involucrados (desde hoy hasta target_date)
+                # Contamos cuantos dias en el rango tenian capacidad > 0
+                rango_dias = pd.date_range(start=fecha_inicio_plan, end=target_date if 'target_date' in locals() else due_date)
+                dias_habiles_count = sum(1 for d in rango_dias if capacity_map.get((maq, d.date()), 0) > 0)
+
                 critical_point = {
                     "Maquina": maq,
                     "Horas Necesarias": req_hours,
                     "Horas Disponibles": visual_capacity, # Visualmente topeado
+                    "Capacidad Total": current_capacity, # <--- DATO REAL PARA EL TOOLTIP
                     "Balance": true_balance, # Balance REAL para tooltip
-                    "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A"
+                    "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A",
+                    "Dias Habiles": dias_habiles_count
                 }
 
             if critical_point:
+                # Si fue encontrado en el loop, calculamos dias habiles tambien
+                if "Dias Habiles" not in critical_point:
+                     # Recuperamos la fecha critica del dict
+                     f_crit = critical_point["Fecha Critica"]
+                     # Definir capacity si no existe (caso raro)
+                     cap_real = critical_point["Horas Disponibles"]
+                     
+                     if isinstance(f_crit, (date, datetime)):
+                        r_dias = pd.date_range(start=fecha_inicio_plan, end=f_crit)
+                        dH = sum(1 for d in r_dias if capacity_map.get((maq, d.date()), 0) > 0)
+                        critical_point["Dias Habiles"] = dH
+                     else:
+                        critical_point["Dias Habiles"] = 0
+                     
+                     # Asegurar que Capacidad Total este presente (si era bottleneck, visual=real)
+                     if "Capacidad Total" not in critical_point:
+                         critical_point["Capacidad Total"] = critical_point["Horas Disponibles"]
+
                 data_bottleneck.append(critical_point)
 
         df_disp = pd.DataFrame(data_bottleneck)
@@ -215,7 +240,7 @@ if archivo is not None:
             df_chart = df_disp.sort_values("Horas Necesarias", ascending=False)
             
             # Transformar a formato largo
-            df_long = df_chart.melt(id_vars=["Maquina", "Balance", "Fecha Critica"], 
+            df_long = df_chart.melt(id_vars=["Maquina", "Balance", "Fecha Critica", "Dias Habiles", "Capacidad Total"], 
                                     value_vars=["Horas Necesarias", "Horas Disponibles"], 
                                     var_name="Tipo", value_name="Horas")
             
@@ -229,9 +254,10 @@ if archivo is not None:
                 text="Horas",
                 title="Próximo Cuello de Botella (Carga vs Capacidad)",
                 color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
-                hover_data=["Balance", "Fecha Critica"]
+                hover_data=["Balance", "Capacidad Total", "Dias Habiles", "Fecha Critica"]
             )
             fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
+            fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
             fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
             st.plotly_chart(fig_carga, use_container_width=True)
             
