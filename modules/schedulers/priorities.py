@@ -167,7 +167,18 @@ def _cola_impresora_offset(q):
 
     # 5. ORDENAMIENTO FINAL
     # ------------------------------------------------------------
-    grupos_todos.sort() 
+    grupos_todos.sort()
+    
+    # # --- PRINT PARA DEPURACION ---
+    # print("\n--- COLA DE IMPRESION OFFSET (Primeros 20 grupos) ---")
+    # for i, item in enumerate(grupos_todos[:20]):
+    #     prio, due, _, c1, c2, recs = item
+    #     print(f"Grupo {i}: Prio={prio} Due={due} C1={c1} C2={c2} (Cnt: {len(recs)})")
+    #     for r in recs:
+    #         print(f"   -> OT: {r.get('OT_id')} | Cli: {r.get('Cliente')} | Troq: {r.get('CodigoTroquel')} | Due: {r.get('DueDate')}")
+    # print("------------------------------------------------------\n")
+
+    return deque([item for _, _, _, _, _, recs in grupos_todos for item in recs])
 
     return deque([item for _, _, _, _, _, recs in grupos_todos for item in recs])
 

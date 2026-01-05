@@ -496,6 +496,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 
                 # Check simple: ¿Está completado?
                 completados_clean = {clean(c) for c in completado[ot]}
+                
+                # --- DEBUG CHECK specific OT ---
+                if "E7398-2025278" in str(ot):
+                     print(f"CHECK DEPS: Proc={proc_actual_clean} Need={p_clean} InCompleted={p_clean in completados_clean} CompletedSet={completados_clean}")
+                
                 if p_clean not in completados_clean:
                     return (False, None)
                 
@@ -548,19 +553,29 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         return (True, last_end)
 
     def _prioridad_dinamica(m):
-        if "autom" in m.lower():
-            return (0, agenda[m]["fecha"], agenda[m]["hora"], m)
-        return (1, agenda[m]["fecha"], agenda[m]["hora"], m)
+        # ORDEN DE SIMULACION:
+        # 1. Fecha (Quien está más atrasado debe avanzar primero)
+        # 2. Hora
+        # 3. Prioridad especial (Automatica antes para llenar huecos si empatan)
+        prio_tipo = 0 if "autom" in m.lower() else 1
+        current_dt = datetime.combine(agenda[m]["fecha"], agenda[m]["hora"])
+        return (current_dt, prio_tipo, m)
 
     progreso = True
     while quedan_tareas() and progreso:
         progreso = False
         
-        # Mezclar máquinas para evitar sesgo hacia la primera (Descartonadora 1)
+        # Mezclar máquinas
         maquinas_shuffled = list(maquinas)
-        # random.shuffle(maquinas_shuffled)
 
-        for maquina in sorted(maquinas_shuffled, key=_prioridad_dinamica):
+        # DEBUG SIMULATION ORDER
+        sim_order = sorted(maquinas_shuffled, key=_prioridad_dinamica)
+        print(f"\n--- SIMULATION LOOP STEP ---")
+        for m in sim_order: # Log ALL machines
+           dt, _, _ = _prioridad_dinamica(m)
+           print(f"   Machine: {m} @ {dt}")
+
+        for maquina in sim_order:
             if not colas.get(maquina):  
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
@@ -597,10 +612,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # ==========================================================
                 # PASO 1: BÚSQUEDA DE CANDIDATA (GAP FILLING)
                 # ==========================================================
-                def log_debug(msg):
-                    with open("tests/debug_francotirador.txt", "a", encoding="utf-8") as f:
-                        f.write(f"[{maquina}] {msg}\n")
-
                 idx_cand = -1 
                 mejor_candidato_futuro = None # (idx, fecha_disponible)
                 mejor_candidato_setup = None 
@@ -615,6 +626,13 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     else:
                         log_debug("Ultima Tarea: NONE")
 
+                # --- DEBUG PRINT OFFSET QUEUE EVOLUTION ---
+                if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
+                    print(f"\n--- OFFSET QUEUE @ {current_agenda_dt} (Last: {ultima_tarea.get('Cliente') if ultima_tarea else 'None'}) ---")
+                    for i, t in enumerate(list(colas[maquina])[:10]):
+                        ready, avail = verificar_disponibilidad(t, maquina)
+                        print(f"  [{i}] {t.get('OT_id')} | {t.get('Cliente')} | Ready: {ready} | Avail: {avail}")
+
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -622,7 +640,19 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                     
-                    if not runnable: continue
+                    if not runnable: 
+                        # --- SOLUCION NATIVOS / BLOQUEO POR GRUPO ---
+                        # Si la tarea no está lista (ej. falta Guillotina), pero es del MISMO GRUPO (Setup Menor)
+                        # que la anterior, decidimos ESPERAR en lugar de buscar otra cosa para llenar el hueco.
+                        if ultima_tarea and usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", "")):
+                            if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
+                                print(f"DEBUG BLOCK: Waiting for grouped task {t_cand.get('OT_id')} (Dependency missing). Aborting gap-fill search.")
+                            # Abortamos búsqueda. Ningún 'mejor_candidato_futuro' será tomado porque idx_cand es -1.
+                            idx_cand = -1
+                            mejor_candidato_futuro = None
+                            mejor_candidato_setup = None
+                            break
+                        continue
                     
                     es_setup = False
                     if ultima_tarea:
@@ -1090,6 +1120,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                         fin_proceso[t["OT_id"]][proceso_nombre] = fin_real
                         completado[t["OT_id"]].add(proceso_nombre)
+                        
+                        # --- DEBUG COMPLETION ---
+                        if "guillotin" in proceso_nombre.lower() and "E7398-2025278" in t["OT_id"]:
+                             print(f"DEBUG: Marking Completed for {t['OT_id']}: ADDING '{proceso_nombre}' to Set. Current Set: {completado[t['OT_id']]}")
+                             print(f"DEBUG: TIMING {t['OT_id']} on {maquina}: TotalH={total_h} ProcH={proc_h} Setup={setup_min}")
+                             print(f"DEBUG: AGENDA {t['OT_id']}: Start={inicio_real} End={fin_real}")
                         ultimo_en_maquina[maquina] = t
                         progreso = True
                         tareas_agendadas = True
