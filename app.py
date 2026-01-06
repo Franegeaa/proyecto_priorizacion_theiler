@@ -91,190 +91,303 @@ if archivo is not None:
     
     # --- VISUALIZACIÓN DE CARGA DE TRABAJO (REQ. USUARIO) ---
     if not schedule.empty:
-        st.markdown("### 📊 Análisis de Capacidad (Próximo Cuello de Botella)")
-        st.caption("Muestra el **Primer Punto Crítico** cronológico de cada máquina. Es decir, la primera orden que no llegaría a tiempo según la capacidad actual.")
-        st.info("💡 La barra roja indica las horas necesarias acumuladas hasta ese primer vencimiento fallido.")
+        st.markdown("### 📊 Análisis de Capacidad y Carga")
+        
+        modo_analisis = st.radio(
+            "Modo de Análisis:",
+            ["Detectar Cuello de Botella (Próximo Vencimiento)", "Análisis Temporal (Carga por Periodo)"],
+            index=0,
+            horizontal=True
+        )
 
-        # Filtrar procesos tercerizados
-        outsourced = {"stamping", "plastificado", "encapado", "cuño"}
-        schedule_viz = schedule[~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
-        
-        # Pre-calcular el mapa de capacidad diaria para el rango completo del plan
-        # Esto optimiza no llamar a get_horas_totales_dia millones de veces
-        fecha_min = schedule_viz["Inicio"].min().date() if not schedule_viz.empty else fecha_inicio_plan
-        fecha_max = schedule_viz["DueDate"].max().date() if not schedule_viz.empty and pd.notna(schedule_viz["DueDate"].max()) else fecha_inicio_plan
-        
-        # Extendemos un poco el horizonte por seguridad
-        fecha_max = max(fecha_max, (pd.Timestamp(fecha_inicio_plan) + timedelta(days=30)).date())
-        
-        dias_rango = pd.date_range(start=fecha_inicio_plan, end=fecha_max)
-        capacity_map = {} # { (maquina, fecha): horas }
-        
-        # Identificar maquinas relevantes
-        maquinas_viz = schedule_viz["Maquina"].unique()
-        
-        # Llenar mapa de capacidad
-        for maq in maquinas_viz:
-            for d in dias_rango:
-                capacity_map[(maq, d.date())] = get_horas_totales_dia(d.date(), cfg, maquina=maq)
+        # ---------------------------------------------------------
+        # MODO 1: DETECTAR CUELLO DE BOTELLA (LÓGICA ORIGINAL)
+        # ---------------------------------------------------------
+        if modo_analisis == "Detectar Cuello de Botella (Próximo Vencimiento)":
+            st.caption("Muestra el **Primer Punto Crítico** cronológico de cada máquina. Es decir, la primera orden que no llegaría a tiempo según la capacidad actual.")
+            st.info("💡 La barra roja indica las horas necesarias acumuladas hasta ese primer vencimiento fallido.")
 
-        data_bottleneck = []
+            # Filtrar procesos tercerizados
+            outsourced = {"stamping", "plastificado", "encapado", "cuño"}
+            schedule_viz = schedule[~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
+            
+            # Pre-calcular el mapa de capacidad diaria para el rango completo del plan
+            # Esto optimiza no llamar a get_horas_totales_dia millones de veces
+            fecha_min = schedule_viz["Inicio"].min().date() if not schedule_viz.empty else fecha_inicio_plan
+            fecha_max = schedule_viz["DueDate"].max().date() if not schedule_viz.empty and pd.notna(schedule_viz["DueDate"].max()) else fecha_inicio_plan
+            
+            # Extendemos un poco el horizonte por seguridad
+            fecha_max = max(fecha_max, (pd.Timestamp(fecha_inicio_plan) + timedelta(days=30)).date())
+            
+            dias_rango = pd.date_range(start=fecha_inicio_plan, end=fecha_max)
+            capacity_map = {} # { (maquina, fecha): horas }
+            
+            # Identificar maquinas relevantes
+            maquinas_viz = schedule_viz["Maquina"].unique()
+            
+            # Llenar mapa de capacidad
+            for maq in maquinas_viz:
+                for d in dias_rango:
+                    capacity_map[(maq, d.date())] = get_horas_totales_dia(d.date(), cfg, maquina=maq)
 
-        for maq in maquinas_viz:
-            # 1. Obtener tareas y ordenar por Fecha Compromiso (DueDate)
-            tasks_m = schedule_viz[schedule_viz["Maquina"] == maq].copy()
-            if tasks_m.empty: continue
-            
-            tasks_m.sort_values("DueDate", inplace=True)
-            
-            # 2. Calcular Carga Acumulada
-            tasks_m["CargaAcumulada"] = tasks_m["Duracion_h"].cumsum()
-            
-            critical_point = None # (Carga, Capacidad, Balance, FechaCritica)
-            found_bottleneck = False
-            
-            # 3. Analizar tarea por tarea (Punto de chequeo)
-            current_capacity = 0.0
-            last_date_checked = pd.Timestamp(fecha_inicio_plan).date() - timedelta(days=1)
-            
-            for idx, task in tasks_m.iterrows():
-                due_dt = task["DueDate"]
-                if pd.isna(due_dt): continue
+            data_bottleneck = []
+
+            for maq in maquinas_viz:
+                # 1. Obtener tareas y ordenar por Fecha Compromiso (DueDate)
+                tasks_m = schedule_viz[schedule_viz["Maquina"] == maq].copy()
+                if tasks_m.empty: continue
                 
-                due_date = due_dt.date()
-                if due_date < fecha_inicio_plan:
-                    due_date = fecha_inicio_plan 
+                tasks_m.sort_values("DueDate", inplace=True)
                 
-                # Actualizar capacidad acumulada hasta due_date
-                if due_date > last_date_checked:
-                    delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=due_date)
-                    for d in delta_dias:
-                        current_capacity += capacity_map.get((maq, d.date()), 0.0)
-                    last_date_checked = due_date
+                # 2. Calcular Carga Acumulada
+                tasks_m["CargaAcumulada"] = tasks_m["Duracion_h"].cumsum()
                 
-                load = task["CargaAcumulada"]
-                capacity = current_capacity
-                deficit = load - capacity 
+                critical_point = None # (Carga, Capacidad, Balance, FechaCritica)
+                found_bottleneck = False
                 
-                # TOLERANCIA DE 0.1 HORAS (6 minutos) para no alertar por redondeos
-                if deficit > 0.1:
-                    found_bottleneck = True
+                # 3. Analizar tarea por tarea (Punto de chequeo)
+                current_capacity = 0.0
+                last_date_checked = pd.Timestamp(fecha_inicio_plan).date() - timedelta(days=1)
+                
+                for idx, task in tasks_m.iterrows():
+                    due_dt = task["DueDate"]
+                    if pd.isna(due_dt): continue
+                    
+                    due_date = due_dt.date()
+                    if due_date < fecha_inicio_plan:
+                        due_date = fecha_inicio_plan 
+                    
+                    # Actualizar capacidad acumulada hasta due_date
+                    if due_date > last_date_checked:
+                        delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=due_date)
+                        for d in delta_dias:
+                            current_capacity += capacity_map.get((maq, d.date()), 0.0)
+                        last_date_checked = due_date
+                    
+                    load = task["CargaAcumulada"]
+                    capacity = current_capacity
+                    deficit = load - capacity 
+                    
+                    # TOLERANCIA DE 0.1 HORAS (6 minutos) para no alertar por redondeos
+                    if deficit > 0.1:
+                        found_bottleneck = True
+                        critical_point = {
+                            "Maquina": maq,
+                            "Horas Necesarias": load,
+                            "Horas Disponibles": capacity,
+                            "Balance": capacity - load, # Será negativo
+                            "Fecha Critica": due_date
+                        }
+                        break # STOP at FIRST bottleneck!
+                
+                # Si NO encontramos cuello de botella (todo ok), mostramos el final
+                if not found_bottleneck:
+                    last_task = tasks_m.iloc[-1]
+                    # Asegurar que capacity llegue hasta el ultimo due date
+                    # Y ademas, aseguramos mirar al menos 1 semana hacia adelante para que la barra
+                    # de "Horas Disponibles" muestre el potencial de la semana (ej 42.5h) y no quede corta
+                    # si las ordenes terminan mañana.
+                    last_due = last_task["DueDate"].date()
+                    min_lookahead = pd.Timestamp(fecha_inicio_plan).date() + timedelta(days=7)
+                    target_date = max(last_due, min_lookahead)
+
+                    if target_date > last_date_checked:
+                        delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=target_date)
+                        for d in delta_dias:
+                            current_capacity += capacity_map.get((maq, d.date()), 0.0)
+                    
+                    # --- VISUAL ADJUSTMENT: Cap displayed available hours ---
+                    # Si sobra mucha capacidad, cortamos la visualizacion a 1 semana (aprox 5 dias)
+                    # para que la barra no quede gigante.
+                    req_hours = last_task["CargaAcumulada"]
+                    true_balance = current_capacity - req_hours
+                    
+                    visual_capacity = current_capacity
+                    if current_capacity > req_hours:
+                        weekly_cap = horas_por_dia(cfg) * 5.0
+                        # Mostramos como maximo max(Req * 1.2, Weekly) para que se vea que sobra
+                        # pero no deforme el grafico con 1000 horas.
+                        limit_visual = max(req_hours * 1.2, weekly_cap)
+                        visual_capacity = min(current_capacity, limit_visual)
+
+                    # Calcular Dias Habiles Involucrados (desde hoy hasta target_date)
+                    # Contamos cuantos dias en el rango tenian capacidad > 0
+                    rango_dias = pd.date_range(start=fecha_inicio_plan, end=target_date if 'target_date' in locals() else due_date)
+                    dias_habiles_count = sum(1 for d in rango_dias if capacity_map.get((maq, d.date()), 0) > 0)
+
                     critical_point = {
                         "Maquina": maq,
-                        "Horas Necesarias": load,
-                        "Horas Disponibles": capacity,
-                        "Balance": capacity - load, # Será negativo
-                        "Fecha Critica": due_date
+                        "Horas Necesarias": req_hours,
+                        "Horas Disponibles": visual_capacity, # Visualmente topeado
+                        "Capacidad Total": current_capacity, # <--- DATO REAL PARA EL TOOLTIP
+                        "Balance": true_balance, # Balance REAL para tooltip
+                        "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A",
+                        "Dias Habiles": dias_habiles_count
                     }
-                    break # STOP at FIRST bottleneck!
-            
-            # Si NO encontramos cuello de botella (todo ok), mostramos el final
-            if not found_bottleneck:
-                last_task = tasks_m.iloc[-1]
-                # Asegurar que capacity llegue hasta el ultimo due date
-                # Y ademas, aseguramos mirar al menos 1 semana hacia adelante para que la barra
-                # de "Horas Disponibles" muestre el potencial de la semana (ej 42.5h) y no quede corta
-                # si las ordenes terminan mañana.
-                last_due = last_task["DueDate"].date()
-                min_lookahead = pd.Timestamp(fecha_inicio_plan).date() + timedelta(days=7)
-                target_date = max(last_due, min_lookahead)
 
-                if target_date > last_date_checked:
-                     delta_dias = pd.date_range(start=last_date_checked + timedelta(days=1), end=target_date)
-                     for d in delta_dias:
-                        current_capacity += capacity_map.get((maq, d.date()), 0.0)
+                if critical_point:
+                    # Si fue encontrado en el loop, calculamos dias habiles tambien
+                    if "Dias Habiles" not in critical_point:
+                        # Recuperamos la fecha critica del dict
+                        f_crit = critical_point["Fecha Critica"]
+                        # Definir capacity si no existe (caso raro)
+                        cap_real = critical_point["Horas Disponibles"]
+                        
+                        if isinstance(f_crit, (date, datetime)):
+                            r_dias = pd.date_range(start=fecha_inicio_plan, end=f_crit)
+                            dH = sum(1 for d in r_dias if capacity_map.get((maq, d.date()), 0) > 0)
+                            critical_point["Dias Habiles"] = dH
+                        else:
+                            critical_point["Dias Habiles"] = 0
+                        
+                        # Asegurar que Capacidad Total este presente (si era bottleneck, visual=real)
+                        if "Capacidad Total" not in critical_point:
+                            critical_point["Capacidad Total"] = critical_point["Horas Disponibles"]
+
+                    data_bottleneck.append(critical_point)
+
+            df_disp = pd.DataFrame(data_bottleneck)
+            
+            if not df_disp.empty:
+                df_chart = df_disp.sort_values("Horas Necesarias", ascending=False)
                 
-                # --- VISUAL ADJUSTMENT: Cap displayed available hours ---
-                # Si sobra mucha capacidad, cortamos la visualizacion a 1 semana (aprox 5 dias)
-                # para que la barra no quede gigante.
-                req_hours = last_task["CargaAcumulada"]
-                true_balance = current_capacity - req_hours
+                # Transformar a formato largo
+                df_long = df_chart.melt(id_vars=["Maquina", "Balance", "Fecha Critica", "Dias Habiles", "Capacidad Total"], 
+                                        value_vars=["Horas Necesarias", "Horas Disponibles"], 
+                                        var_name="Tipo", value_name="Horas")
                 
-                visual_capacity = current_capacity
-                if current_capacity > req_hours:
-                    weekly_cap = horas_por_dia(cfg) * 5.0
-                    # Mostramos como maximo max(Req * 1.2, Weekly) para que se vea que sobra
-                    # pero no deforme el grafico con 1000 horas.
-                    limit_visual = max(req_hours * 1.2, weekly_cap)
-                    visual_capacity = min(current_capacity, limit_visual)
+                import plotly.express as px
+                fig_carga = px.bar(
+                    df_long, 
+                    x="Maquina", 
+                    y="Horas",
+                    color="Tipo",
+                    barmode="group",
+                    text="Horas",
+                    title="Próximo Cuello de Botella (Carga vs Capacidad Acumulada)",
+                    color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
+                    hover_data=["Balance", "Capacidad Total", "Dias Habiles", "Fecha Critica"]
+                )
+                fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
+                fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
+                st.plotly_chart(fig_carga, use_container_width=True)
+                
+                # Alerta de Riesgo Global
+                maquinas_riesgo = df_chart[df_chart["Balance"] < -0.1]
+                if not maquinas_riesgo.empty:
+                    st.error(f"🚨 Crítico: Se detectaron cuellos de botella inmediatos en {len(maquinas_riesgo)} máquinas.")
+                    st.markdown("**Detalle del Primer Vencimiento en Riesgo:**")
+                    
+                    st.dataframe(maquinas_riesgo[["Maquina", "Fecha Critica", "Horas Necesarias", "Horas Disponibles", "Balance"]].style.format({
+                        "Horas Necesarias": "{:.1f}", 
+                        "Horas Disponibles": "{:.1f}", 
+                        "Balance": "{:.1f}",
+                        "Fecha Critica": "{:%Y-%m-%d}"
+                    }))
+                else:
+                    st.success("✅ Todas las máquinas tienen capacidad suficiente para cumplir sus plazos.")
 
-                # Calcular Dias Habiles Involucrados (desde hoy hasta target_date)
-                # Contamos cuantos dias en el rango tenian capacidad > 0
-                rango_dias = pd.date_range(start=fecha_inicio_plan, end=target_date if 'target_date' in locals() else due_date)
-                dias_habiles_count = sum(1 for d in rango_dias if capacity_map.get((maq, d.date()), 0) > 0)
-
-                critical_point = {
-                    "Maquina": maq,
-                    "Horas Necesarias": req_hours,
-                    "Horas Disponibles": visual_capacity, # Visualmente topeado
-                    "Capacidad Total": current_capacity, # <--- DATO REAL PARA EL TOOLTIP
-                    "Balance": true_balance, # Balance REAL para tooltip
-                    "Fecha Critica": last_task["DueDate"].date() if pd.notna(last_task["DueDate"]) else "N/A",
-                    "Dias Habiles": dias_habiles_count
-                }
-
-            if critical_point:
-                # Si fue encontrado en el loop, calculamos dias habiles tambien
-                if "Dias Habiles" not in critical_point:
-                     # Recuperamos la fecha critica del dict
-                     f_crit = critical_point["Fecha Critica"]
-                     # Definir capacity si no existe (caso raro)
-                     cap_real = critical_point["Horas Disponibles"]
-                     
-                     if isinstance(f_crit, (date, datetime)):
-                        r_dias = pd.date_range(start=fecha_inicio_plan, end=f_crit)
-                        dH = sum(1 for d in r_dias if capacity_map.get((maq, d.date()), 0) > 0)
-                        critical_point["Dias Habiles"] = dH
-                     else:
-                        critical_point["Dias Habiles"] = 0
-                     
-                     # Asegurar que Capacidad Total este presente (si era bottleneck, visual=real)
-                     if "Capacidad Total" not in critical_point:
-                         critical_point["Capacidad Total"] = critical_point["Horas Disponibles"]
-
-                data_bottleneck.append(critical_point)
-
-        df_disp = pd.DataFrame(data_bottleneck)
-        
-        if not df_disp.empty:
-            df_chart = df_disp.sort_values("Horas Necesarias", ascending=False)
+        # ---------------------------------------------------------
+        # MODO 2: ANÁLISIS TEMPORAL (POR PERIODO)
+        # ---------------------------------------------------------
+        else:
+            st.caption("Compara la **Carga Programada** (tareas que caen en el periodo) vs **Capacidad Disponible** en ese rango de tiempo.")
             
-            # Transformar a formato largo
-            df_long = df_chart.melt(id_vars=["Maquina", "Balance", "Fecha Critica", "Dias Habiles", "Capacidad Total"], 
-                                    value_vars=["Horas Necesarias", "Horas Disponibles"], 
-                                    var_name="Tipo", value_name="Horas")
-            
-            import plotly.express as px
-            fig_carga = px.bar(
-                df_long, 
-                x="Maquina", 
-                y="Horas",
-                color="Tipo",
-                barmode="group",
-                text="Horas",
-                title="Próximo Cuello de Botella (Carga vs Capacidad)",
-                color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
-                hover_data=["Balance", "Capacidad Total", "Dias Habiles", "Fecha Critica"]
+            # --- FILTROS DE TIEMPO (REPLICADOS DEL GANTT) ---
+            tipo_filtro_cap = st.radio(
+                "Seleccionar Rango de Tiempo:",
+                ["Día", "Semana", "Mes", "Ver todo"], 
+                index=0,
+                horizontal=True,
+                key="filtro_cap_radio"
             )
-            fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
-            fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-            fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-            st.plotly_chart(fig_carga, use_container_width=True)
             
-            # Alerta de Riesgo Global
-            maquinas_riesgo = df_chart[df_chart["Balance"] < -0.1]
-            if not maquinas_riesgo.empty:
-                st.error(f"🚨 Crítico: Se detectaron cuellos de botella inmediatos en {len(maquinas_riesgo)} máquinas.")
-                st.markdown("**Detalle del Primer Vencimiento en Riesgo:**")
+            c_start = None
+            c_end = None
+            min_date = schedule["Inicio"].min().date() if not schedule.empty else date.today()
+            max_date = schedule["Fin"].max().date() if not schedule.empty else date.today()
+
+            if tipo_filtro_cap == "Día":
+                f_dia = st.date_input("Seleccioná el día:", value=min_date, min_value=min_date, max_value=max_date, key="cap_dia")
+                c_start = pd.Timestamp(f_dia)
+                c_end = c_start + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            elif tipo_filtro_cap == "Semana":
+                f_sem = st.date_input("Seleccioná un día de la semana:", value=min_date, min_value=min_date, max_value=max_date, key="cap_sem")
+                start_week = f_sem - pd.Timedelta(days=f_sem.weekday())
+                c_start = pd.Timestamp(start_week)
+                c_end = c_start + pd.Timedelta(days=7) - pd.Timedelta(seconds=1)
+                st.info(f"Mostrando semana: {c_start.date()} al {c_end.date()}")
+            elif tipo_filtro_cap == "Mes":
+                f_mes = st.date_input("Seleccioná un día del mes:", value=min_date, min_value=min_date, max_value=max_date, key="cap_mes")
+                c_start = pd.Timestamp(f_mes.replace(day=1))
+                next_m = (c_start + pd.Timedelta(days=32)).replace(day=1)
+                c_end = next_m - pd.Timedelta(seconds=1)
+            else: # Ver todo
+                c_start = pd.Timestamp(min_date)
+                c_end = pd.Timestamp(max_date) + pd.Timedelta(days=1)
+
+
+            # CALCULAR CARGA Y CAPACIDAD
+            outsourced = {"stamping", "plastificado", "encapado", "cuño"}
+            # Filtrar schedule por FECHA COMPROMISO (DueDate)
+            # El usuario pide "ver las ordenes que terminan el dia seleccionado" (Deadline).
+            # Esto muestra la DEMANDA real del día vs la Capacidad.
+            mask_periodo = (schedule["DueDate"] >= c_start) & (schedule["DueDate"] <= c_end)
+            schedule_periodo = schedule[mask_periodo & ~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
+
+            data_temporal = []
+            maquinas_todas = sorted(schedule["Maquina"].unique())
+            
+            # Calcular días hábiles en el rango para capacidad
+            dias_en_rango = pd.date_range(start=c_start.date(), end=c_end.date())
+
+            for maq in maquinas_todas:
+                # 1. Capacidad Disponible en el rango
+                cap_total = 0.0
+                dias_habiles = 0
+                for d in dias_en_rango:
+                    hrs = get_horas_totales_dia(d.date(), cfg, maquina=maq)
+                    cap_total += hrs
+                    if hrs > 0: dias_habiles += 1
                 
-                st.dataframe(maquinas_riesgo[["Maquina", "Fecha Critica", "Horas Necesarias", "Horas Disponibles", "Balance"]].style.format({
-                    "Horas Necesarias": "{:.1f}", 
-                    "Horas Disponibles": "{:.1f}", 
-                    "Balance": "{:.1f}",
-                    "Fecha Critica": "{:%Y-%m-%d}"
-                }))
+                # 2. Carga Programada (Suma de tareas en el rango)
+                carga_maq = schedule_periodo[schedule_periodo["Maquina"] == maq]["Duracion_h"].sum()
+                
+                # Solo agregamos si hay carga O capacidad (para no llenar de ceros)
+                if cap_total > 0 or carga_maq > 0:
+                    data_temporal.append({
+                        "Maquina": maq,
+                        "Horas Necesarias": carga_maq,
+                        "Horas Disponibles": cap_total,
+                        "Balance": cap_total - carga_maq,
+                        "Dias Habiles": dias_habiles
+                    })
+
+            df_temp = pd.DataFrame(data_temporal)
+            
+            if not df_temp.empty:
+                df_temp = df_temp.sort_values("Horas Necesarias", ascending=False)
+                df_long_t = df_temp.melt(id_vars=["Maquina", "Balance", "Dias Habiles"], 
+                                        value_vars=["Horas Necesarias", "Horas Disponibles"], 
+                                        var_name="Tipo", value_name="Horas")
+                
+                import plotly.express as px
+                fig_temp = px.bar(
+                    df_long_t, 
+                    x="Maquina", 
+                    y="Horas",
+                    color="Tipo",
+                    barmode="group",
+                    text="Horas",
+                    title=f"Carga vs Capacidad ({tipo_filtro_cap})",
+                    color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#00CC96"},
+                    hover_data=["Balance", "Dias Habiles"]
+                )
+                fig_temp.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
+                fig_temp.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
+                st.plotly_chart(fig_temp, use_container_width=True)
             else:
-                st.success("✅ Todas las máquinas tienen capacidad suficiente para cumplir sus plazos.")
+                st.warning("No hay datos de carga ni capacidad para el periodo seleccionado.")
 
     render_gantt_chart(schedule, cfg)
 
