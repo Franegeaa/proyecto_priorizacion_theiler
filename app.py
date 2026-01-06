@@ -296,7 +296,7 @@ if archivo is not None:
             # --- FILTROS DE TIEMPO (REPLICADOS DEL GANTT) ---
             tipo_filtro_cap = st.radio(
                 "Seleccionar Rango de Tiempo:",
-                ["Día", "Semana", "Mes", "Ver todo"], 
+                ["Día"],  #, "Semana", "Mes", "Ver todo"], 
                 index=0,
                 horizontal=True,
                 key="filtro_cap_radio"
