@@ -296,7 +296,7 @@ if archivo is not None:
             # --- FILTROS DE TIEMPO (REPLICADOS DEL GANTT) ---
             tipo_filtro_cap = st.radio(
                 "Seleccionar Rango de Tiempo:",
-                ["Día"], # "Semana", "Mes", "Ver todo"], 
+                ["Día", "Semana"], # "Mes", "Ver todo"], 
                 index=0,
                 horizontal=True,
                 key="filtro_cap_radio"
@@ -328,19 +328,29 @@ if archivo is not None:
 
 
             # CALCULAR CARGA Y CAPACIDAD
-            outsourced = {"stamping", "plastificado", "encapado", "cuño"}
+            outsourced_procs = {"stamping", "plastificado", "encapado", "cuño"}
+            outsourced_keywords = ["stamping", "plastifica", "encapado", "cuño"]
             
+            # Helper para saber si una maquina es tercerizada
+            def es_maquina_tercerizada(m):
+                m_lower = m.lower()
+                return any(k in m_lower for k in outsourced_keywords)
+
             # --- LOGICA HIBRIDA (PEDIDO USUARIO) ---
             # 1. Load_Due: Carga de tareas que VENCEN en el periodo (Demanda Pura)
             mask_due = (schedule["DueDate"] >= c_start) & (schedule["DueDate"] <= c_end)
-            schedule_due = schedule[mask_due & ~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
+            # Filtramos por proceso tambien, aunque el filtro principal será por máquina
+            schedule_due = schedule[mask_due].copy()
 
             # 2. Load_Active: Carga de tareas que se EJECUTAN en el periodo (Ocupación Real)
             mask_overlap = (schedule["Inicio"] < c_end) & (schedule["Fin"] > c_start)
-            schedule_active = schedule[mask_overlap & ~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
+            schedule_active = schedule[mask_overlap].copy()
 
             data_temporal = []
-            maquinas_todas = sorted(schedule["Maquina"].unique())
+            
+            # Obtenemos TODAS las máquinas del plan, pero FILTRAMOS las tercerizadas
+            all_machines = sorted(schedule["Maquina"].dropna().unique())
+            maquinas_todas = [m for m in all_machines if not es_maquina_tercerizada(m)]
             
             # Calcular días hábiles en el rango para capacidad
             dias_en_rango = pd.date_range(start=c_start.date(), end=c_end.date())
@@ -379,18 +389,8 @@ if archivo is not None:
                 # Si Due <= Limit -> Rellenamos con Active hasta llegar al Limit (Ocupación)
                 # Formula: Max(Load_Due, Min(Load_Active, Limit))
                 
-                # Excepcion: Si el filtro es Mayor a 1 dia (Semana/Mes), la logica de "rellenar hasta 8.5"
-                # es confusa. Usamos la logica pura por dia?
-                # El usuario pidio esto para la vista DIARIA.
-                
-                final_load = 0.0
-                if tipo_filtro_cap == "Día":
-                    final_load = max(load_due, min(load_active, LIMIT_HOURS))
-                else:
-                    # Para semana/mes, sumamos todo lo active? O mantenemos logica?
-                    # Por coherencia, usamos Active puro (lo que se trabajó) o Due puro?
-                    # Usuario dijo "necesito ver lo que realmente esta pasando". Active es lo real.
-                    final_load = load_active
+                # APLICAMOS A TODAS LAS VISTAS (Dia/Semana/Mes)
+                final_load = max(load_due, min(load_active, LIMIT_HOURS))
 
                 # Solo agregamos si hay algo relevante
                 if cap_total > 0 or final_load > 0:
