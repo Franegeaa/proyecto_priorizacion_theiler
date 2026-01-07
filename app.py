@@ -296,7 +296,7 @@ if archivo is not None:
             # --- FILTROS DE TIEMPO (REPLICADOS DEL GANTT) ---
             tipo_filtro_cap = st.radio(
                 "Seleccionar Rango de Tiempo:",
-                ["Día"],  #, "Semana", "Mes", "Ver todo"], 
+                ["Día"], # "Semana", "Mes", "Ver todo"], 
                 index=0,
                 horizontal=True,
                 key="filtro_cap_radio"
@@ -329,20 +329,32 @@ if archivo is not None:
 
             # CALCULAR CARGA Y CAPACIDAD
             outsourced = {"stamping", "plastificado", "encapado", "cuño"}
-            # Filtrar schedule por FECHA COMPROMISO (DueDate)
-            # El usuario pide "ver las ordenes que terminan el dia seleccionado" (Deadline).
-            # Esto muestra la DEMANDA real del día vs la Capacidad.
-            mask_periodo = (schedule["DueDate"] >= c_start) & (schedule["DueDate"] <= c_end)
-            schedule_periodo = schedule[mask_periodo & ~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
+            
+            # --- LOGICA HIBRIDA (PEDIDO USUARIO) ---
+            # 1. Load_Due: Carga de tareas que VENCEN en el periodo (Demanda Pura)
+            mask_due = (schedule["DueDate"] >= c_start) & (schedule["DueDate"] <= c_end)
+            schedule_due = schedule[mask_due & ~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
+
+            # 2. Load_Active: Carga de tareas que se EJECUTAN en el periodo (Ocupación Real)
+            mask_overlap = (schedule["Inicio"] < c_end) & (schedule["Fin"] > c_start)
+            schedule_active = schedule[mask_overlap & ~schedule["Proceso"].astype(str).str.lower().isin(outsourced)].copy()
 
             data_temporal = []
             maquinas_todas = sorted(schedule["Maquina"].unique())
             
             # Calcular días hábiles en el rango para capacidad
             dias_en_rango = pd.date_range(start=c_start.date(), end=c_end.date())
+            
+            # Limite diario definido por turno (ej. 8.5h)
+            try:
+                LIMIT_HOURS = horas_por_dia(cfg)
+                if tipo_filtro_cap == "Semana": LIMIT_HOURS *= 5 # Estimado semanal
+                elif tipo_filtro_cap == "Mes": LIMIT_HOURS *= 22
+            except:
+                LIMIT_HOURS = 8.5
 
             for maq in maquinas_todas:
-                # 1. Capacidad Disponible en el rango
+                # A. Capacidad Disponible
                 cap_total = 0.0
                 dias_habiles = 0
                 for d in dias_en_rango:
@@ -350,16 +362,43 @@ if archivo is not None:
                     cap_total += hrs
                     if hrs > 0: dias_habiles += 1
                 
-                # 2. Carga Programada (Suma de tareas en el rango)
-                carga_maq = schedule_periodo[schedule_periodo["Maquina"] == maq]["Duracion_h"].sum()
+                # B. Carga DUE (Vencimiento)
+                load_due = schedule_due[schedule_due["Maquina"] == maq]["Duracion_h"].sum()
+
+                # C. Carga ACTIVE (Intersección Real)
+                tasks_active = schedule_active[schedule_active["Maquina"] == maq]
+                load_active = 0.0
+                for _, t in tasks_active.iterrows():
+                    overlap_start = max(t["Inicio"], c_start)
+                    overlap_end = min(t["Fin"], c_end)
+                    if overlap_start < overlap_end:
+                        load_active += (overlap_end - overlap_start).total_seconds() / 3600.0
+
+                # --- FORMULA HIBRIDA ---
+                # Si Due > Limit -> Mostramos Due (Demanda Excesiva)
+                # Si Due <= Limit -> Rellenamos con Active hasta llegar al Limit (Ocupación)
+                # Formula: Max(Load_Due, Min(Load_Active, Limit))
                 
-                # Solo agregamos si hay carga O capacidad (para no llenar de ceros)
-                if cap_total > 0 or carga_maq > 0:
+                # Excepcion: Si el filtro es Mayor a 1 dia (Semana/Mes), la logica de "rellenar hasta 8.5"
+                # es confusa. Usamos la logica pura por dia?
+                # El usuario pidio esto para la vista DIARIA.
+                
+                final_load = 0.0
+                if tipo_filtro_cap == "Día":
+                    final_load = max(load_due, min(load_active, LIMIT_HOURS))
+                else:
+                    # Para semana/mes, sumamos todo lo active? O mantenemos logica?
+                    # Por coherencia, usamos Active puro (lo que se trabajó) o Due puro?
+                    # Usuario dijo "necesito ver lo que realmente esta pasando". Active es lo real.
+                    final_load = load_active
+
+                # Solo agregamos si hay algo relevante
+                if cap_total > 0 or final_load > 0:
                     data_temporal.append({
                         "Maquina": maq,
-                        "Horas Necesarias": carga_maq,
+                        "Horas Necesarias": final_load,
                         "Horas Disponibles": cap_total,
-                        "Balance": cap_total - carga_maq,
+                        "Balance": cap_total - final_load,
                         "Dias Habiles": dias_habiles
                     })
 
