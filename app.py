@@ -296,7 +296,7 @@ if archivo is not None:
             # --- FILTROS DE TIEMPO (REPLICADOS DEL GANTT) ---
             tipo_filtro_cap = st.radio(
                 "Seleccionar Rango de Tiempo:",
-                ["Día", "Semana"], # "Mes", "Ver todo"], 
+                ["Día", "Semana", "Rango Personalizado"], # "Mes", "Ver todo"], 
                 index=0,
                 horizontal=True,
                 key="filtro_cap_radio"
@@ -305,7 +305,9 @@ if archivo is not None:
             c_start = None
             c_end = None
             min_date = schedule["Inicio"].min().date() if not schedule.empty else date.today()
-            max_date = schedule["Fin"].max().date() if not schedule.empty else date.today()
+            # Extendemos max_date para permitir planificación futura (ej. +180 dias)
+            last_schedule_date = schedule["Fin"].max().date() if not schedule.empty else date.today()
+            max_date = last_schedule_date + pd.Timedelta(days=180)
 
             if tipo_filtro_cap == "Día":
                 f_dia = st.date_input("Seleccioná el día:", value=min_date, min_value=min_date, max_value=max_date, key="cap_dia")
@@ -317,6 +319,14 @@ if archivo is not None:
                 c_start = pd.Timestamp(start_week)
                 c_end = c_start + pd.Timedelta(days=7) - pd.Timedelta(seconds=1)
                 st.info(f"Mostrando semana: {c_start.date()} al {c_end.date()}")
+            elif tipo_filtro_cap == "Rango Personalizado":
+                fechas = st.date_input("Seleccioná Rango de Fechas:", value=(min_date, min_date), min_value=min_date, max_value=max_date, key="cap_rango")
+                if isinstance(fechas, tuple) and len(fechas) == 2:
+                    c_start = pd.Timestamp(fechas[0])
+                    c_end = pd.Timestamp(fechas[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                else:
+                    st.warning("Seleccioná ambas fechas del rango.")
+                    st.stop()
             elif tipo_filtro_cap == "Mes":
                 f_mes = st.date_input("Seleccioná un día del mes:", value=min_date, min_value=min_date, max_value=max_date, key="cap_mes")
                 c_start = pd.Timestamp(f_mes.replace(day=1))
@@ -336,7 +346,7 @@ if archivo is not None:
                 m_lower = m.lower()
                 return any(k in m_lower for k in outsourced_keywords)
 
-            # --- LOGICA HIBRIDA (PEDIDO USUARIO) ---
+            # --- LOGICA HIBRIDA Y PERSONALIZADA ---
             # 1. Load_Due: Carga de tareas que VENCEN en el periodo (Demanda Pura)
             mask_due = (schedule["DueDate"] >= c_start) & (schedule["DueDate"] <= c_end)
             # Filtramos por proceso tambien, aunque el filtro principal será por máquina
@@ -345,6 +355,13 @@ if archivo is not None:
             # 2. Load_Active: Carga de tareas que se EJECUTAN en el periodo (Ocupación Real)
             mask_overlap = (schedule["Inicio"] < c_end) & (schedule["Fin"] > c_start)
             schedule_active = schedule[mask_overlap].copy()
+            
+            # 3. Load_Future: Tareas que terminan DESPUES del rango (Solo para Rango Personalizado)
+            if tipo_filtro_cap == "Rango Personalizado":
+                mask_future = schedule["DueDate"] > c_end
+                schedule_future = schedule[mask_future].copy()
+            else:
+                schedule_future = pd.DataFrame()
 
             data_temporal = []
             
@@ -355,13 +372,9 @@ if archivo is not None:
             # Calcular días hábiles en el rango para capacidad
             dias_en_rango = pd.date_range(start=c_start.date(), end=c_end.date())
             
-            # Limite diario definido por turno (ej. 8.5h)
-            try:
-                LIMIT_HOURS = horas_por_dia(cfg)
-                if tipo_filtro_cap == "Semana": LIMIT_HOURS *= 5 # Estimado semanal
-                elif tipo_filtro_cap == "Mes": LIMIT_HOURS *= 22
-            except:
-                LIMIT_HOURS = 8.5
+            # --- NOTA: LIMIT_HOURS (Estimación) ELIMINADA ---
+            # Ahora usamos 'cap_total' (Capacidad Real Calculada) como límite para cada máquina.
+            # Esto permite que funcione perfecto para Día, Semana, Mes o Todo.
 
             for maq in maquinas_todas:
                 # A. Capacidad Disponible
@@ -384,13 +397,25 @@ if archivo is not None:
                     if overlap_start < overlap_end:
                         load_active += (overlap_end - overlap_start).total_seconds() / 3600.0
 
-                # --- FORMULA HIBRIDA ---
-                # Si Due > Limit -> Mostramos Due (Demanda Excesiva)
-                # Si Due <= Limit -> Rellenamos con Active hasta llegar al Limit (Ocupación)
-                # Formula: Max(Load_Due, Min(Load_Active, Limit))
+                final_load = 0.0
                 
-                # APLICAMOS A TODAS LAS VISTAS (Dia/Semana/Mes)
-                final_load = max(load_due, min(load_active, LIMIT_HOURS))
+                if tipo_filtro_cap == "Rango Personalizado":
+                    # LOGICA RANGO PERSONALIZADO:
+                    # 1. Base = load_due (Todas las que terminan en el rango)
+                    # 2. Si sobra espacio (cap_total > load_due), sumamos ordenes futuras hasta llenar
+                    remaining_cap = max(0, cap_total - load_due)
+                    
+                    future_load = 0.0
+                    if not schedule_future.empty:
+                        future_load = schedule_future[schedule_future["Maquina"] == maq]["Duracion_h"].sum()
+                    
+                    fill = min(future_load, remaining_cap)
+                    final_load = load_due + fill
+                    
+                else:
+                    # LOGICA ESTANDAR (Dia/Semana/Mes):
+                    # Max(Load_Due, Min(Load_Active, Cap_Total))
+                    final_load = max(load_due, min(load_active, cap_total))
 
                 # Solo agregamos si hay algo relevante
                 if cap_total > 0 or final_load > 0:
