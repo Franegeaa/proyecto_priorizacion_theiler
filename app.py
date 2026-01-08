@@ -41,6 +41,16 @@ if archivo is not None:
 
     # 3. UI: Active Machines
     maquinas_activas = render_active_machines_selector(cfg)
+
+    # 3.b UI: Ignore Constraints Checkbox
+    with st.sidebar:
+        st.markdown("### 🔧 Configuración Avanzada")
+        ignore_constraints = st.checkbox(
+            "Ignorar restricciones de materiales/herramental (Simulación Teórica)", 
+            value=False, 
+            help="Si se activa, el planificador ignorará la falta de Materia Prima, Chapas o Troqueles. Útil para ver capacidad teórica."
+        )
+        cfg["ignore_constraints"] = ignore_constraints
     
     # Filter config for scheduler
     cfg_plan = cfg.copy()
@@ -92,6 +102,12 @@ if archivo is not None:
     # --- VISUALIZACIÓN DE CARGA DE TRABAJO (REQ. USUARIO) ---
     if not schedule.empty:
         st.markdown("### 📊 Análisis de Capacidad y Carga")
+        
+        # --- EXPLICACIÓN DE MODOS DE ANÁLISIS ---
+        # 1. Detectar Cuello de Botella: Busca el primer momento en el futuro donde la demada acumulada supera la capacidad acumulada.
+        #    Es útil para saber CUÁNDO va a fallar la planta si no se toman medidas (horas extra).
+        # 2. Análisis Temporal: Muestra una foto estática de un periodo (ej. mañana, o la semana que viene).
+        #    Compara cuántas horas de trabajo caen en ese periodo vs cuántas horas máquina hay disponibles.
         
         modo_analisis = st.radio(
             "Modo de Análisis:",
