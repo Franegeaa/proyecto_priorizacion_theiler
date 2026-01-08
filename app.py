@@ -50,6 +50,9 @@ if archivo is not None:
             value=False, 
             help="Si se activa, el planificador ignorará la falta de Materia Prima, Chapas o Troqueles. Útil para ver capacidad teórica."
         )
+        # --- VERSIÓN TEÓRICA / SIMULACIÓN ---
+        # Si 'ignore_constraints' es True, se le pasa esta bandera al scheduler.
+        # Esto permite calcular el programa "ideal" asumiendo que todos los materiales están en planta.
         cfg["ignore_constraints"] = ignore_constraints
     
     # Filter config for scheduler
@@ -102,6 +105,12 @@ if archivo is not None:
     # --- VISUALIZACIÓN DE CARGA DE TRABAJO (REQ. USUARIO) ---
     if not schedule.empty:
         st.markdown("### 📊 Análisis de Capacidad y Carga")
+        
+        # --- EXPLICACIÓN DE MODOS DE ANÁLISIS ---
+        # 1. Detectar Cuello de Botella: Busca el primer momento en el futuro donde la demada acumulada supera la capacidad acumulada.
+        #    Es útil para saber CUÁNDO va a fallar la planta si no se toman medidas (horas extra).
+        # 2. Análisis Temporal: Muestra una foto estática de un periodo (ej. mañana, o la semana que viene).
+        #    Compara cuántas horas de trabajo caen en ese periodo vs cuántas horas máquina hay disponibles.
         
         modo_analisis = st.radio(
             "Modo de Análisis:",

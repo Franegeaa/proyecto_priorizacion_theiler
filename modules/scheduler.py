@@ -428,6 +428,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         ot = t["OT_id"]
         flujo_clean = [clean(p) for p in flujo_estandar]
         
+        # --- LÓGICA VERSIÓN TEÓRICA (SIMULACIÓN) ---
+        # Si cfg.get("ignore_constraints") es True, esta función:
+        # 1. Ignorará la falta de stock de Materia Prima (verificado fuera de esta función, en el loop principal).
+        # 2. Ignorará la falta de fechas de llegada para Chapas (Pelicula) y Troqueles.
+        # Esto permite generar una planificación "ideal" basada solo en capacidad de máquina y tiempos de proceso.
+        
         # --- REORDENAMIENTO DINAMICO (TROQ ANTES) ---
         if t.get("_TroqAntes"):
              # Mover 'troquelado' antes de 'impresion flexo'/'impresion offset'
