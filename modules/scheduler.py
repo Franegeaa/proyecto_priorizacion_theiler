@@ -52,6 +52,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     
     pending_list = cfg.get("pending_processes", [])
     if pending_list:
+        print(f"--- Procesando {len(pending_list)} procesos en curso ---")
         
         # Mapa inverso para saber qué tareas borrar de 'tasks'
         # Clave: (OT_id, Maquina) -> Indices en tasks
@@ -101,6 +102,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             if candidates.empty:
                 # Si no encontramos la tarea, quizás es porque la máquina no matchea perfecto con el proceso estándar
                 # O la OT no existe. Logueamos y seguimos.
+                print(f"Skip Pending: No se encontró tarea para {pp_ot} en {pp_maquina} ({proc_target})")
                 continue
             
             # Tomamos la primera coincidencia (debería ser única por proceso)
@@ -152,8 +154,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 
                 # --- BORRAR DE TASKS (Para que no se agende de nuevo) ---
                 tasks = tasks.drop(idx_task)
+                print(f"OK Pending: {pp_ot} en {pp_maquina} agendado y removido de cola.")
             else:
-                pass
+                 print(f"Error Pending: No se pudo reservar tiempo para {pp_ot} en {pp_maquina}")
+
     # =======================================================
 
     flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])] 
@@ -493,6 +497,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # Check simple: ¿Está completado?
                 completados_clean = {clean(c) for c in completado[ot]}
                 
+                # --- DEBUG CHECK specific OT ---
+                if "E7398-2025278" in str(ot):
+                     print(f"CHECK DEPS: Proc={proc_actual_clean} Need={p_clean} InCompleted={p_clean in completados_clean} CompletedSet={completados_clean}")
+                
                 if p_clean not in completados_clean:
                     return (False, None)
                 
@@ -562,8 +570,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
         # DEBUG SIMULATION ORDER
         sim_order = sorted(maquinas_shuffled, key=_prioridad_dinamica)
+        print(f"\n--- SIMULATION LOOP STEP ---")
         for m in sim_order: # Log ALL machines
            dt, _, _ = _prioridad_dinamica(m)
+           print(f"   Machine: {m} @ {dt}")
 
         for maquina in sim_order:
             if not colas.get(maquina):  
@@ -618,8 +628,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                 # --- DEBUG PRINT OFFSET QUEUE EVOLUTION ---
                 if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
+                    print(f"\n--- OFFSET QUEUE @ {current_agenda_dt} (Last: {ultima_tarea.get('Cliente') if ultima_tarea else 'None'}) ---")
                     for i, t in enumerate(list(colas[maquina])[:10]):
                         ready, avail = verificar_disponibilidad(t, maquina)
+                        print(f"  [{i}] {t.get('OT_id')} | {t.get('Cliente')} | Ready: {ready} | Avail: {avail}")
 
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
@@ -633,6 +645,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # Si la tarea no está lista (ej. falta Guillotina), pero es del MISMO GRUPO (Setup Menor)
                         # que la anterior, decidimos ESPERAR en lugar de buscar otra cosa para llenar el hueco.
                         if ultima_tarea and usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", "")):
+                            if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
+                                print(f"DEBUG BLOCK: Waiting for grouped task {t_cand.get('OT_id')} (Dependency missing). Aborting gap-fill search.")
+                            # Abortamos búsqueda. Ningún 'mejor_candidato_futuro' será tomado porque idx_cand es -1.
                             idx_cand = -1
                             mejor_candidato_futuro = None
                             mejor_candidato_setup = None
@@ -1035,20 +1050,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 elif usa_setup_menor(last_task, orden, proceso_nombre):
                                     setup_min = setup_menor_min(proceso_nombre, maquina, cfg); motivo = "Setup menor (cluster)"
                             
-                            
                             total_h = proc_h + setup_min / 60.0
-
-                            # --- DEBUG ESPECIFICO FLEXO ---
-                            if "E7438-2005253" in str(t["OT_id"]) and "flexo" in maquina.lower():
-                                print(f"################################################################")
-                                print(f"DEBUG FLEXO {t['OT_id']} en {maquina}:")
-                                print(f"  - CantidadPliegos: {orden.get('CantidadPliegos')}")
-                                print(f"  - Poses: {orden.get('Poses')}, Bocas: {orden.get('Bocas')}")
-                                print(f"  - Dorso: {orden.get('Dorso')}, FreyDorDpd: {orden.get('FreyDorDpd')}")
-                                print(f"  - Proc_h: {proc_h:.4f} h")
-                                print(f"  - Setup_min: {setup_min} min")
-                                print(f"  - Total_h: {total_h:.4f} h")
-                                print(f"################################################################")
 
                         if pd.isna(total_h) or total_h <= 0:
                             continue
@@ -1112,13 +1114,18 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         if tarea_robada: motivo = "Robado (Optimización)"
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje", "Dorso", "FreyDorDpd"]} |
+                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
                         fin_proceso[t["OT_id"]][proceso_nombre] = fin_real
                         completado[t["OT_id"]].add(proceso_nombre)
                         
+                        # --- DEBUG COMPLETION ---
+                        if "guillotin" in proceso_nombre.lower() and "E7398-2025278" in t["OT_id"]:
+                             print(f"DEBUG: Marking Completed for {t['OT_id']}: ADDING '{proceso_nombre}' to Set. Current Set: {completado[t['OT_id']]}")
+                             print(f"DEBUG: TIMING {t['OT_id']} on {maquina}: TotalH={total_h} ProcH={proc_h} Setup={setup_min}")
+                             print(f"DEBUG: AGENDA {t['OT_id']}: Start={inicio_real} End={fin_real}")
                         ultimo_en_maquina[maquina] = t
                         progreso = True
                         tareas_agendadas = True

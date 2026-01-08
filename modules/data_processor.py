@@ -85,7 +85,7 @@ def process_uploaded_dataframe(df):
     df["_IMP_FreyDorDpd"] = to_bool_series(["FreyDorDpd"])    # Offset → doble pasada
     
     # --- FLAGO DE REORDENAMIENTO (TROQUEL ANTES DE IMPRESION) ---
-    df["_TroqAntes"] = to_bool_series(["ProcesoDpd", "TroquelAntes", "TroqueladoAntes"])
+    df["_TroqAntes"] = to_bool_series(["TroqAntes", "TroquelAntes", "TroqueladoAntes"])
 
     # --- TROQUEL PREFERIDO ---
     for c in ["CodigoTroquel", "CodigoTroquelTapa", "CodigoTroquelCuerpo", "CodTroTapa", "CodTroCuerpo"]:
