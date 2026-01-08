@@ -52,8 +52,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     
     pending_list = cfg.get("pending_processes", [])
     if pending_list:
-        print(f"--- Procesando {len(pending_list)} procesos en curso ---")
-        
+
         # Mapa inverso para saber qué tareas borrar de 'tasks'
         # Clave: (OT_id, Maquina) -> Indices en tasks
         # Pero ojo, necesitamos saber el "Proceso" para mappear a Maquina si no es obvio, 
@@ -102,7 +101,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
             if candidates.empty:
                 # Si no encontramos la tarea, quizás es porque la máquina no matchea perfecto con el proceso estándar
                 # O la OT no existe. Logueamos y seguimos.
-                print(f"Skip Pending: No se encontró tarea para {pp_ot} en {pp_maquina} ({proc_target})")
                 continue
             
             # Tomamos la primera coincidencia (debería ser única por proceso)
@@ -154,10 +152,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 
                 # --- BORRAR DE TASKS (Para que no se agende de nuevo) ---
                 tasks = tasks.drop(idx_task)
-                print(f"OK Pending: {pp_ot} en {pp_maquina} agendado y removido de cola.")
             else:
-                 print(f"Error Pending: No se pudo reservar tiempo para {pp_ot} en {pp_maquina}")
-
+                pass
     # =======================================================
 
     flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])] 
@@ -498,8 +494,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 completados_clean = {clean(c) for c in completado[ot]}
                 
                 # --- DEBUG CHECK specific OT ---
-                if "E7398-2025278" in str(ot):
-                     print(f"CHECK DEPS: Proc={proc_actual_clean} Need={p_clean} InCompleted={p_clean in completados_clean} CompletedSet={completados_clean}")
                 
                 if p_clean not in completados_clean:
                     return (False, None)
@@ -570,10 +564,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
         # DEBUG SIMULATION ORDER
         sim_order = sorted(maquinas_shuffled, key=_prioridad_dinamica)
-        print(f"\n--- SIMULATION LOOP STEP ---")
         for m in sim_order: # Log ALL machines
            dt, _, _ = _prioridad_dinamica(m)
-           print(f"   Machine: {m} @ {dt}")
 
         for maquina in sim_order:
             if not colas.get(maquina):  
@@ -626,13 +618,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     else:
                         log_debug("Ultima Tarea: NONE")
 
-                # --- DEBUG PRINT OFFSET QUEUE EVOLUTION ---
-                if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
-                    print(f"\n--- OFFSET QUEUE @ {current_agenda_dt} (Last: {ultima_tarea.get('Cliente') if ultima_tarea else 'None'}) ---")
-                    for i, t in enumerate(list(colas[maquina])[:10]):
-                        ready, avail = verificar_disponibilidad(t, maquina)
-                        print(f"  [{i}] {t.get('OT_id')} | {t.get('Cliente')} | Ready: {ready} | Avail: {avail}")
-
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -645,9 +630,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         # Si la tarea no está lista (ej. falta Guillotina), pero es del MISMO GRUPO (Setup Menor)
                         # que la anterior, decidimos ESPERAR en lugar de buscar otra cosa para llenar el hueco.
                         if ultima_tarea and usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", "")):
-                            if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
-                                print(f"DEBUG BLOCK: Waiting for grouped task {t_cand.get('OT_id')} (Dependency missing). Aborting gap-fill search.")
-                            # Abortamos búsqueda. Ningún 'mejor_candidato_futuro' será tomado porque idx_cand es -1.
                             idx_cand = -1
                             mejor_candidato_futuro = None
                             mejor_candidato_setup = None
@@ -1121,11 +1103,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         fin_proceso[t["OT_id"]][proceso_nombre] = fin_real
                         completado[t["OT_id"]].add(proceso_nombre)
                         
-                        # --- DEBUG COMPLETION ---
-                        if "guillotin" in proceso_nombre.lower() and "E7398-2025278" in t["OT_id"]:
-                             print(f"DEBUG: Marking Completed for {t['OT_id']}: ADDING '{proceso_nombre}' to Set. Current Set: {completado[t['OT_id']]}")
-                             print(f"DEBUG: TIMING {t['OT_id']} on {maquina}: TotalH={total_h} ProcH={proc_h} Setup={setup_min}")
-                             print(f"DEBUG: AGENDA {t['OT_id']}: Start={inicio_real} End={fin_real}")
                         ultimo_en_maquina[maquina] = t
                         progreso = True
                         tareas_agendadas = True
