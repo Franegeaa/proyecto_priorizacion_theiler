@@ -52,7 +52,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     
     pending_list = cfg.get("pending_processes", [])
     if pending_list:
-        
+
         # Mapa inverso para saber qué tareas borrar de 'tasks'
         # Clave: (OT_id, Maquina) -> Indices en tasks
         # Pero ojo, necesitamos saber el "Proceso" para mappear a Maquina si no es obvio, 
@@ -499,6 +499,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 # Check simple: ¿Está completado?
                 completados_clean = {clean(c) for c in completado[ot]}
                 
+                # --- DEBUG CHECK specific OT ---
+                
                 if p_clean not in completados_clean:
                     return (False, None)
                 
@@ -523,14 +525,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         arrival_date = None
         
         # 1. Impresión (Offset/Flexo) depende de fecha llegada chapas (PeliculaArt)
-        # 1. Impresión (Offset/Flexo) depende de fecha llegada chapas (PeliculaArt)
         if "impres" in proc_actual_clean:
-            # Si "ignoramos restricciones", asumimos que NO REQUIERE (Force False)
-            requires_pelicula = es_si(t.get("PeliculaArt"))
-            if cfg.get("ignore_constraints"):
-                requires_pelicula = False
-            
-            if requires_pelicula:
+            if es_si(t.get("PeliculaArt")):
                 fecha_chapas = t.get("FechaLlegadaChapas")
                 if pd.notna(fecha_chapas):
                     # Asumimos disponibilidad al inicio de ese día (00:00) o a las 7:00?
@@ -538,13 +534,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     arrival_date = datetime.combine(fecha_chapas.date(), time(7,0))
 
         # 2. Troquelado depende de fecha llegada troquel (TroquelArt)
-        # 2. Troquelado depende de fecha llegada troquel (TroquelArt)
         elif "troquel" in proc_actual_clean:
-             requires_troquel = es_si(t.get("TroquelArt"))
-             if cfg.get("ignore_constraints"):
-                 requires_troquel = False
-
-             if requires_troquel:
+             if es_si(t.get("TroquelArt")):
                 fecha_troquel = t.get("FechaLlegadaTroquel")
                 with open("debug_scheduler.log", "a") as f:
                     f.write(f"DEBUG: Checking TroquelArt for {ot}. Val: {t.get('TroquelArt')}. Date: {fecha_troquel}. NotNa: {pd.notna(fecha_troquel)}\n")
@@ -633,19 +624,9 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     else:
                         log_debug("Ultima Tarea: NONE")
 
-                # --- DEBUG PRINT OFFSET QUEUE EVOLUTION ---
-                if "offset" in maquina.lower() or "heidelberg" in maquina.lower():
-                    for i, t in enumerate(list(colas[maquina])[:10]):
-                        ready, avail = verificar_disponibilidad(t, maquina)
-
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                    
-                    # OVERRIDE: Si ignoramos restricciones, asumimos MP OK siempre
-                    if cfg.get("ignore_constraints"):
-                        mp_ok = True
-                    
                     if not mp_ok: continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
@@ -670,14 +651,8 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                     # Si está lista YA (o antes), la tomamos inmediatamente (Gap Filling)
 
-                    # Si está lista YA (o antes), la tomamos inmediatamente (Gap Filling)
-
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                    
-                    if cfg.get("ignore_constraints"):
-                        mp_ok = True
-
                     if not mp_ok: continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
@@ -789,10 +764,6 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 # Validar MP
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                
-                                if cfg.get("ignore_constraints"):
-                                    mp_ok = True
-
                                 if not mp_ok: continue
                                 
                                 runnable, available_at = verificar_disponibilidad(t_cand, maquina)
@@ -1067,20 +1038,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 elif usa_setup_menor(last_task, orden, proceso_nombre):
                                     setup_min = setup_menor_min(proceso_nombre, maquina, cfg); motivo = "Setup menor (cluster)"
                             
-                            
                             total_h = proc_h + setup_min / 60.0
-
-                            # --- DEBUG ESPECIFICO FLEXO ---
-                            if "E7438-2005253" in str(t["OT_id"]) and "flexo" in maquina.lower():
-                                print(f"################################################################")
-                                print(f"DEBUG FLEXO {t['OT_id']} en {maquina}:")
-                                print(f"  - CantidadPliegos: {orden.get('CantidadPliegos')}")
-                                print(f"  - Poses: {orden.get('Poses')}, Bocas: {orden.get('Bocas')}")
-                                print(f"  - Dorso: {orden.get('Dorso')}, FreyDorDpd: {orden.get('FreyDorDpd')}")
-                                print(f"  - Proc_h: {proc_h:.4f} h")
-                                print(f"  - Setup_min: {setup_min} min")
-                                print(f"  - Total_h: {total_h:.4f} h")
-                                print(f"################################################################")
 
                         if pd.isna(total_h) or total_h <= 0:
                             continue
@@ -1144,7 +1102,7 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                         if tarea_robada: motivo = "Robado (Optimización)"
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje", "Dorso", "FreyDorDpd"]} |
+                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
