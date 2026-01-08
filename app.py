@@ -41,16 +41,6 @@ if archivo is not None:
 
     # 3. UI: Active Machines
     maquinas_activas = render_active_machines_selector(cfg)
-
-    # 3.b UI: Ignore Constraints Checkbox
-    with st.sidebar:
-        st.markdown("### 🔧 Configuración Avanzada")
-        ignore_constraints = st.checkbox(
-            "Ignorar restricciones de materiales/herramental (Simulación Teórica)", 
-            value=False, 
-            help="Si se activa, el planificador ignorará la falta de Materia Prima, Chapas o Troqueles. Útil para ver capacidad teórica."
-        )
-        cfg["ignore_constraints"] = ignore_constraints
     
     # Filter config for scheduler
     cfg_plan = cfg.copy()
@@ -304,22 +294,13 @@ if archivo is not None:
             st.caption("Compara la **Carga Programada** (tareas que caen en el periodo) vs **Capacidad Disponible** en ese rango de tiempo.")
             
             # --- FILTROS DE TIEMPO (REPLICADOS DEL GANTT) ---
-            col_f1, col_f2 = st.columns([2, 1])
-            with col_f1:
-                tipo_filtro_cap = st.radio(
-                    "Seleccionar Rango de Tiempo:",
-                    ["Día", "Semana", "Rango Personalizado"], 
-                    index=0,
-                    horizontal=True,
-                    key="filtro_cap_radio"
-                )
-            with col_f2:
-                tipo_cliente_cap = st.selectbox(
-                    "Filtrar por Cliente:",
-                    ["(Todos)", "ESTANDAR", "PERSONALIZADOS"],
-                    index=0,
-                    key="filtro_cap_cliente"
-                )
+            tipo_filtro_cap = st.radio(
+                "Seleccionar Rango de Tiempo:",
+                ["Día", "Semana", "Rango Personalizado"], # "Mes", "Ver todo"], 
+                index=0,
+                horizontal=True,
+                key="filtro_cap_radio"
+            )
             
             c_start = None
             c_end = None
@@ -364,31 +345,21 @@ if archivo is not None:
             def es_maquina_tercerizada(m):
                 m_lower = m.lower()
                 return any(k in m_lower for k in outsourced_keywords)
-            
-            # --- FILTRADO POR CLIENTE (NUEVO) ---
-            schedule_filtered = schedule.copy()
-            if tipo_cliente_cap == "ESTANDAR":
-                # Filtramos los que contienen "estandar" (case insensitive)
-                schedule_filtered = schedule_filtered[schedule_filtered["Cliente"].astype(str).str.lower().str.contains("estandar", na=False)]
-            elif tipo_cliente_cap == "PERSONALIZADOS":
-                # Filtramos los que NO contienen "estandar"
-                schedule_filtered = schedule_filtered[~schedule_filtered["Cliente"].astype(str).str.lower().str.contains("estandar", na=False)]
-            # Si es (Todos), usamos schedule original (copia)
 
             # --- LOGICA HIBRIDA Y PERSONALIZADA ---
-            # USAMOS schedule_filtered PARA EL CALCULO DE CARGA (DEMANDA)
             # 1. Load_Due: Carga de tareas que VENCEN en el periodo (Demanda Pura)
-            mask_due = (schedule_filtered["DueDate"] >= c_start) & (schedule_filtered["DueDate"] <= c_end)
-            schedule_due = schedule_filtered[mask_due].copy()
+            mask_due = (schedule["DueDate"] >= c_start) & (schedule["DueDate"] <= c_end)
+            # Filtramos por proceso tambien, aunque el filtro principal será por máquina
+            schedule_due = schedule[mask_due].copy()
 
-            # 2. Load_Active: Carga de tareas que se EJECUTAN en el periodo
-            mask_overlap = (schedule_filtered["Inicio"] < c_end) & (schedule_filtered["Fin"] > c_start)
-            schedule_active = schedule_filtered[mask_overlap].copy()
+            # 2. Load_Active: Carga de tareas que se EJECUTAN en el periodo (Ocupación Real)
+            mask_overlap = (schedule["Inicio"] < c_end) & (schedule["Fin"] > c_start)
+            schedule_active = schedule[mask_overlap].copy()
             
             # 3. Load_Future: Tareas que terminan DESPUES del rango (Solo para Rango Personalizado)
             if tipo_filtro_cap == "Rango Personalizado":
-                mask_future = schedule_filtered["DueDate"] > c_end
-                schedule_future = schedule_filtered[mask_future].copy()
+                mask_future = schedule["DueDate"] > c_end
+                schedule_future = schedule[mask_future].copy()
             else:
                 schedule_future = pd.DataFrame()
 
