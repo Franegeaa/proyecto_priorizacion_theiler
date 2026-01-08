@@ -327,23 +327,12 @@ def render_details_section(schedule, detalle_maquina, df):
     st.subheader("🔎 Detalle interactivo")
     modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina"], horizontal=True)
 
-
-
-
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 
             opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist())
             elegido = st.selectbox("Elegí OT:", opciones)
             df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido]
             df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
-            
-            # Ensure "ID Maquina" is first if it exists
-            cols = df_show.columns.tolist()
-            if "ID Maquina" in cols:
-                cols.remove("ID Maquina")
-                cols = ["ID Maquina"] + cols
-            df_show = df_show[cols]
-
             st.dataframe(df_show, use_container_width=True)
             
             # --- Custom Download Button ---
@@ -385,25 +374,18 @@ def render_details_section(schedule, detalle_maquina, df):
             df_maquina.sort_values(by="Inicio", inplace=True)
 
             # Columns selection
-            # Base columns now include "ID Maquina" at the START if avail
-            base_cols = ["OT_id", "Cliente-articulo"]
-            if "ID Maquina" in df_maquina.columns:
-                 base_cols = ["ID Maquina"] + base_cols
-
             if any(k in maquina_sel.lower() for k in ["troq", "manual", "autom", "duyan", "iberica"]):
                 st.write("🧱 Mostrando código de troquel (agrupamiento interno).")
-                specific_cols = ["PliAnc","PliLar", "Bocas","CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
+                cols = ["OT_id", "Cliente-articulo", "PliAnc","PliLar", "Bocas","CantidadPliegosNetos", "CantidadPliegos", "CodigoTroquel", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
             elif "bobina" in maquina_sel.lower():
                  st.write("📜 Mostrando detalles de bobina (Materia Prima / Medidas).")
-                 specific_cols = ["MateriaPrima", "Gramaje", "PliAnc", "PliLar", "CantidadPliegos", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
+                 cols = ["OT_id", "Cliente-articulo", "MateriaPrima", "Gramaje", "PliAnc", "PliLar", "CantidadPliegos", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
             elif any(k in maquina_sel.lower() for k in ["offset", "flexo", "impres", "heidel"]):
                 st.write("🎨 Mostrando colores del trabajo de impresión.")
-                specific_cols = ["Poses", "CantidadPliegosNetos","CantidadPliegos", "Colores", "CodigoTroquel", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
+                cols = ["OT_id", "Cliente-articulo", "Poses", "CantidadPliegosNetos","CantidadPliegos", "Colores", "CodigoTroquel", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
             else:
-                specific_cols = ["CantidadPliegos", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
+                cols = ["OT_id", "Cliente-articulo", "CantidadPliegos", "Proceso", "Inicio", "Fin", "Duracion_h", "DueDate"]
 
-            cols = base_cols + specific_cols
-            
             cols_exist = [c for c in cols if c in df_maquina.columns]
             df_maquina_display = df_maquina[cols_exist].drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
             st.dataframe(df_maquina_display, use_container_width=True)
