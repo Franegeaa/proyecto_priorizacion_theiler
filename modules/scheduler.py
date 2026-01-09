@@ -526,7 +526,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         
         # 1. Impresión (Offset/Flexo) depende de fecha llegada chapas (PeliculaArt)
         if "impres" in proc_actual_clean:
-            if es_si(t.get("PeliculaArt")):
+            # Si "ignoramos restricciones", asumimos que NO REQUIERE (Force False)
+            requires_pelicula = es_si(t.get("PeliculaArt"))
+            if cfg.get("ignore_constraints"):
+                requires_pelicula = False
+            
+            if requires_pelicula:
                 fecha_chapas = t.get("FechaLlegadaChapas")
                 if pd.notna(fecha_chapas):
                     # Asumimos disponibilidad al inicio de ese día (00:00) o a las 7:00?
@@ -535,7 +540,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
         # 2. Troquelado depende de fecha llegada troquel (TroquelArt)
         elif "troquel" in proc_actual_clean:
-             if es_si(t.get("TroquelArt")):
+             requires_troquel = es_si(t.get("TroquelArt"))
+             if cfg.get("ignore_constraints"):
+                 requires_troquel = False
+
+             if requires_troquel:
                 fecha_troquel = t.get("FechaLlegadaTroquel")
                 with open("debug_scheduler.log", "a") as f:
                     f.write(f"DEBUG: Checking TroquelArt for {ot}. Val: {t.get('TroquelArt')}. Date: {fecha_troquel}. NotNa: {pd.notna(fecha_troquel)}\n")
@@ -627,6 +636,11 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                 for i, t_cand in enumerate(colas[maquina]):
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                    
+                    # OVERRIDE: Si ignoramos restricciones, asumimos MP OK siempre
+                    if cfg.get("ignore_constraints"):
+                        mp_ok = True
+                    
                     if not mp_ok: continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
@@ -653,6 +667,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                    
+                    if cfg.get("ignore_constraints"):
+                        mp_ok = True
+
                     if not mp_ok: continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
@@ -764,6 +782,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                                 # Validar MP
                                 mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                 mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                
+                                if cfg.get("ignore_constraints"):
+                                    mp_ok = True
+
                                 if not mp_ok: continue
                                 
                                 runnable, available_at = verificar_disponibilidad(t_cand, maquina)
