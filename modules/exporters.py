@@ -64,7 +64,7 @@ def generar_excel_ot_horizontal(schedule_df):
             row = proc_map.get(proc) 
             
             if row is not None:
-                row_data[f"{prefix} - Maquina"]   = row.get("Maquina", "")
+                row_data[f"{prefix} - Maquina"]   = row.get("ID Maquina", "")
                 row_data[f"{prefix} - Inicio"]    = row.get("Inicio", "")
                 row_data[f"{prefix} - Fin"]       = row.get("Fin", "")
                 row_data[f"{prefix} - Duracion"]  = row.get("Duracion_h", 0)
