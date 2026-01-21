@@ -64,15 +64,33 @@ def generar_excel_ot_horizontal(schedule_df):
             row = proc_map.get(proc) 
             
             if row is not None:
-                row_data[f"{prefix} - Maquina"]   = row.get("ID Maquina", "")
-                row_data[f"{prefix} - Inicio"]    = row.get("Inicio", "")
-                row_data[f"{prefix} - Fin"]       = row.get("Fin", "")
-                row_data[f"{prefix} - Duracion"]  = row.get("Duracion_h", 0)
+                start_dt = pd.to_datetime(row.get("Inicio"))
+                end_dt = pd.to_datetime(row.get("Fin"))
+                
+                row_data[f"{prefix} - Maquina"]       = row.get("ID Maquina", "")
+                
+                if pd.notna(start_dt):
+                    row_data[f"{prefix} - Fecha Inicio"]  = start_dt.date()
+                    row_data[f"{prefix} - Hora Inicio"]   = start_dt.time()
+                else:
+                    row_data[f"{prefix} - Fecha Inicio"]  = ""
+                    row_data[f"{prefix} - Hora Inicio"]   = ""
+
+                if pd.notna(end_dt):
+                    row_data[f"{prefix} - Fecha Fin"]     = end_dt.date()
+                    row_data[f"{prefix} - Hora Fin"]      = end_dt.time()
+                else:
+                    row_data[f"{prefix} - Fecha Fin"]     = ""
+                    row_data[f"{prefix} - Hora Fin"]      = ""
+                
+                row_data[f"{prefix} - Duracion"]      = row.get("Duracion_h", 0)
             else:
                 # Celdas vacías si no hay proceso
-                row_data[f"{prefix} - Maquina"]   = ""
-                row_data[f"{prefix} - Inicio"]    = ""
-                row_data[f"{prefix} - Fin"]       = ""
+                row_data[f"{prefix} - Maquina"]       = ""
+                row_data[f"{prefix} - Fecha Inicio"]  = ""
+                row_data[f"{prefix} - Hora Inicio"]   = ""
+                row_data[f"{prefix} - Fecha Fin"]     = ""
+                row_data[f"{prefix} - Hora Fin"]      = ""
                 row_data[f"{prefix} - Duracion"]  = ""
         
         data_rows.append(row_data)
