@@ -16,6 +16,7 @@ from modules.config_loader import (
 from modules.tiempos_y_setup import (
     capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
 )
+from modules.history_manager import get_frozen_tasks
 
 # Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
 PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
@@ -41,6 +42,106 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # =======================================================
+    # 0. HISTORY & FREEZING LOGIC
+    # =======================================================
+    if cfg.get("ignore_history"):
+        strict_frozen = pd.DataFrame()
+        soft_frozen = pd.DataFrame() 
+        history_full = pd.DataFrame()
+    else:
+        strict_frozen, soft_frozen, history_full = get_frozen_tasks(agenda["General"]["fecha"])
+    
+    # Identify Pending tasks to avoid double-locking (Pending wins)
+    pending_list = cfg.get("pending_processes", [])
+    pending_set = set()
+    for pp in pending_list:
+        pending_set.add((str(pp["ot_id"]).strip(), str(pp["maquina"]).strip()))
+
+    # --- PHASE 1: APPLY STRICT LOCKS (TODAY) ---
+    frozen_schedule_rows = []
+    
+    if not strict_frozen.empty and not tasks.empty:
+        tasks["_match_key"] = tasks["OT_id"] + "_" + tasks["Proceso"].astype(str).str.lower().str.strip()
+        strict_frozen["_match_key"] = strict_frozen["OT_id"] + "_" + strict_frozen["Proceso"].astype(str).str.lower().str.strip()
+        
+        for _, frozen_t in strict_frozen.iterrows():
+            # Check if this task is in Pending List (running now)
+            # We skip strict freeze if it's pending, so pending logic handles it (partial qty, starts now)
+            if (str(frozen_t["OT_id"]).strip(), str(frozen_t["Maquina"]).strip()) in pending_set:
+                continue
+
+            key = frozen_t["_match_key"]
+            matches = tasks[tasks["_match_key"] == key]
+            
+            if not matches.empty:
+                curr_task_idx = matches.index[0]
+                curr_task = tasks.loc[curr_task_idx]
+                
+                f_start = frozen_t["Inicio"]
+                f_end = frozen_t["Fin"]
+                f_maq = frozen_t["Maquina"]
+                
+                if f_maq in agenda:
+                     current_agenda_dt = datetime.combine(agenda[f_maq]["fecha"], agenda[f_maq]["hora"])
+                     if f_end > current_agenda_dt:
+                         agenda[f_maq]["fecha"] = f_end.date()
+                         agenda[f_maq]["hora"] = f_end.time()
+                
+                res = curr_task.to_dict()
+                res.update({
+                    "Maquina": f_maq,
+                    "Inicio": f_start,
+                    "Fin": f_end,
+                    "Duracion_h": (f_end - f_start).total_seconds() / 3600.0,
+                    "Motivo": "FROZEN (Hoy)",
+                    "Setup_min": frozen_t.get("Setup_min", 0),
+                    "Proceso_h": frozen_t.get("Proceso_h", 0)
+                })
+                frozen_schedule_rows.append(res)
+                tasks.drop(curr_task_idx, inplace=True)
+
+    # --- PHASE 2: PREPARE SOFT LOCKS (TOMORROW) ---
+    if not soft_frozen.empty and not tasks.empty:
+         if "_match_key" not in tasks.columns:
+             tasks["_match_key"] = tasks["OT_id"] + "_" + tasks["Proceso"].astype(str).str.lower().str.strip()
+         
+         soft_frozen["_match_key"] = soft_frozen["OT_id"] + "_" + soft_frozen["Proceso"].astype(str).str.lower().str.strip()
+         soft_map = soft_frozen.set_index("_match_key")[["Maquina", "Inicio"]].to_dict("index")
+         
+         def apply_soft_lock(row):
+             k = row["_match_key"]
+             if k in soft_map:
+                 return pd.Series([soft_map[k]["Maquina"], soft_map[k]["Inicio"], True])
+             return pd.Series([None, None, False])
+             
+         tasks[["_frozen_machine", "_frozen_start", "_is_soft_locked"]] = tasks.apply(apply_soft_lock, axis=1)
+         
+         # Force Machine for soft locked
+         mask_soft = tasks["_is_soft_locked"]
+         if mask_soft.any():
+            tasks.loc[mask_soft, "Maquina"] = tasks.loc[mask_soft, "_frozen_machine"]
+
+    # --- PHASE 3: IDENTIFY NEW URGENT ---
+    if not tasks.empty:
+         if "_match_key" not in tasks.columns:
+              tasks["_match_key"] = tasks["OT_id"] + "_" + tasks["Proceso"].astype(str).str.lower().str.strip()
+         
+         history_keys = set()
+         if not history_full.empty:
+              history_full["_tmp_key"] = history_full["OT_id"] + "_" + history_full["Proceso"].astype(str).str.lower().str.strip()
+              history_keys = set(history_full["_tmp_key"].unique())
+         
+         def is_new_urgent(row):
+             is_urg = es_si(row.get("Urgente"))
+             if not is_urg: return False
+             return row["_match_key"] not in history_keys
+             
+         tasks["_is_new_urgent"] = tasks.apply(is_new_urgent, axis=1)
+
+    if "_match_key" in tasks.columns:
+        tasks.drop(columns=["_match_key"], inplace=True)
+
+    # =======================================================
     # 1.1 PROCESAMIENTO IMAGEN DE PLANTA (PENDING PROCESSES)
     # =======================================================
     
@@ -49,6 +150,19 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
     fin_proceso = defaultdict(dict)
     ultimo_en_maquina = {m: None for m in cfg["maquinas"]["Maquina"].unique()} 
     filas = []
+
+    # --- MERGE FROZEN ROWS (STRICT) ---
+    if frozen_schedule_rows:
+        filas.extend(frozen_schedule_rows)
+        for r in frozen_schedule_rows:
+            ot = r["OT_id"]
+            proc = r["Proceso"]
+            maq = r["Maquina"]
+            fin = r["Fin"]
+            
+            completado[ot].add(proc)
+            fin_proceso[ot][proc] = fin
+            ultimo_en_maquina[maq] = r
     
     pending_list = cfg.get("pending_processes", [])
     if pending_list:
@@ -376,14 +490,22 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
         else: 
-            # Orden por defecto: Urgente -> DueDate -> Orden Proceso -> Cantidad
-            q.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[False, True, True, False], inplace=True)
+            # Orden por defecto: New Urgent -> Soft Locked -> Urgente -> DueDate -> Orden Proceso -> Cantidad
+            if "_is_new_urgent" not in q.columns: q["_is_new_urgent"] = False
+            if "_is_soft_locked" not in q.columns: q["_is_soft_locked"] = False
+            
+            q.sort_values(by=["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                          ascending=[False, False, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
     # Crear la cola del POOL si existe
     if "POOL_DESCARTONADO" in tasks["Maquina"].values:
         q_pool = tasks[tasks["Maquina"] == "POOL_DESCARTONADO"].copy()
-        q_pool.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], ascending=[False, True, True, False], inplace=True)
+        if "_is_new_urgent" not in q_pool.columns: q_pool["_is_new_urgent"] = False
+        if "_is_soft_locked" not in q_pool.columns: q_pool["_is_soft_locked"] = False
+            
+        q_pool.sort_values(by=["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                           ascending=[False, False, False, True, True, False], inplace=True)
         colas["POOL_DESCARTONADO"] = deque(q_pool.to_dict("records"))
     else:
         colas["POOL_DESCARTONADO"] = deque()

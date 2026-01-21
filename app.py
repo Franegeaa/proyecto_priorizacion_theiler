@@ -18,20 +18,38 @@ from modules.ui_components import (
     render_descartonador_ids_section # New import
 )
 from modules.visualizations import render_gantt_chart
+from modules.history_manager import save_history
 
 st.set_page_config(page_title="Priorización de Órdenes", layout="wide")
 st.title("📦 Planificador de Producción – Theiler Packaging")
+
+# Load Config (Always active)
+if "cfg" not in st.session_state:
+    st.session_state.cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
+cfg = st.session_state.cfg
+
+# --- SIDEBAR CONFIGURATION (Always visible) ---
+with st.sidebar:
+    st.markdown("### 🔧 Configuración Avanzada")
+    ignore_constraints = st.checkbox(
+        "Ignorar restricciones de materiales/herramental (Simulación Teórica)", 
+        value=False, 
+        help="Si se activa, el planificador ignorará la falta de Materia Prima, Chapas o Troqueles. Útil para ver capacidad teórica."
+    )
+    cfg["ignore_constraints"] = ignore_constraints
+    
+    ignore_history = st.checkbox(
+        "Restablecer Planificación (Ignorar Historial/Memoria)",
+        value=False,
+        help="Si se activa, se ignorará la planificación anterior y se recalculará todo desde cero (sin congelar el día de hoy)."
+    )
+    cfg["ignore_history"] = ignore_history
 
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
 if archivo is not None:
     df = pd.read_excel(archivo)
-
-    # Load Config
-    if "cfg" not in st.session_state:
-        st.session_state.cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
-    cfg = st.session_state.cfg   # <- SIEMPRE usar el mismo cfg    
-
+    
     # 1. UI: Machine Speeds
     render_machine_speed_inputs(cfg)
     
@@ -42,16 +60,6 @@ if archivo is not None:
     # 3. UI: Active Machines
     maquinas_activas = render_active_machines_selector(cfg)
 
-    # 3.b UI: Ignore Constraints Checkbox
-    with st.sidebar:
-        st.markdown("### 🔧 Configuración Avanzada")
-        ignore_constraints = st.checkbox(
-            "Ignorar restricciones de materiales/herramental (Simulación Teórica)", 
-            value=False, 
-            help="Si se activa, el planificador ignorará la falta de Materia Prima, Chapas o Troqueles. Útil para ver capacidad teórica."
-        )
-        cfg["ignore_constraints"] = ignore_constraints
-    
     # Filter config for scheduler
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
@@ -87,6 +95,10 @@ if archivo is not None:
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 
     schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
+    
+    # Save History for next run (Freezing Logic)
+    if not schedule.empty:
+        save_history(schedule)
 
     # 9. Metrics
     col1, col2, col3, col4 = st.columns(4)
