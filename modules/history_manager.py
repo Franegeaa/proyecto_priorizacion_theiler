@@ -47,10 +47,21 @@ def save_history(schedule_df):
             # Fallback to local
     
     # 2. Local JSON Fallback
-    records = df_save.to_dict("records")
     try:
+        # Use simple Date format handling and replace NaNs to ensure valid JSON
+        df_save = df_save.replace({float('nan'): None})
+        
+        # Convert all datetimes to string to avoid serialization errors
+        # (Already did strict ones, but let's be safe for others like FechaLlegada*)
+        for col in df_save.select_dtypes(include=['datetime', 'datetimetz']).columns:
+            df_save[col] = df_save[col].astype(str)
+            
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2, ensure_ascii=False)
+            # use to_json for better pandas compatibility? 
+            # Actually simplest is df.to_json(path_or_buf) but we wanted to catch errors.
+            # to_dict -> json.dump with default=str helps.
+            records = df_save.to_dict("records")
+            json.dump(records, f, indent=2, ensure_ascii=False, default=str)
         print("History saved to local JSON.")
     except Exception as e:
         print(f"Error saving history locally: {e}")

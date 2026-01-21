@@ -333,6 +333,15 @@ def render_details_section(schedule, detalle_maquina, df):
             elegido = st.selectbox("Elegí OT:", opciones)
             df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido]
             df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
+            
+            # --- Sanitize for Streamlit/Arrow ---
+            # Drop internal columns
+            df_show = df_show.loc[:, ~df_show.columns.str.startswith("_")]
+            # Convert object columns to string to handle mixed types (e.g. Troquel/IDs)
+            for col in df_show.select_dtypes(include=['object']).columns:
+                df_show[col] = df_show[col].fillna("").astype(str)
+            # ------------------------------------
+
             st.dataframe(df_show, use_container_width=True)
             
             # --- Custom Download Button ---
@@ -388,6 +397,15 @@ def render_details_section(schedule, detalle_maquina, df):
 
             cols_exist = [c for c in cols if c in df_maquina.columns]
             df_maquina_display = df_maquina[cols_exist].drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
+            
+            # --- Sanitize for Streamlit/Arrow ---
+            # Drop internal columns
+            df_maquina_display = df_maquina_display.loc[:, ~df_maquina_display.columns.str.startswith("_")]
+            # Convert object columns to string
+            for col in df_maquina_display.select_dtypes(include=['object']).columns:
+                df_maquina_display[col] = df_maquina_display[col].fillna("").astype(str)
+            # ------------------------------------
+
             st.dataframe(df_maquina_display, use_container_width=True)
             
             # --- Custom Download Button ---
