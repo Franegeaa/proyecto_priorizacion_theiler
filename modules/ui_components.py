@@ -325,7 +325,7 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
 def render_details_section(schedule, detalle_maquina, df):
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
-    modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina"], horizontal=True)
+    modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina", "Día (Fecha)"], horizontal=True)
 
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 
@@ -357,7 +357,7 @@ def render_details_section(schedule, detalle_maquina, df):
         else:
             st.info("No hay tareas planificadas.")
 
-    else:
+    elif modo == "Máquina":
         if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
             maquinas_disponibles = ordenar_maquinas_personalizado(detalle_maquina["Maquina"].unique().tolist())
             maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
@@ -421,6 +421,53 @@ def render_details_section(schedule, detalle_maquina, df):
             # ------------------------------
         else:
             st.info("No hay detalle por máquina disponible.")
+
+    else:
+        # --- VIEW BY DAY ---
+        if not schedule.empty:
+            st.write("📆 **Visualización por Día**")
+            d_seleccionado = st.date_input("Seleccioná la fecha a visualizar:", value=date.today())
+            
+            # Filter tasks active on this day (intersects [Inicio, Fin])
+            # active if Start <= Selected end of day AND End >= Selected start of day
+            # simpler: intersects selected date
+            
+            sel_start = pd.to_datetime(d_seleccionado)
+            sel_end = sel_start + pd.Timedelta(days=1)
+            
+            # Mask: Start < Day+1 AND End > Day
+            mask = (schedule["Inicio"] < sel_end) & (schedule["Fin"] > sel_start)
+            df_dia = schedule[mask].copy()
+            
+            if not df_dia.empty:
+                # Sort by Machine first, then Start Time
+                df_dia.sort_values(by=["Maquina", "Inicio"], inplace=True)
+                
+                # Select useful cols
+                cols_day = ["Maquina", "OT_id", "Cliente", "Cliente-articulo", "Proceso", "Inicio", "Fin", "Duracion_h", "CantidadPliegos", "DueDate"]
+                cols_final = [c for c in cols_day if c in df_dia.columns]
+                
+                df_show_day = df_dia[cols_final]
+                
+                # Sanitize object columns
+                for col in df_show_day.select_dtypes(include=['object']).columns:
+                    df_show_day[col] = df_show_day[col].fillna("").astype(str)
+
+                st.dataframe(df_show_day, use_container_width=True)
+                
+                # --- Download Button ---
+                buf = dataframe_to_excel_bytes(df_show_day, sheet_name=f"Dia {d_seleccionado}")
+                st.download_button(
+                    label=f"⬇️ Descargar Plan del {d_seleccionado}",
+                    data=buf,
+                    file_name=f"Plan_Dia_{d_seleccionado}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="btn_dl_day_view"
+                )
+            else:
+                st.warning(f"No hay tareas planificadas para el {d_seleccionado}.")
+        else:
+            st.info("No hay tareas planificadas.")
 
 def render_download_section(schedule, resumen_ot, carga_md):
     """Renders the unified download section."""
