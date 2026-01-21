@@ -71,14 +71,14 @@ def generar_excel_ot_horizontal(schedule_df):
                 
                 if pd.notna(start_dt):
                     row_data[f"{prefix} - Fecha Inicio"]  = start_dt.date()
-                    row_data[f"{prefix} - Hora Inicio"]   = start_dt.time()
+                    row_data[f"{prefix} - Hora Inicio"]   = start_dt.strftime("%H:%M")
                 else:
                     row_data[f"{prefix} - Fecha Inicio"]  = ""
                     row_data[f"{prefix} - Hora Inicio"]   = ""
 
                 if pd.notna(end_dt):
                     row_data[f"{prefix} - Fecha Fin"]     = end_dt.date()
-                    row_data[f"{prefix} - Hora Fin"]      = end_dt.time()
+                    row_data[f"{prefix} - Hora Fin"]      = end_dt.strftime("%H:%M")
                 else:
                     row_data[f"{prefix} - Fecha Fin"]     = ""
                     row_data[f"{prefix} - Hora Fin"]      = ""
