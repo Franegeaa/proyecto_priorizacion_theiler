@@ -18,7 +18,6 @@ from modules.ui_components import (
     render_descartonador_ids_section # New import
 )
 from modules.visualizations import render_gantt_chart
-from modules.history_manager import save_history
 
 st.set_page_config(page_title="Priorización de Órdenes", layout="wide")
 st.title("📦 Planificador de Producción – Theiler Packaging")
@@ -38,12 +37,7 @@ with st.sidebar:
     )
     cfg["ignore_constraints"] = ignore_constraints
     
-    ignore_history = st.checkbox(
-        "Restablecer Planificación (Ignorar Historial/Memoria)",
-        value=False,
-        help="Si se activa, se ignorará la planificación anterior y se recalculará todo desde cero (sin congelar el día de hoy)."
-    )
-    cfg["ignore_history"] = ignore_history
+    cfg["ignore_constraints"] = ignore_constraints
 
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
@@ -95,10 +89,6 @@ if archivo is not None:
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 
     schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
-    
-    # Save History for next run (Freezing Logic)
-    if not schedule.empty:
-        save_history(schedule)
 
     # 9. Metrics
     col1, col2, col3, col4 = st.columns(4)

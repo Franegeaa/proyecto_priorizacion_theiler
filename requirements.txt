@@ -3,4 +3,3 @@ openpyxl
 plotly
 numpy
 streamlit>=1.36
-st-gsheets-connection

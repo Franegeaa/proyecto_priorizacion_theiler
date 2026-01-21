@@ -22,8 +22,8 @@ def _cola_impresora_flexo(q):
     q["Urgente"] = q["Urgente"].apply(lambda x: es_si(x))
     
     # Ensure Sort Cols
-    if "_is_new_urgent" not in q.columns: q["_is_new_urgent"] = False
-    if "_is_soft_locked" not in q.columns: q["_is_soft_locked"] = False
+    # Ensure Sort Cols
+
     
     q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
     q["_color_key"] = (
@@ -41,8 +41,8 @@ def _cola_impresora_flexo(q):
         
         # 1. Orden inicial estricto por Fecha
         # Usamos un índice temporal para controlar procesados
-        sub_q = sub_q.sort_values(by=["_is_new_urgent", "_is_soft_locked", "DueDate", "_cliente_key", "CantidadPliegos"], 
-                                  ascending=[False, False, True, True, False])
+        sub_q = sub_q.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], 
+                                  ascending=[True, True, False])
         lista_items = sub_q.to_dict("records")
         n = len(lista_items)
         processed = [False] * n
@@ -101,8 +101,8 @@ def _cola_impresora_offset(q):
     q = q.copy()
 
     # Ensure Sort Cols
-    if "_is_new_urgent" not in q.columns: q["_is_new_urgent"] = False
-    if "_is_soft_locked" not in q.columns: q["_is_soft_locked"] = False
+    # Ensure Sort Cols
+
     
     # 1. LIMPIEZA DE DATOS
     # ------------------------------------------------------------
@@ -151,35 +151,22 @@ def _cola_impresora_offset(q):
         for keys, g in q_cmyk.groupby(["_cliente_key", "_troq_key"], dropna=False):
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
-            # Prioritize New Urgent inside group?
-            # Or group sort order?
-            # Groups are sorted later. This is INSIDE group sort? No, "g_sorted" is stored in recs.
-            # And sorted later by "grupos_todos.sort()".
-            # The tuple is `(not es_urgente, due_min, ...)`
-            # We should add new urgency to tuple.
-            es_new_urgent = g["_is_new_urgent"].any()
-            es_soft_locked = g["_is_soft_locked"].any()
             
-            g_sorted = g.sort_values(["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[False, False, False, True, False])
+            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[False, True, False])
             # Prio 0
-            # Order: New Urgent (True->0 in tuple logic? No, Python Sort. True > False)
-            # We want True FIRST.
-            # Tuple Sort: False < True.
-            # So `not es_new_urgent` gives False if Urgent -> First.
-            grupos_todos.append((not es_new_urgent, not es_soft_locked, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
         # 3.2 PANTONE -> Agrupar por CLIENTE + COLOR
         for keys, g in q_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
-            es_new_urgent = g["_is_new_urgent"].any()
-            es_soft_locked = g["_is_soft_locked"].any()
+
             
-            g_sorted = g.sort_values(["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[False, False, False, True, False])
+            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[False, True, False])
             # Prio 0 (Mismo nivel que CMYK, se ordenan entre ellos por Fecha/Cliente)
-            grupos_todos.append((not es_new_urgent, not es_soft_locked, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
     # 4. GRUPO BARNIZADO (Prioridad 1)
     # ------------------------------------------------------------
@@ -188,13 +175,12 @@ def _cola_impresora_offset(q):
         for cliente, g in q_barniz.groupby("_cliente_key", dropna=False):
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
-            es_new_urgent = g["_is_new_urgent"].any()
-            es_soft_locked = g["_is_soft_locked"].any()
+
             
-            g_sorted = g.sort_values(["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[False, False, False, True, False])
+            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[False, True, False])
             # Prio 1 -> Queda DESPUES de impresion si las fechas coinciden
-            grupos_todos.append((not es_new_urgent, not es_soft_locked, not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
+            grupos_todos.append((not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
 
     # 5. ORDENAMIENTO FINAL
     # ------------------------------------------------------------
@@ -209,27 +195,24 @@ def _cola_impresora_offset(q):
     #         print(f"   -> OT: {r.get('OT_id')} | Cli: {r.get('Cliente')} | Troq: {r.get('CodigoTroquel')} | Due: {r.get('DueDate')}")
     # print("------------------------------------------------------\n")
 
-    return deque([item for _, _, _, _, _, _, _, recs in grupos_todos for item in recs])
+    return deque([item for _, _, _, _, _, recs in grupos_todos for item in recs])
 
 def _cola_troquelada(q): 
     if q.empty: return deque()
     q = q.copy()
-    if "_is_new_urgent" not in q.columns: q["_is_new_urgent"] = False
-    if "_is_soft_locked" not in q.columns: q["_is_soft_locked"] = False
+
+
 
     q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
     grupos = []
     for troq, g in q.groupby("_troq_key", dropna=False):
         due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
         es_urgente = g["Urgente"].any()
-        es_new_urgent = g["_is_new_urgent"].any()
-        es_soft_locked = g["_is_soft_locked"].any()
-
-        g_sorted = g.sort_values(["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[False, False, False, True, False])
-        grupos.append((not es_new_urgent, not es_soft_locked, not es_urgente, due_min, troq, g_sorted.to_dict("records")))
+        g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[False, True, False])
+        grupos.append((not es_urgente, due_min, troq, g_sorted.to_dict("records")))
     grupos.sort()
-    return deque([item for _, _, _, _, _, recs in grupos for item in recs])
+    return deque([item for _, _, _, recs in grupos for item in recs])
 
 def _cola_cortadora_bobina(q):
     """
@@ -255,8 +238,8 @@ def _cola_cortadora_bobina(q):
     q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
     
     # Ensure Sort Cols
-    if "_is_new_urgent" not in q.columns: q["_is_new_urgent"] = False
-    if "_is_soft_locked" not in q.columns: q["_is_soft_locked"] = False
+    
+
     
     grupos = []
     
@@ -267,16 +250,15 @@ def _cola_cortadora_bobina(q):
         # Metadatos del grupo
         due_min = g["DueDate"].min() or pd.Timestamp.max
         es_urgente = g["Urgente"].any()
-        es_new_urgent = g["_is_new_urgent"].any()
-        es_soft_locked = g["_is_soft_locked"].any()
+
         
         # Orden interno del grupo (Para respetar FIFO/Urgencia dentro del mismo setup)
-        g_sorted = g.sort_values(["_is_new_urgent", "_is_soft_locked", "Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[False, False, False, True, False])
+        g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[False, True, False])
         
         # Guardamos el grupo. 
-        grupos.append((not es_new_urgent, not es_soft_locked, not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
+        grupos.append((not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
         
     grupos.sort()
     
-    return deque([item for _, _, _, _, _, _, _, recs in grupos for item in recs])
+    return deque([item for _, _, _, _, _, recs in grupos for item in recs])
