@@ -43,7 +43,7 @@ def process_uploaded_dataframe(df):
         "MPPlanta": "MateriaPrimaPlanta",
         "CodTroTapa": "CodigoTroquelTapa",
         "CodTroCuerpo": "CodigoTroquelCuerpo",
-        "FechaDisDpv": "FechaLlegadaChapas", # Corrección aplicada en paso anterior
+        "FechaChaDpv": "FechaLlegadaChapas", # Corrección aplicada en paso anterior
         "FechaTroDpv": "FechaLlegadaTroquel",
         "Pli Anc": "PliAnc",
         "Pli Lar": "PliLar",
