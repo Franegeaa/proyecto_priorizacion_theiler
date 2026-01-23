@@ -30,6 +30,9 @@ def process_uploaded_dataframe(df):
     """
     Applies all transformations, renames, and calculated columns to the raw dataframe.
     """
+    # --- SANITIZE COLUMN NAMES ---
+    df.columns = df.columns.astype(str).str.strip()
+
     # --- RENOMBRADO ---
     df.rename(columns={
         "ORDEN": "CodigoProducto",
