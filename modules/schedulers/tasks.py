@@ -127,6 +127,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "Gramaje": row.get("Grs./Nº", 0), # Nuevo campo para agrupamiento Bobina
                 "Urgente": es_si(row.get("Urgente", False)), # Nueva bandera de urgencia
                 "_TroqAntes": es_si(row.get("_TroqAntes", False)), # <--- NUEVO FLAG
+                "_PEN_ImpresionFlexo": row.get("_PEN_ImpresionFlexo"),
+                "_PEN_ImpresionOffset": row.get("_PEN_ImpresionOffset"),
                 "ProcesoDpd": row.get("ProcesoDpd", "") # ProcesoDpd para reordenamiento dinámico
             })  
 

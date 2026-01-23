@@ -25,7 +25,61 @@ PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño
 # Programador principal (Versión Combinada)
 # =======================================================
 
-def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
+# --- HELPER: SCORING PRIORIDAD GROUPING ---
+def _get_downstream_presence_score(task, colas, maquinas_info, maquina_actual, last_tasks_map=None):
+    """
+    Calcula un puntaje de prioridad basado en si el CLIENTE de la tarea
+    ya tiene otras tareas esperando o procesandose en la siguiente maquina (Impresión).
+    Sirve para agrupar tareas del mismo cliente en procesos previos (Guillotina/Corte).
+    """
+    cliente = str(task.get("Cliente", "")).strip().lower()
+    if not cliente: return 0
+    
+    # Determinar siguiente máquina probable (Impresión)
+    # Heurística simple: Si estoy en Guillotina/Corte, lo siguiente es Impresión.
+    # Necesitamos saber qué impresión usa esta tarea.
+    # Miramos _PEN_ImpresionFlexo o _PEN_ImpresionOffset.
+    
+    target_queues = []
+    
+    # Check flags in task
+    is_flexo = str(task.get("_PEN_ImpresionFlexo")).strip().lower() in ["sí", "si", "true"]
+    is_offset = str(task.get("_PEN_ImpresionOffset")).strip().lower() in ["sí", "si", "true"]
+    
+    
+    # Find printer names in colas keys
+    # Asumimos que las colas tienen nombres como "Impresora Flexo 1", "Heidelberg", etc.
+    # O usamos la configuración de máquinas.
+    
+    # Simple search in queues
+    for q_name in colas.keys():
+        qn = q_name.lower()
+        if is_flexo and ("flexo" in qn or "bhs" in qn):
+            target_queues.append(q_name)
+        if is_offset and ("offset" in qn or "heidelberg" in qn or "kba" in qn):
+             target_queues.append(q_name)
+             
+    score = 0
+    for tq in target_queues:
+        # Check Waiting Queue
+        queue_items = colas.get(tq, [])
+        for item in queue_items:
+            c_item = str(item.get("Cliente", "")).strip().lower()
+            if c_item == cliente:
+                score += 1
+
+        
+        # Check Currently Running / Last Scheduled Task
+        if last_tasks_map:
+            t_running = last_tasks_map.get(tq)
+            if t_running:
+                c_run = str(t_running.get("Cliente", "")).strip().lower()
+                if c_run == cliente:
+                    score += 2 # Running task is a strong signal!
+    
+    return score
+
+def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False):
     """
     Planifica respetando dependencias, orden de máquinas,
     balanceo de carga (Troquelado) y optimización de setups.
@@ -695,7 +749,21 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     else:
                         log_debug("Ultima Tarea: NONE")
 
+                # SCAN WINDOW
+                # For prep machines, we scan up to 50 items to find "Catch Up" candidates.
+                # For others, we assume FIFO (break on first) or simple Logic.
+                
+                # VARS FOR GROUPING PRIORITY
+                is_prep_machine = "guillotin" in maquina.lower() or "bobina" in maquina.lower() or "corte" in maquina.lower()
+                best_group_score = -1
+                best_group_idx = -1
+                
+                scan_limit = 50 if is_prep_machine else 999999
+                
                 for i, t_cand in enumerate(colas[maquina]):
+                    if is_prep_machine and i >= scan_limit: 
+                        break # Stop scanning for prep machines to avoid perf hit
+
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
                     
@@ -709,13 +777,12 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     
                     if not runnable: 
                         # --- SOLUCION NATIVOS / BLOQUEO POR GRUPO ---
-                        # Si la tarea no está lista (ej. falta Guillotina), pero es del MISMO GRUPO (Setup Menor)
-                        # que la anterior, decidimos ESPERAR en lugar de buscar otra cosa para llenar el hueco.
                         if ultima_tarea and usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", "")):
-                            idx_cand = -1
-                            mejor_candidato_futuro = None
-                            mejor_candidato_setup = None
-                            break
+                            if not is_prep_machine: 
+                                idx_cand = -1
+                                mejor_candidato_futuro = None
+                                mejor_candidato_setup = None
+                                break
                         continue
                     
                     es_setup = False
@@ -725,44 +792,52 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     if "barniz" in maquina.lower() and i < 5:
                          log_debug(f"Cand[{i}]: {t_cand.get('Cliente')} (Due: {t_cand.get('DueDate')}) - Avail: {available_at} - SetupMenor: {es_setup}")
 
-                    # Si está lista YA (o antes), la tomamos inmediatamente (Gap Filling)
-
-                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                    # Si está lista YA (o antes), la tomamos...
+                    is_ready_now = not available_at or available_at <= current_agenda_dt
                     
-                    if cfg.get("ignore_constraints"):
-                        mp_ok = True
-
-                    if not mp_ok: continue
-
-                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                    if is_ready_now:
+                        if is_prep_machine:
+                            score = _get_downstream_presence_score(t_cand, colas, None, maquina, last_tasks_map=ultimo_en_maquina)
+                            
+                            # Decision Rule: Strictly better score wins
+                            if score > best_group_score:
+                                best_group_score = score
+                                best_group_idx = i
+                                
+                            # If score is very high, maybe break? For now, scan full window.
+                        else:
+                            # STANDARD FIFO Logic (Gap Filling)
+                            idx_cand = i
+                            mejor_candidato_futuro = None
+                            break
                     
-                    if not runnable: continue
-
-                    # Si está lista YA (o antes), la tomamos inmediatamente (Gap Filling)
-                    if not available_at or available_at <= current_agenda_dt:
-                        idx_cand = i
-                        mejor_candidato_futuro = None # Ya encontramos una perfecta
-                        break
-                    
-                    # Si no está lista ya, pero es runnable, la guardamos como opción futura
-                    if mejor_candidato_futuro is None:
-                        mejor_candidato_futuro = (i, available_at)
                     else:
-                        # Si esta está lista ANTES que la que teníamos guardada, la preferimos
-                        if available_at < mejor_candidato_futuro[1]:
+                        # Si no está lista ya, pero es runnable, la guardamos como opción futura
+                        if mejor_candidato_futuro is None:
                             mejor_candidato_futuro = (i, available_at)
+                        else:
+                            if available_at < mejor_candidato_futuro[1]:
+                                mejor_candidato_futuro = (i, available_at)
                             
                     # -- LÓGICA FRANCOTIRADOR (SMART WAIT) --
-                    # Guardamos el mejor candidato de setup para compararlo luego
                     if es_setup:
                          if mejor_candidato_setup is None:
                              mejor_candidato_setup = (i, available_at)
                              if "barniz" in maquina.lower(): log_debug(f"MARKING SETUP CANDIDATE: IDX {i}")
                          else:
-                             if available_at < mejor_candidato_setup[1]:
+                             # Safe Comparison: None means "Active Now" (Earlier than any future date)
+                             curr_dt = available_at if available_at else datetime.min
+                             best_dt = mejor_candidato_setup[1] if mejor_candidato_setup[1] else datetime.min
+                             
+                             if curr_dt < best_dt:
                                  mejor_candidato_setup = (i, available_at)
                                  if "barniz" in maquina.lower(): log_debug(f"UPDATING SETUP CANDIDATE: IDX {i}")
+
+                # END SEARCH LOOP
+                
+                # For Prep Machines, apply the Best Group Selection
+                if is_prep_machine and best_group_idx != -1:
+                    idx_cand = best_group_idx
 
                 
                 
@@ -775,7 +850,10 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
 
                 # 1. Si ya tenemos uno listo (idx_cand != -1), checkeamos si vale la pena ESPERAR por setup
                 if idx_cand != -1 and mejor_candidato_setup:
-                     wait_time = mejor_candidato_setup[1] - current_agenda_dt
+                     wait_time = timedelta(0)
+                     if mejor_candidato_setup[1] is not None:
+                         wait_time = mejor_candidato_setup[1] - current_agenda_dt
+                         
                      if wait_time <= TOLERANCIA:
                          if "barniz" in maquina.lower(): log_debug(f"FRANCOTIRADOR: Esperando {wait_time} por cand {mejor_candidato_setup[0]} (Setup)")
                          idx_cand = -1
@@ -796,22 +874,23 @@ def programar(df_ordenes: pd.DataFrame, cfg, start=None, start_time=None):
                     future_dt = final_decision[1]
 
 
-                    # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
-                    # Lógica de salto de tiempo (respetando días hábiles)
-                    fecha_destino = future_dt.date()
-                    hora_destino = future_dt.time()
-
-                    if not es_dia_habil(fecha_destino, cfg):
-                        fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg)
-                        hora_destino = time(7, 0)
-                    
-                    # Solo avanzamos si el destino es futuro (debería serlo por lógica anterior)
-                    dest_dt = datetime.combine(fecha_destino, hora_destino)
-                    if dest_dt > current_agenda_dt:
-                        agenda[maquina]["fecha"] = fecha_destino
-                        agenda[maquina]["hora"] = hora_destino
-                        h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
-                        agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
+                    if future_dt:
+                        # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
+                        # Lógica de salto de tiempo (respetando días hábiles)
+                        fecha_destino = future_dt.date()
+                        hora_destino = future_dt.time()
+    
+                        if not es_dia_habil(fecha_destino, cfg):
+                            fecha_destino = proximo_dia_habil(fecha_destino - timedelta(days=1), cfg)
+                            hora_destino = time(7, 0)
+                        
+                        # Solo avanzamos si el destino es futuro (debería serlo por lógica anterior)
+                        dest_dt = datetime.combine(fecha_destino, hora_destino)
+                        if dest_dt > current_agenda_dt:
+                            agenda[maquina]["fecha"] = fecha_destino
+                            agenda[maquina]["hora"] = hora_destino
+                            h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
+                            agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
 
                 
                 # ==========================================================
