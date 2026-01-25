@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>Planificador Theiler</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.56.0/build/stlite.css">
+</head>
+
+<body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.56.0/build/stlite.js"></script>
+    <script>
+        stlite.mount({
+            requirements: ["pandas", "openpyxl", "plotly", "numpy", "streamlit"],
+            entrypoint: "app.py",
+            files: {
+                "app.py": {
+                    url: "app.py?v=2",
+                },
+                "config/Config_Priorizacion_Theiler.xlsx": {
+                    url: "config/Config_Priorizacion_Theiler.xlsx?v=2",
+                },
+                "config/FormIAConsulta1a 23-01-26.xlsx": {
+                    url: "config/FormIAConsulta1a 23-01-26.xlsx?v=2",
+                },
+                "modules/__init__.py": {
+                    url: "modules/__init__.py?v=2",
+                },
+                "modules/app_utils.py": {
+                    url: "modules/app_utils.py?v=2",
+                },
+                "modules/config_loader.py": {
+                    url: "modules/config_loader.py?v=2",
+                },
+                "modules/data_processor.py": {
+                    url: "modules/data_processor.py?v=2",
+                },
+                "modules/debug_utils.py": {
+                    url: "modules/debug_utils.py?v=2",
+                },
+                "modules/demo_data.py": {
+                    url: "modules/demo_data.py?v=2",
+                },
+                "modules/exporters.py": {
+                    url: "modules/exporters.py?v=2",
+                },
+                "modules/scheduler.py": {
+                    url: "modules/scheduler.py?v=2",
+                },
+                "modules/tiempos_y_setup.py": {
+                    url: "modules/tiempos_y_setup.py?v=2",
+                },
+                "modules/ui_components.py": {
+                    url: "modules/ui_components.py?v=2",
+                },
+                "modules/visualizations.py": {
+                    url: "modules/visualizations.py?v=2",
+                },
+                "modules/schedulers/__init__.py": {
+                    url: "modules/schedulers/__init__.py?v=2",
+                },
+                "modules/schedulers/agenda.py": {
+                    url: "modules/schedulers/agenda.py?v=2",
+                },
+                "modules/schedulers/machines.py": {
+                    url: "modules/schedulers/machines.py?v=2",
+                },
+                "modules/schedulers/priorities.py": {
+                    url: "modules/schedulers/priorities.py?v=2",
+                },
+                "modules/schedulers/tasks.py": {
+                    url: "modules/schedulers/tasks.py?v=2",
+                },
+            },
+        }, document.getElementById("root"));
+    </script>
+</body>
+
+</html>

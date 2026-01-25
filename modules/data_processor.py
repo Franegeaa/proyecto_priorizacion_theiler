@@ -97,13 +97,22 @@ def process_uploaded_dataframe(df):
             break
 
     # --- IMPRESIÓN: SEPARAR OFFSET/FLEXO ---
-    mat = df.get("MateriaPrima", "").astype(str).str.lower()
+    if "MateriaPrima" in df.columns:
+        mat = df["MateriaPrima"].astype(str).str.lower()
+    else:
+        mat = pd.Series("", index=df.index)
     imp_pend = to_bool_series(["ImpresionSNDpd", "ImpresionSND"])
     df["_PEN_ImpresionFlexo"]  = imp_pend & (mat.str.contains("micro", na=False) )
     df["_PEN_ImpresionOffset"] = imp_pend & (mat.str.contains("cartulina", na=False) | mat.str.contains("carton", na=False) | mat.str.contains("papel", na=False) )
 
     # --- OT_ID ---
     if "OT_id" not in df.columns:
+        # Validate columns exist
+        if "CodigoProducto" not in df.columns:
+            df["CodigoProducto"] = "Unknown"
+        if "Subcodigo" not in df.columns:
+            df["Subcodigo"] = "0"
+            
         df["OT_id"] = (
            df["CodigoProducto"].astype(str).str.strip() + "-" + df["Subcodigo"].astype(str).str.strip() 
         )

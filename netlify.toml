@@ -1,0 +1,9 @@
+[build]
+  publish = "/"
+  command = "echo 'No build command needed for stlite'"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"

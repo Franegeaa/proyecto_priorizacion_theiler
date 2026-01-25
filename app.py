@@ -297,20 +297,39 @@ if archivo is not None or use_demo_data:
                                         value_vars=["Horas Necesarias", "Horas Disponibles"], 
                                         var_name="Tipo", value_name="Horas")
                 
-                import plotly.express as px
-                fig_carga = px.bar(
-                    df_long, 
-                    x="Maquina", 
-                    y="Horas",
-                    color="Tipo",
-                    barmode="group",
-                    text="Horas",
+                import plotly.graph_objects as go
+                fig_carga = go.Figure()
+                
+                # Filter data for each type
+                df_nec = df_long[df_long["Tipo"] == "Horas Necesarias"]
+                df_disp = df_long[df_long["Tipo"] == "Horas Disponibles"]
+                
+                fig_carga.add_trace(go.Bar(
+                    x=df_nec["Maquina"].tolist(),
+                    y=df_nec["Horas"].tolist(),
+                    name="Horas Necesarias",
+                    marker_color="#EF553B",
+                    text=[f"{h:.1f} h" for h in df_nec["Horas"]],
+                    textposition='outside',
+                    hovertemplate="<b>%{x}</b><br>Necesarias: %{y:.1f} h<extra></extra>"
+                ))
+                
+                fig_carga.add_trace(go.Bar(
+                    x=df_disp["Maquina"].tolist(),
+                    y=df_disp["Horas"].tolist(),
+                    name="Horas Disponibles",
+                    marker_color="#636EFA",
+                    text=[f"{h:.1f} h" for h in df_disp["Horas"]],
+                    textposition='outside',
+                     hovertemplate="<b>%{x}</b><br>Disponibles: %{y:.1f} h<extra></extra>"
+                ))
+
+                fig_carga.update_layout(
                     title="Próximo Cuello de Botella (Carga vs Capacidad Acumulada)",
-                    color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
-                    hover_data=["Balance", "Capacidad Total", "Dias Habiles", "Fecha Critica"]
+                    barmode='group',
+                    uniformtext_minsize=8, 
+                    uniformtext_mode='hide'
                 )
-                fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
-                fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
                 st.plotly_chart(fig_carga, use_container_width=True)
                 
                 # Alerta de Riesgo Global
@@ -319,12 +338,16 @@ if archivo is not None or use_demo_data:
                     st.error(f"🚨 Crítico: Se detectaron cuellos de botella inmediatos en {len(maquinas_riesgo)} máquinas.")
                     st.markdown("**Detalle del Primer Vencimiento en Riesgo:**")
                     
-                    st.dataframe(maquinas_riesgo[["Maquina", "Fecha Critica", "Horas Necesarias", "Horas Disponibles", "Balance"]].style.format({
-                        "Horas Necesarias": "{:.1f}", 
-                        "Horas Disponibles": "{:.1f}", 
-                        "Balance": "{:.1f}",
-                        "Fecha Critica": "{:%Y-%m-%d}"
-                    }))
+                    
+                    # Pre-format dataframe for st.table (static HTML, no arrow serialization issues)
+                    df_riesgo_display = maquinas_riesgo[["Maquina", "Fecha Critica", "Horas Necesarias", "Horas Disponibles", "Balance"]].copy()
+                    df_riesgo_display["Horas Necesarias"] = df_riesgo_display["Horas Necesarias"].map("{:.1f}".format)
+                    df_riesgo_display["Horas Disponibles"] = df_riesgo_display["Horas Disponibles"].map("{:.1f}".format)
+                    df_riesgo_display["Balance"] = df_riesgo_display["Balance"].map("{:.1f}".format)
+                    # Handle dates: ensure they are datetime objects before formatting, or handle string dates
+                    df_riesgo_display["Fecha Critica"] = pd.to_datetime(df_riesgo_display["Fecha Critica"]).dt.strftime('%Y-%m-%d')
+                    
+                    st.table(df_riesgo_display)
                 else:
                     st.success("✅ Todas las máquinas tienen capacidad suficiente para cumplir sus plazos.")
 
@@ -495,20 +518,39 @@ if archivo is not None or use_demo_data:
                                         value_vars=["Horas Necesarias", "Horas Disponibles"], 
                                         var_name="Tipo", value_name="Horas")
                 
-                import plotly.express as px
-                fig_temp = px.bar(
-                    df_long_t, 
-                    x="Maquina", 
-                    y="Horas",
-                    color="Tipo",
-                    barmode="group",
-                    text="Horas",
+                # import plotly.express as px # No longer needed
+                import plotly.graph_objects as go
+                fig_temp = go.Figure()
+                
+                df_nec_t = df_long_t[df_long_t["Tipo"] == "Horas Necesarias"]
+                df_disp_t = df_long_t[df_long_t["Tipo"] == "Horas Disponibles"]
+                
+                fig_temp.add_trace(go.Bar(
+                    x=df_nec_t["Maquina"].tolist(),
+                    y=df_nec_t["Horas"].tolist(),
+                    name="Horas Necesarias",
+                    marker_color="#EF553B",
+                    text=[f"{h:.1f} h" for h in df_nec_t["Horas"]],
+                    textposition='outside',
+                     hovertemplate="<b>%{x}</b><br>Necesarias: %{y:.1f} h<extra></extra>"
+                ))
+                
+                fig_temp.add_trace(go.Bar(
+                    x=df_disp_t["Maquina"].tolist(),
+                    y=df_disp_t["Horas"].tolist(),
+                    name="Horas Disponibles",
+                    marker_color="#00CC96",
+                    text=[f"{h:.1f} h" for h in df_disp_t["Horas"]],
+                    textposition='outside',
+                     hovertemplate="<b>%{x}</b><br>Disponibles: %{y:.1f} h<extra></extra>"
+                ))
+
+                fig_temp.update_layout(
                     title=f"Carga vs Capacidad ({tipo_filtro_cap})",
-                    color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#00CC96"},
-                    hover_data=["Balance", "Dias Habiles"]
+                    barmode='group',
+                    uniformtext_minsize=8, 
+                    uniformtext_mode='hide'
                 )
-                fig_temp.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
-                fig_temp.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
                 st.plotly_chart(fig_temp, use_container_width=True)
             else:
                 st.warning("No hay datos de carga ni capacidad para el periodo seleccionado.")
