@@ -155,6 +155,13 @@ def render_gantt_chart(schedule, cfg):
         st.info("No hay tareas planificadas en el rango de fechas seleccionado.")
     else:  
         try:
+             # --- Sanitize for Plotly/Arrow compatibility ---
+            # Ensure text columns are standard Python strings to avoid 'ChunkedArray' errors
+            # if the environment has a broken or mismatched PyArrow version.
+            for col in schedule_gantt.select_dtypes(include=['object', 'string']).columns:
+                schedule_gantt[col] = schedule_gantt[col].fillna("").astype(str)
+            # -----------------------------------------------
+
             if vista == "Por Orden de Trabajo (OT)":
                 opciones_ot = ["(Todas)"] + sorted(schedule_gantt["OT_id"].unique().tolist())
                 ot_seleccionada = st.selectbox(

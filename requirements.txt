@@ -3,3 +3,4 @@ openpyxl
 plotly
 numpy
 streamlit>=1.36
+pyarrow>=14.0
