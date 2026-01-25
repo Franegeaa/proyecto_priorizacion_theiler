@@ -39,10 +39,22 @@ with st.sidebar:
     
     cfg["ignore_constraints"] = ignore_constraints
 
-archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
+    # --- DEMO MODE TOGGLE ---
+    use_demo_data = st.checkbox("🛠 Modo Demo (Datos Simulados)", value=True, help="Activar para probar el sistema con datos generados aleatoriamente.")
 
-if archivo is not None:
-    df = pd.read_excel(archivo)
+from modules.demo_data import generate_demo_dataframe
+
+archivo = None
+if not use_demo_data:
+    archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
+else:
+    st.warning("⚠️ Usando datos simulados (Modo Demo)")
+
+if archivo is not None or use_demo_data:
+    if use_demo_data:
+        df = generate_demo_dataframe(n_rows=50)
+    else:
+        df = pd.read_excel(archivo)
     
     # 1. UI: Machine Speeds
     render_machine_speed_inputs(cfg)
