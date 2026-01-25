@@ -1,4 +1,16 @@
 import streamlit as st
+
+# --- MONKEY PATCH FOR PYARROW (Fix for stlite/WASM) ---
+try:
+    import pyarrow
+    if not hasattr(pyarrow, "ChunkedArray"):
+        class MockChunkedArray:
+            pass
+        pyarrow.ChunkedArray = MockChunkedArray
+except ImportError:
+    pass
+# -------------------------------------------------------
+
 import pandas as pd
 from datetime import date, datetime, timedelta
 from modules.config_loader import cargar_config, horas_por_dia, get_horas_totales_dia
