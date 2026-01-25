@@ -1,7 +1,6 @@
 import pandas as pd
 from datetime import datetime, timedelta, time, date
 from collections import defaultdict, deque
-import random
 
 from modules.schedulers.machines import elegir_maquina
 from modules.schedulers.priorities import _clave_prioridad_maquina, _cola_impresora_flexo, _cola_impresora_offset, _cola_troquelada, _cola_cortadora_bobina
@@ -247,6 +246,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
     maquinas = sorted(cfg["maquinas"]["Maquina"].unique(), key=_orden_proceso)
     
+    # --- ADD VIRTUAL MACHINES IF NEEDED ---
+    # We check if tasks have assigned them
+    extra_machines = set(tasks["Maquina"].unique()) - set(maquinas) - {"POOL_DESCARTONADO"}
+    # Filter only our known virtual ones to be safe
+    virtual_machines = {m for m in extra_machines if m in ["TERCERIZADO", "SALTADO"]}
+    maquinas.extend(sorted(list(virtual_machines)))
+    # -------------------------------------
+    
     # =================================================================
     # 3. REASIGNACIÓN TROQUELADO (Solo asigna, NO reserva tiempo)
     # =================================================================
@@ -443,9 +450,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
         else: 
-            # Orden por defecto: New Urgent -> Soft Locked -> Urgente -> DueDate -> Orden Proceso -> Cantidad
-            q.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
-                          ascending=[False, True, True, False], inplace=True)
+            # Orden por defecto: ManualPriority -> Agrupados -> New Urgent -> Soft Locked -> Urgente -> DueDate -> Orden Proceso -> Cantidad
+            # Standard sorting
+            q.sort_values(by=["ManualPriority", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                          ascending=[True, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
     # Crear la cola del POOL si existe
@@ -683,6 +691,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # 2. Hora
         # 3. Prioridad especial (Automatica antes para llenar huecos si empatan)
         prio_tipo = 0 if "autom" in m.lower() else 1
+        
+        # Virtual Machines don't have agenda, so we give them high priority (run whenever)
+        if m in ["TERCERIZADO", "SALTADO"]:
+            return (datetime.min, 0, m)
+            
         current_dt = datetime.combine(agenda[m]["fecha"], agenda[m]["hora"])
         return (current_dt, prio_tipo, m)
 
@@ -699,6 +712,48 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
            dt, _, _ = _prioridad_dinamica(m)
 
         for maquina in sim_order:
+            # --- VIRTUAL MACHINE EXECUTION (Infinite Capacity) ---
+            if maquina in ["TERCERIZADO", "SALTADO"]:
+                if not colas.get(maquina): continue
+                
+                # Consume ALL ready tasks
+                queue_snapshot = list(colas[maquina]) # Copy to iterate
+                for t_virt in queue_snapshot:
+                    runnable, available_at = verificar_disponibilidad(t_virt, maquina)
+                    if runnable:
+                        # Determine Start Time (Max of Dependency Availability or Plan Start)
+                        start_virt = max(available_at, inicio_general) if available_at else inicio_general
+                        
+                        # Determine Duration
+                        duration_virt = 0.0
+                        if maquina == "TERCERIZADO":
+                             # Use estimated duration
+                             duration_virt = float(t_virt.get("Duracion_h", 0.0) or 0.0)
+                        
+                        end_virt = start_virt + timedelta(hours=duration_virt)
+                        
+                        # Register Result
+                        filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
+                                                                "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped"]} | 
+                                        {"Setup_min": 0.0, "Proceso_h": duration_virt,
+                                        "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
+                                        "Motivo": "Outsourced/Skipped", "Maquina": maquina})
+                        
+                        # Update Global State
+                        ot_id = t_virt["OT_id"]
+                        proc = t_virt["Proceso"]
+                        fin_proceso[ot_id][proc] = end_virt
+                        completado[ot_id].add(proc)
+                        ultimo_en_maquina[maquina] = t_virt
+                        
+                        # Remove from queue
+                        colas[maquina].remove(t_virt)
+                        progreso = True # We made progress
+                
+                continue # Skip standard logic for virtual machines
+            # -----------------------------------------------------
+
             if not colas.get(maquina):  
                 # --- SISTEMA DE RESCATE (CRÍTICO) ---
                 # Si la cola se vació pero quedó alguien encerrado en el buffer, ¡LIBÉRALO!
@@ -1230,7 +1285,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             fin = sumar_horas_habiles(inicio, total_h, cfg)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                                "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje"]} |
+                                                                "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1265,7 +1321,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         if tarea_robada: motivo = "Robado (Optimización)"
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje"]} |
+                                                            "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 

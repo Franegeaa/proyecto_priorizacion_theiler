@@ -78,18 +78,56 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
     tareas = []
     orden_std_limpio = [p.strip() for p in cfg.get("orden_std", [])]
 
-
+    # --- MANUAL OVERRIDES ---
+    overrides = cfg.get("manual_overrides", {})
+    blacklist = overrides.get("blacklist_ots", set())
+    priorities = overrides.get("manual_priorities", {})
+    outsourced = overrides.get("outsourced_processes", set())
+    skipped = overrides.get("skipped_processes", set())
 
     for idx, row in df.iterrows():
         ot = f"{row['CodigoProducto']}-{row['Subcodigo']}"
+        
+        # 1. Blacklist Check
+        if ot in blacklist:
+            continue
+            
         pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio)
 
         if not pendientes:
             continue
 
         for proceso in pendientes:
-            
             maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
+            
+            # --- Check Outsourced/Skipped/Priority ---
+            str_ot = str(ot)
+            str_proc = str(proceso)
+            str_maq = str(maquina)
+            
+            key_proc = (str_ot, str_proc)
+            
+            is_outsourced = key_proc in outsourced
+            is_skipped = key_proc in skipped
+            
+            # Override Machine Name if Outsourced/Skipped to allow special handling
+            if is_skipped:
+                maquina = "SALTADO"
+            elif is_outsourced:
+                maquina = "TERCERIZADO"
+            
+            # Manual Priority (check with ORIGINAL machine name or new one? Original makes sense for user input)
+            # User selected "Imp. Offset 1" in UI. If we change it to TERCERIZADO, we lose that key.
+            # But priority only matters if it stays internal. 
+            # If Internal, check priority.
+            manual_prio = 9999
+            if not (is_outsourced or is_skipped):
+                # Check for (OT, Machine)
+                # We use the assigned machine 'maquina'
+                # Note: 'elegir_maquina' might return generic; need to match what User sees (Specific Machine).
+                # The user selects from valid machines. `elegir_maquina` returns one of those.
+                key_prio = (str_ot, str_maq)
+                manual_prio = priorities.get(key_prio, 9999)
 
             # Cálculo de pliegos
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
@@ -129,7 +167,12 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "_TroqAntes": es_si(row.get("_TroqAntes", False)), # <--- NUEVO FLAG
                 "_PEN_ImpresionFlexo": row.get("_PEN_ImpresionFlexo"),
                 "_PEN_ImpresionOffset": row.get("_PEN_ImpresionOffset"),
-                "ProcesoDpd": row.get("ProcesoDpd", "") # ProcesoDpd para reordenamiento dinámico
+                "ProcesoDpd": row.get("ProcesoDpd", ""), # ProcesoDpd para reordenamiento dinámico
+                
+                # Manual Override Params
+                "ManualPriority": manual_prio,
+                "IsOutsourced": is_outsourced,
+                "IsSkipped": is_skipped
             })  
 
     tasks = pd.DataFrame(tareas)

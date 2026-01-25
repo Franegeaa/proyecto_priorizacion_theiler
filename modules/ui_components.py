@@ -322,10 +322,10 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
 
     return st.session_state.pending_processes
 
-def render_details_section(schedule, detalle_maquina, df):
+def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
-    modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina", "Día (Fecha)"], horizontal=True)
+    modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina", "Día (Fecha)", "Plan Completo (Todas)"], horizontal=True)
 
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 
@@ -422,40 +422,29 @@ def render_details_section(schedule, detalle_maquina, df):
         else:
             st.info("No hay detalle por máquina disponible.")
 
-    else:
-        # --- VIEW BY DAY ---
+    elif modo == "Día (Fecha)":
         if not schedule.empty:
             st.write("📆 **Visualización por Día**")
             d_seleccionado = st.date_input("Seleccioná la fecha a visualizar:", value=date.today())
             
-            # Filter tasks active on this day (intersects [Inicio, Fin])
-            # active if Start <= Selected end of day AND End >= Selected start of day
-            # simpler: intersects selected date
-            
             sel_start = pd.to_datetime(d_seleccionado)
             sel_end = sel_start + pd.Timedelta(days=1)
             
-            # Mask: Start < Day+1 AND End > Day
             mask = (schedule["Inicio"] < sel_end) & (schedule["Fin"] > sel_start)
             df_dia = schedule[mask].copy()
             
             if not df_dia.empty:
-                # Sort by Machine first, then Start Time
                 df_dia.sort_values(by=["Maquina", "Inicio"], inplace=True)
-                
-                # Select useful cols
                 cols_day = ["Maquina", "OT_id", "Cliente", "Cliente-articulo", "Proceso", "Inicio", "Fin", "Duracion_h", "CantidadPliegos", "DueDate"]
                 cols_final = [c for c in cols_day if c in df_dia.columns]
                 
                 df_show_day = df_dia[cols_final]
                 
-                # Sanitize object columns
                 for col in df_show_day.select_dtypes(include=['object']).columns:
                     df_show_day[col] = df_show_day[col].fillna("").astype(str)
 
                 st.dataframe(df_show_day, use_container_width=True)
                 
-                # --- Download Button ---
                 buf = dataframe_to_excel_bytes(df_show_day, sheet_name=f"Dia {d_seleccionado}")
                 st.download_button(
                     label=f"⬇️ Descargar Plan del {d_seleccionado}",
@@ -466,6 +455,180 @@ def render_details_section(schedule, detalle_maquina, df):
                 )
             else:
                 st.warning(f"No hay tareas planificadas para el {d_seleccionado}.")
+        else:
+            st.info("No hay tareas planificadas.")
+
+    else: # "Plan Completo (Todas)"
+        if not schedule.empty:
+            st.write("📋 **Planificación Completa (Todas las Órdenes) - Edición**")
+            st.caption("Editá la tabla para ajustar prioridades o marcar excepciones.")
+            
+            # --- PREPARE DATA FOR EDITOR ---
+            df_full = schedule.sort_values(by=["Inicio", "Maquina"]).copy()
+            
+            # Add editing columns if not present
+            if "ManualPriority" not in df_full.columns: df_full["ManualPriority"] = 9999
+            if "IsOutsourced" not in df_full.columns: df_full["IsOutsourced"] = False
+            if "IsSkipped" not in df_full.columns: df_full["IsSkipped"] = False
+            
+            # Add "Eliminar" column (Virtual)
+            df_full["Eliminar OT"] = False
+            
+            # Rename for display
+            df_editor = df_full.rename(columns={
+                "IsOutsourced": "Tercerizar",
+                "IsSkipped": "Saltar",
+                "ManualPriority": "Prioridad Manual"
+            })
+            
+            # Select columns to show/edit
+            cols_editable = ["Maquina", "OT_id", "Cliente", "Proceso", "Prioridad Manual", "Tercerizar", "Saltar", "Eliminar OT", "Inicio", "Fin", "Duracion_h", "DueDate"]
+            cols_final = [c for c in cols_editable if c in df_editor.columns]
+            df_editor = df_editor[cols_final]
+
+            # --- RENDER EDITOR ---
+            edited_df = st.data_editor(
+                df_editor,
+                column_config={
+                    "Prioridad Manual": st.column_config.NumberColumn(
+                        "Prioridad",
+                        help="1 = Máxima prioridad. Dejá 9999 para auto.",
+                        min_value=1,
+                        max_value=9999,
+                        step=1,
+                    ),
+                    "Tercerizar": st.column_config.CheckboxColumn(
+                        "Tercerizar",
+                        help="Marcar para asignar a proveedor externo",
+                        default=False,
+                    ),
+                    "Saltar": st.column_config.CheckboxColumn(
+                        "Saltar",
+                        help="Marcar para saltar este proceso",
+                        default=False,
+                    ),
+                    "Eliminar OT": st.column_config.CheckboxColumn(
+                        "Eliminar OT",
+                        help="Marcar para eliminar TODA la orden",
+                        default=False,
+                    ),
+                    "Inicio": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True),
+                    "Fin": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True),
+                    "Maquina": st.column_config.TextColumn(disabled=True),
+                    "OT_id": st.column_config.TextColumn(disabled=True),
+                    "Cliente": st.column_config.TextColumn(disabled=True),
+                    "Proceso": st.column_config.TextColumn(disabled=True),
+                },
+                use_container_width=True,
+                height=600,
+                hide_index=True,
+                key="editor_plan_completo"
+            )
+
+            # --- PROCESS CHANGES BUTTON ---
+            col_btn, col_info = st.columns([1, 3])
+            
+            if col_btn.button("💾 Aplicar Cambios y Recalcular"):
+                if cfg and "manual_overrides" in st.session_state:
+                    overrides = st.session_state.manual_overrides
+                    has_changes = False
+                    
+                    # 1. Update Priorities
+                    # Diff: Look for rows where Priority != 9999
+                    # Note: We iterate ALL rows effectively in edited_df. 
+                    # Optimization: Iterate only where 'Prioridad Manual' != 9999
+                    
+                    # Reset priorities locally first? Or merge? 
+                    # Merging is safer. If user sets 9999, we remove it.
+                    
+                    rows_prio = edited_df[edited_df["Prioridad Manual"] != 9999]
+                    for idx, row in rows_prio.iterrows():
+                        ot = str(row["OT_id"])
+                        maq = str(row["Maquina"])
+                        # If renamed to TERCERIZADO/SALTADO, we might lose original machine key for priority assignment
+                        # But priority only matters for REAL machines.
+                        # If user sets priority on TERCERIZADO row, it's useless but harmless.
+                        # Ideally we need original machine.
+                        # Luckily, if it is TERCERIZADO, the 'Maquina' col says TERCERIZADO.
+                        # If it is NOT outsourced, it says real machine.
+                        if maq not in ["TERCERIZADO", "SALTADO"]:
+                            key = (ot, maq)
+                            overrides["manual_priorities"][key] = int(row["Prioridad Manual"])
+                            has_changes = True
+
+                    # Remove 9999s explicitly
+                    rows_reset = edited_df[edited_df["Prioridad Manual"] == 9999]
+                    for idx, row in rows_reset.iterrows():
+                         ot = str(row["OT_id"])
+                         maq = str(row["Maquina"])
+                         key = (ot, maq)
+                         if key in overrides["manual_priorities"]:
+                             del overrides["manual_priorities"][key]
+                             has_changes = True
+
+                    # 2. Update Outsourced / Skipped
+                    # We can't detect "unchecking" easily without comparing to previous state or iterating all.
+                    # Simpler: Iterate all rows where Checkbox is TRUE to ADD.
+                    # Iterate rows where Checkox is FALSE to REMOVE?
+                    # Since we show ALL tasks, we can just rebuild the sets based on what is visible?
+                    # RISK: If filter hides some tasks, we might miss them. But "Plan Completo" shows ALL.
+                    # So rebuilding sets from this view is (mostly) safe IF this view contains everything.
+                    # BUT: Deleted items are NOT here. Outsourced items ARE here.
+                    
+                    # Safer: Only process CHANGES. But st.data_editor doesn't give diff easily unless used with experimental callbacks or comparing.
+                    # Just iterating "True" values to ADD is safe. 
+                    # To REMOVE, we need to find "False" values that WERE in the set.
+                    
+                    # Let's iterate the whole edited_df since it's the source of truth for "Active" items.
+                    # If an item is here and unchecked, it is NOT outsourced.
+                    
+                    for idx, row in edited_df.iterrows():
+                        ot = str(row["OT_id"])
+                        proc = str(row["Proceso"])
+                        key_op = (ot, proc)
+                        
+                        # Outsourced
+                        if row["Tercerizar"]:
+                            if key_op not in overrides["outsourced_processes"]:
+                                overrides["outsourced_processes"].add(key_op)
+                                has_changes = True
+                        else:
+                            if key_op in overrides["outsourced_processes"]:
+                                overrides["outsourced_processes"].remove(key_op)
+                                has_changes = True
+                                
+                        # Skipped
+                        if row["Saltar"]:
+                            if key_op not in overrides["skipped_processes"]:
+                                overrides["skipped_processes"].add(key_op)
+                                has_changes = True
+                        else:
+                            if key_op in overrides["skipped_processes"]:
+                                overrides["skipped_processes"].remove(key_op)
+                                has_changes = True
+                                
+                        # Delete OT (Blacklist)
+                        if row["Eliminar OT"]:
+                            overrides["blacklist_ots"].add(ot)
+                            has_changes = True
+                            
+                    if has_changes:
+                        st.success("✅ Cambios registrados. Recalculando...")
+                        st.rerun()
+                    else:
+                        st.info("No se detectaron cambios.")
+
+            # --- RESTORE SECTION (For Blacklisted OTs) ---
+            if cfg and "manual_overrides" in st.session_state:
+                blacklist = st.session_state.manual_overrides["blacklist_ots"]
+                if blacklist:
+                     with st.expander(f"♻️ Restaurar Órdenes Eliminadas ({len(blacklist)})"):
+                        to_restore = st.multiselect("Seleccionar OT para restaurar:", sorted(list(blacklist)))
+                        if st.button("Restaurar Seleccionadas"):
+                            for ot in to_restore:
+                                st.session_state.manual_overrides["blacklist_ots"].remove(ot)
+                            st.rerun()
+                            
         else:
             st.info("No hay tareas planificadas.")
 

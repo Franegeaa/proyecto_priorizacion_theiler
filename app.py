@@ -58,6 +58,17 @@ if archivo is not None:
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
     
+    # --- MANUAL OVERRIDES INJECTION ---
+    if "manual_overrides" not in st.session_state:
+        st.session_state.manual_overrides = {
+            "blacklist_ots": set(),
+            "manual_priorities": {},
+            "outsourced_processes": set(),
+            "skipped_processes": set()
+        }
+    cfg_plan["manual_overrides"] = st.session_state.manual_overrides
+    # ----------------------------------
+    
     # 3.1 UI: Descartonador IDs (New)
     cfg["custom_ids"] = render_descartonador_ids_section(cfg_plan) # Pass filtered config or full config? Full config has all machines. Better to use cfg_plan if we only care about active ones? 
     # Actually logic uses cfg["maquinas"] so it will see filtered ones.
@@ -493,7 +504,7 @@ if archivo is not None:
     render_gantt_chart(schedule, cfg)
 
     # 11. Details Section
-    render_details_section(schedule, detalle_maquina, df)
+    render_details_section(schedule, detalle_maquina, df, cfg)
 
     # 12. Export Section
     render_download_section(schedule, resumen_ot, carga_md)
