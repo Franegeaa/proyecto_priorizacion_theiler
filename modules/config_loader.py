@@ -47,6 +47,37 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
     cfg["mapa_abreviaturas"] = mapa
     return cfg
 
+# Machine name aliases for priority mapping
+ALIAS_MAP = {
+    "Manual 2": "Troq Nº 1 Gus",
+    "Manual 1": "Troq Nº 2 Ema",
+    "Manual-2": "Troq Nº 1 Gus",
+    "Manual-1": "Troq Nº 2 Ema",
+    "Manual2": "Troq Nº 1 Gus",
+    "Manual1": "Troq Nº 2 Ema",
+}
+
+def normalize_machine_name(machine_name):
+    """
+    Normaliza nombres de máquina para que aliases apunten al nombre canónico.
+    Útil para prioridades manuales donde el usuario puede usar diferentes nombres.
+    """
+    if not machine_name:
+        return machine_name
+    
+    # Try exact match first
+    if machine_name in ALIAS_MAP:
+        return ALIAS_MAP[machine_name]
+    
+    # Try case-insensitive match
+    machine_lower = machine_name.lower().strip()
+    for alias, canonical in ALIAS_MAP.items():
+        if alias.lower().strip() == machine_lower:
+            return canonical
+    
+    # Return original if no match
+    return machine_name
+
 def horas_por_dia(cfg):
     j = cfg["jornada"]
     base = j.loc[j["Parametro"]=="Horas_base_por_dia","Valor"].iloc[0] if (j["Parametro"]=="Horas_base_por_dia").any() else 8.5

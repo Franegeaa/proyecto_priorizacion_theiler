@@ -18,12 +18,13 @@ def _cola_impresora_flexo(q):
     # Lógica Clustering con Ventana de 1 Día
     if q.empty: return deque()
     q = q.copy()
+    
+    # Ensure ManualPriority exists
+    if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
+    q["ManualPriority"] = q["ManualPriority"].fillna(9999).astype(int)
+    
     # Convertir Urgente a booleano real
     q["Urgente"] = q["Urgente"].apply(lambda x: es_si(x))
-    
-    # Ensure Sort Cols
-    # Ensure Sort Cols
-
     
     q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
     q["_color_key"] = (
@@ -39,10 +40,9 @@ def _cola_impresora_flexo(q):
     def _agrupar_con_ventana(sub_q):
         if sub_q.empty: return []
         
-        # 1. Orden inicial estricto por Fecha
-        # Usamos un índice temporal para controlar procesados
-        sub_q = sub_q.sort_values(by=["DueDate", "_cliente_key", "CantidadPliegos"], 
-                                  ascending=[True, True, False])
+        # 1. Orden inicial estricto por ManualPriority, luego Fecha
+        sub_q = sub_q.sort_values(by=["ManualPriority", "DueDate", "_cliente_key", "CantidadPliegos"], 
+                                  ascending=[True, True, True, False])
         lista_items = sub_q.to_dict("records")
         n = len(lista_items)
         processed = [False] * n
@@ -63,6 +63,7 @@ def _cola_impresora_flexo(q):
             if pd.isna(anchor_date): continue # No podemos hacer comparaciones de ventana sin fecha
             
             anchor_color = anchor.get("_color_key", "")
+            anchor_prio = anchor.get("ManualPriority", 9999)
             
             # Buscar siguientes compatibles dentro de la ventana
             for j in range(i + 1, n):
@@ -71,17 +72,17 @@ def _cola_impresora_flexo(q):
                 candidate = lista_items[j]
                 cand_date = candidate["DueDate"]
                 cand_color = candidate.get("_color_key", "")
+                cand_prio = candidate.get("ManualPriority", 9999)
+                
+                # Chequeo 0: Misma prioridad manual (no agrupar diferentes prioridades)
+                if cand_prio != anchor_prio: continue
                 
                 # Chequeo 1: Mismo Color
                 if cand_color != anchor_color: continue
                 
-                # Chequeo 2: Dentro de Ventana (Anchor Date + 1 Dia >= Candidate Date)
-                # Nota: Candidate Date siempre es >= Anchor Date porque ordenamos la lista al inicio.
-                # Solo verificamos el límite superior.
+                # Chequeo 2: Dentro de Ventana
                 if pd.isna(cand_date):
-                     # Si no tiene fecha, ¿lo agrupamos? Asumimos que sí si es el mismo color (tratar como fecha lejana o cercana?)
-                     # Mejor no arriesgar: si no tiene fecha, sigue su curso natural (probablemente al final).
-                     continue
+                    continue
                 
                 diff = cand_date - anchor_date
                 if diff <= WINDOW:
@@ -100,10 +101,10 @@ def _cola_impresora_offset(q):
     if q.empty: return deque()
     q = q.copy()
 
-    # Ensure Sort Cols
-    # Ensure Sort Cols
+    # Ensure ManualPriority exists
+    if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
+    q["ManualPriority"] = q["ManualPriority"].fillna(9999).astype(int)
 
-    
     # 1. LIMPIEZA DE DATOS
     # ------------------------------------------------------------
     q["_cliente_key"] = q.get("Cliente", "").fillna("").astype(str).str.strip().str.lower()
@@ -149,38 +150,41 @@ def _cola_impresora_offset(q):
         
         # 3.1 CMYK -> Agrupar por CLIENTE + TROQUEL
         for keys, g in q_cmyk.groupby(["_cliente_key", "_troq_key"], dropna=False):
+            min_prio = g["ManualPriority"].min()
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
             
-            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[False, True, False])
+            g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[True, False, True, False])
             # Prio 0
-            grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            grupos_todos.append((min_prio, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
         # 3.2 PANTONE -> Agrupar por CLIENTE + COLOR
         for keys, g in q_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
+            min_prio = g["ManualPriority"].min()
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
 
             
-            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[False, True, False])
+            g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[True, False, True, False])
             # Prio 0 (Mismo nivel que CMYK, se ordenan entre ellos por Fecha/Cliente)
-            grupos_todos.append((not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            grupos_todos.append((min_prio, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
     # 4. GRUPO BARNIZADO (Prioridad 1)
     # ------------------------------------------------------------
     if not q_barniz.empty:
         # Agrupar solo por CLIENTE
         for cliente, g in q_barniz.groupby("_cliente_key", dropna=False):
+            min_prio = g["ManualPriority"].min()
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
 
             
-            g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[False, True, False])
+            g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[True, False, True, False])
             # Prio 1 -> Queda DESPUES de impresion si las fechas coinciden
-            grupos_todos.append((not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
+            grupos_todos.append((min_prio, not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
 
     # 5. ORDENAMIENTO FINAL
     # ------------------------------------------------------------
@@ -195,24 +199,34 @@ def _cola_impresora_offset(q):
     #         print(f"   -> OT: {r.get('OT_id')} | Cli: {r.get('Cliente')} | Troq: {r.get('CodigoTroquel')} | Due: {r.get('DueDate')}")
     # print("------------------------------------------------------\n")
 
-    return deque([item for _, _, _, _, _, recs in grupos_todos for item in recs])
+    return deque([item for _, _, _, _, _, _, recs in grupos_todos for item in recs])
 
 def _cola_troquelada(q): 
     if q.empty: return deque()
     q = q.copy()
 
-
+    if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
+    q["ManualPriority"] = q["ManualPriority"].fillna(9999).astype(int)
+    
+    # DEBUG: Print priority distribution
+    if (q["ManualPriority"] < 9999).any():
+        print(f"\n=== TROQUELADA QUEUE DEBUG ===")
+        print(f"Tasks with Manual Priority:")
+        prio_tasks = q[q["ManualPriority"] < 9999][["OT_id", "Maquina", "ManualPriority", "CodigoTroquel"]]
+        print(prio_tasks.to_string())
+        print(f"==============================\n")
 
     q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
     grupos = []
     for troq, g in q.groupby("_troq_key", dropna=False):
+        min_prio = g["ManualPriority"].min()
         due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
         es_urgente = g["Urgente"].any()
-        g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[False, True, False])
-        grupos.append((not es_urgente, due_min, troq, g_sorted.to_dict("records")))
+        g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[True, False, True, False])
+        grupos.append((min_prio, not es_urgente, due_min, troq, g_sorted.to_dict("records")))
     grupos.sort()
-    return deque([item for _, _, _, recs in grupos for item in recs])
+    return deque([item for _, _, _, _, recs in grupos for item in recs])
 
 def _cola_cortadora_bobina(q):
     """
@@ -225,6 +239,10 @@ def _cola_cortadora_bobina(q):
     if q.empty: return deque()
     q = q.copy()
     
+    # Ensure ManualPriority exists
+    if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
+    q["ManualPriority"] = q["ManualPriority"].fillna(9999).astype(int)
+
     # Normalización de claves
     q["_mp_key"] = q.get("MateriaPrima", "").fillna("").astype(str).str.strip().str.lower()
     
@@ -248,17 +266,18 @@ def _cola_cortadora_bobina(q):
     for (mp, medida, gramaje), g in q.groupby(["_mp_key", "_medida_key", "_gramaje_key"], dropna=False):
         
         # Metadatos del grupo
+        min_prio = g["ManualPriority"].min()
         due_min = g["DueDate"].min() or pd.Timestamp.max
         es_urgente = g["Urgente"].any()
 
         
         # Orden interno del grupo (Para respetar FIFO/Urgencia dentro del mismo setup)
-        g_sorted = g.sort_values(["Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[False, True, False])
+        g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[True, False, True, False])
         
         # Guardamos el grupo. 
-        grupos.append((not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
+        grupos.append((min_prio, not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
         
     grupos.sort()
     
-    return deque([item for _, _, _, _, _, recs in grupos for item in recs])
+    return deque([item for _, _, _, _, _, _, recs in grupos for item in recs])

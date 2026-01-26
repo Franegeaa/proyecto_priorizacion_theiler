@@ -474,6 +474,14 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             # Add "Eliminar" column (Virtual)
             df_full["Eliminar OT"] = False
             
+            # --- FILTERING LOGIC ---
+            col_filter, _ = st.columns([1, 4])
+            show_skipped = col_filter.toggle("Mostrar Procesos Saltados", value=False)
+            
+            if not show_skipped:
+                # Filter out rows where IsSkipped is True
+                df_full = df_full[~df_full["IsSkipped"].astype(bool)]
+            
             # Rename for display
             df_editor = df_full.rename(columns={
                 "IsOutsourced": "Tercerizar",
@@ -545,14 +553,21 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     for idx, row in rows_prio.iterrows():
                         ot = str(row["OT_id"])
                         maq = str(row["Maquina"])
+                        
+                        # Normalize machine name to handle aliases (Manual 1 -> Troq Nº 2 Ema, etc)
+                        from modules.config_loader import normalize_machine_name
+                        maq_normalized = normalize_machine_name(maq)
+                        
+                        print(f"DEBUG SAVE PRIORITY: OT={ot}, Original Maq={maq}, Normalized={maq_normalized}, Prio={row['Prioridad Manual']}")
+                        
                         # If renamed to TERCERIZADO/SALTADO, we might lose original machine key for priority assignment
                         # But priority only matters for REAL machines.
                         # If user sets priority on TERCERIZADO row, it's useless but harmless.
                         # Ideally we need original machine.
                         # Luckily, if it is TERCERIZADO, the 'Maquina' col says TERCERIZADO.
                         # If it is NOT outsourced, it says real machine.
-                        if maq not in ["TERCERIZADO", "SALTADO"]:
-                            key = (ot, maq)
+                        if maq_normalized not in ["TERCERIZADO", "SALTADO"]:
+                            key = (ot, maq_normalized)
                             overrides["manual_priorities"][key] = int(row["Prioridad Manual"])
                             has_changes = True
 

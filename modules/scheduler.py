@@ -244,6 +244,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         
         return (base_order, 0)
 
+    # --- FILTRO DE BLACKLIST ---
+    if "manual_overrides" in cfg and "blacklist_ots" in cfg["manual_overrides"]:
+        bl = cfg["manual_overrides"]["blacklist_ots"]
+        tasks = tasks[~tasks["OT_id"].isin(bl)]
+        
+    # ---------------------------------------------
+
     maquinas = sorted(cfg["maquinas"]["Maquina"].unique(), key=_orden_proceso)
     
     # --- ADD VIRTUAL MACHINES IF NEEDED ---
@@ -443,6 +450,23 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     for m in maquinas:
         q = tasks[tasks["Maquina"] == m].copy()
         m_lower = m.lower()
+        
+        # DEBUG: Check if ManualPriority exists and has values
+        if "troq" in m_lower or "manual" in m_lower:
+            print(f"\n=== DEBUG QUEUE FOR {m} ===")
+            print(f"Queue size: {len(q)}")
+            if "ManualPriority" in q.columns:
+                print(f"ManualPriority column EXISTS")
+                prio_tasks = q[q["ManualPriority"] < 9999]
+                if not prio_tasks.empty:
+                    print(f"Tasks with priority < 9999:")
+                    print(prio_tasks[["OT_id", "Maquina", "ManualPriority"]].to_string())
+                else:
+                    print(f"NO tasks with priority < 9999")
+                    print(f"Sample priorities: {q['ManualPriority'].head().tolist()}")
+            else:
+                print(f"ManualPriority column MISSING!")
+            print(f"================================\n")
 
         if q.empty: colas[m] = deque()
         elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower) or ("duyan" in m_lower) or ("iberica" in m_lower): colas[m] = _cola_troquelada(q)
@@ -826,6 +850,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     if cfg.get("ignore_constraints"):
                         mp_ok = True
                     
+                    # Manual Priority Override for Material Constraints ("No hay discusión")
+                    prio_man_check = int(t_cand.get("ManualPriority", 9999))
+                    if prio_man_check < 9000:
+                        mp_ok = True
+                    
                     if not mp_ok: continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
@@ -839,6 +868,38 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 mejor_candidato_setup = None
                                 break
                         continue
+                    
+                    # --- SUPER OVERRIDE: MANUAL PRIORITY ---
+                    prio_man = int(t_cand.get("ManualPriority", 9999))
+                    # Si tiene prioridad alta (ej < 9000), es sagrada.
+                    # Asumimos que la lista ya esta ordenada por ManualPriority.
+                    # Si la primera tarea ejecutable tiene prioridad manual, LA TOMAMOS YA.
+                    # Sin setups, sin grupos, sin nada.
+                    if prio_man < 9000:
+                        # Check start constraints
+                        is_ready_now = not available_at or available_at <= current_agenda_dt
+                        if is_ready_now:
+                             idx_cand = i
+                             mejor_candidato_futuro = None
+                             mejor_candidato_setup = None # Disable setup gap filling
+                             
+                             # Forced break - no optimizations allowed for manual override
+                             break 
+                        else:
+                             # If not ready IS runnable, keep it as future candidate.
+                             # BUT we should NOT verify setups for others if this one is waiting with P1.
+                             if mejor_candidato_futuro is None:
+                                 mejor_candidato_futuro = (i, available_at)
+                             elif available_at < mejor_candidato_futuro[1]:
+                                 mejor_candidato_futuro = (i, available_at)
+                             
+                             # If we found a Manual Priority Runnable task but it's future,
+                             # we should probably NOT pick a setup filler that delays us?
+                             # For now, let standard logic handle future wait, but don't look further.
+                             # Actually if P1 is waiting, we shouldn't run P9999 just because it has setup.
+                             # So we break loop here too?
+                             # If we break here, we wait for P1.
+                             break
                     
                     es_setup = False
                     if ultima_tarea:
@@ -904,7 +965,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     log_debug(f"End Loop. IdxCand: {idx_cand}. BestFut: {mejor_candidato_futuro}. BestSetup: {mejor_candidato_setup}")
 
                 # 1. Si ya tenemos uno listo (idx_cand != -1), checkeamos si vale la pena ESPERAR por setup
-                if idx_cand != -1 and mejor_candidato_setup:
+                #    PERO SOLO SI NO ES UNA PRIORIDAD MANUAL
+                is_manual_override = False
+                if idx_cand != -1:
+                    t_sel = colas[maquina][idx_cand]
+                    if int(t_sel.get("ManualPriority", 9999)) < 9000:
+                        is_manual_override = True
+
+                if idx_cand != -1 and mejor_candidato_setup and not is_manual_override:
                      wait_time = timedelta(0)
                      if mejor_candidato_setup[1] is not None:
                          wait_time = mejor_candidato_setup[1] - current_agenda_dt

@@ -98,11 +98,30 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             continue
 
         for proceso in pendientes:
-            maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
-            
-            # --- Check Outsourced/Skipped/Priority ---
+            # --- Check if Manual Priority specifies a machine ---
+            # If user set priority for (OT, SpecificMachine), use that machine instead of auto-assignment
             str_ot = str(ot)
             str_proc = str(proceso)
+            
+            # Look for any priority entry for this OT
+            maquina_from_priority = None
+            for (prio_ot, prio_maq), prio_val in priorities.items():
+                if prio_ot == str_ot:
+                    # Check if this machine handles this process
+                    maq_row = cfg["maquinas"][cfg["maquinas"]["Maquina"] == prio_maq]
+                    if not maq_row.empty:
+                        maq_proceso = maq_row["Proceso"].iloc[0]
+                        if str_proc.lower() in maq_proceso.lower() or maq_proceso.lower() in str_proc.lower():
+                            maquina_from_priority = prio_maq
+                            break
+            
+            # Use priority machine if found, otherwise auto-assign
+            if maquina_from_priority:
+                maquina = maquina_from_priority
+            else:
+                maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
+            
+            # --- Check Outsourced/Skipped/Priority ---
             str_maq = str(maquina)
             
             key_proc = (str_ot, str_proc)
@@ -128,6 +147,15 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # The user selects from valid machines. `elegir_maquina` returns one of those.
                 key_prio = (str_ot, str_maq)
                 manual_prio = priorities.get(key_prio, 9999)
+                
+                # DEBUG: Show priority lookup for troquelado
+                if "troquel" in str_proc.lower():
+                    if manual_prio < 9999:
+                        print(f"DEBUG PRIORITY FOUND: OT={str_ot}, Maq={str_maq}, Prio={manual_prio}")
+                    elif str_ot in [k[0] for k in priorities.keys()]:
+                        print(f"DEBUG PRIORITY MISMATCH: OT={str_ot}, Maq={str_maq}")
+                        matching_prios = [(k, v) for k, v in priorities.items() if k[0] == str_ot]
+                        print(f"  Available: {matching_prios}")
 
             # Cálculo de pliegos
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)

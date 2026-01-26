@@ -4,7 +4,6 @@ from datetime import date, datetime, timedelta
 from modules.config_loader import cargar_config, horas_por_dia, get_horas_totales_dia
 from modules.scheduler import programar
 
-# New modules
 from modules.data_processor import process_uploaded_dataframe
 from modules.ui_components import (
     render_machine_speed_inputs,
@@ -17,6 +16,7 @@ from modules.ui_components import (
     render_download_section,
     render_descartonador_ids_section # New import
 )
+
 from modules.visualizations import render_gantt_chart
 
 st.set_page_config(page_title="Priorización de Órdenes", layout="wide")
