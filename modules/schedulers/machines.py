@@ -24,3 +24,73 @@ def elegir_maquina(proceso, orden, cfg, plan_actual=None):
         if descs:
             return descs[0]
     return candidatos[0]
+
+def validar_medidas_troquel(maquina, anc, lar):
+    """Valida si un pliego entra en la máquina de troquelado."""
+    # Normalizar nombre
+    m = str(maquina).lower().strip()
+    # Dimensiones de la tarea (CON ROTACIÓN)
+    # Se compara el lado mayor del pliego con el lado mayor de la máquina
+    # y el lado menor del pliego con el lado menor de la máquina.
+    w_orig = float(anc or 0)
+    l_orig = float(lar or 0)
+    
+    pliego_min = min(w_orig, l_orig)
+    pliego_max = max(w_orig, l_orig)
+
+    if "autom" in m or "duyan" in m:
+        # Min 38x38 (Ambos lados deben ser >= 38)
+        # Como es minimo, ambos lados deben superar 38, asi que da igual la rotación si min(pliego) >= 38
+        return pliego_min >= 38
+    
+    # Manuales: Maximos definidos (Ancho y Largo)
+    
+    # Manual 1 (Troq Nº 2 Ema): Max 80 x 105
+    if "manual 1" in m or "manual1" in m or "ema" in m:
+            # Maquina: 80x105 -> Min: 80, Max: 105
+            mq_min, mq_max = 80, 105
+            return pliego_min <= mq_min and pliego_max <= mq_max
+    
+    # Manual 2 (Troq Nº 1 Gus): Max 66 x 90
+    # Maquina: 66x90 -> Min: 66, Max: 90
+    if "manual 2" in m or "manual2" in m or "gus" in m:
+            mq_min, mq_max = 66, 90
+            return pliego_min <= mq_min and pliego_max <= mq_max
+        
+    # Manual 3: Max 70 x 100
+    # Maquina: 70x100 -> Min: 70, Max: 100
+    if "manual 3" in m or "manual3" in m:
+            mq_min, mq_max = 70, 100
+            return pliego_min <= mq_min and pliego_max <= mq_max
+    
+    # Iberica: Max 70 x 100
+    #          Min 35 x 50
+    # Maquina: 70x100 -> Min: 86, Max: 110
+    if "iberica" in m:
+        mq_min, mq_max, mq_min2, mq_max2 = 86, 110, 35, 50
+        return (pliego_min <= mq_min and pliego_max <= mq_max) and (pliego_min >= mq_min2 and pliego_max >= mq_max2)
+    
+    return True # Por defecto si no matchea nombre
+
+def get_machine_process_order(maquina, cfg):
+    """Devuelve una tupla (orden_proceso, orden_tipo) para ordenar máquinas."""
+    proc_name = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Proceso"]
+    if proc_name.empty: return (999, 0)
+    proc = proc_name.iloc[0]
+    
+    flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])]
+    
+    base_order = 999
+    for i, p in enumerate(flujo_estandar):
+        if p.lower() in proc.lower(): 
+            base_order = i
+            break
+    
+    # Desempate: Manuales (0) van ANTES que Automáticas (1)
+    if "troquel" in proc.lower():
+        if "autom" in maquina.lower() or "duyan" in maquina.lower():
+            return (base_order, 1)
+        else:
+            return (base_order, 0)
+    
+    return (base_order, 0)

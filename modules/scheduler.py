@@ -2,8 +2,11 @@ import pandas as pd
 from datetime import datetime, timedelta, time, date
 from collections import defaultdict, deque
 
-from modules.schedulers.machines import elegir_maquina
-from modules.schedulers.priorities import _clave_prioridad_maquina, _cola_impresora_flexo, _cola_impresora_offset, _cola_troquelada, _cola_cortadora_bobina
+from modules.schedulers.machines import elegir_maquina, validar_medidas_troquel, get_machine_process_order
+from modules.schedulers.priorities import (
+    _clave_prioridad_maquina, _cola_impresora_flexo, _cola_impresora_offset, 
+    _cola_troquelada, _cola_cortadora_bobina, get_downstream_presence_score
+)
 from modules.schedulers.agenda import _reservar_en_agenda
 from modules.schedulers.tasks import _procesos_pendientes_de_orden, _expandir_tareas
 
@@ -25,58 +28,7 @@ PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño
 # =======================================================
 
 # --- HELPER: SCORING PRIORIDAD GROUPING ---
-def _get_downstream_presence_score(task, colas, maquinas_info, maquina_actual, last_tasks_map=None):
-    """
-    Calcula un puntaje de prioridad basado en si el CLIENTE de la tarea
-    ya tiene otras tareas esperando o procesandose en la siguiente maquina (Impresión).
-    Sirve para agrupar tareas del mismo cliente en procesos previos (Guillotina/Corte).
-    """
-    cliente = str(task.get("Cliente", "")).strip().lower()
-    if not cliente: return 0
-    
-    # Determinar siguiente máquina probable (Impresión)
-    # Heurística simple: Si estoy en Guillotina/Corte, lo siguiente es Impresión.
-    # Necesitamos saber qué impresión usa esta tarea.
-    # Miramos _PEN_ImpresionFlexo o _PEN_ImpresionOffset.
-    
-    target_queues = []
-    
-    # Check flags in task
-    is_flexo = str(task.get("_PEN_ImpresionFlexo")).strip().lower() in ["sí", "si", "true"]
-    is_offset = str(task.get("_PEN_ImpresionOffset")).strip().lower() in ["sí", "si", "true"]
-    
-    
-    # Find printer names in colas keys
-    # Asumimos que las colas tienen nombres como "Impresora Flexo 1", "Heidelberg", etc.
-    # O usamos la configuración de máquinas.
-    
-    # Simple search in queues
-    for q_name in colas.keys():
-        qn = q_name.lower()
-        if is_flexo and ("flexo" in qn or "bhs" in qn):
-            target_queues.append(q_name)
-        if is_offset and ("offset" in qn or "heidelberg" in qn or "kba" in qn):
-             target_queues.append(q_name)
-             
-    score = 0
-    for tq in target_queues:
-        # Check Waiting Queue
-        queue_items = colas.get(tq, [])
-        for item in queue_items:
-            c_item = str(item.get("Cliente", "")).strip().lower()
-            if c_item == cliente:
-                score += 1
 
-        
-        # Check Currently Running / Last Scheduled Task
-        if last_tasks_map:
-            t_running = last_tasks_map.get(tq)
-            if t_running:
-                c_run = str(t_running.get("Cliente", "")).strip().lower()
-                if c_run == cliente:
-                    score += 2 # Running task is a strong signal!
-    
-    return score
 
 def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False):
     """
@@ -225,24 +177,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     flujo_estandar = [p.strip() for p in cfg.get("orden_std", [])] 
 
     def _orden_proceso(maquina):
-        proc_name = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == maquina, "Proceso"]
-        if proc_name.empty: return (999, 0)
-        proc = proc_name.iloc[0]
-        
-        base_order = 999
-        for i, p in enumerate(flujo_estandar):
-            if p.lower() in proc.lower(): 
-                base_order = i
-                break
-        
-        # Desempate: Manuales (0) van ANTES que Automáticas (1)
-        if "troquel" in proc.lower():
-            if "autom" in maquina.lower() or "duyan" in maquina.lower():
-                return (base_order, 1)
-            else:
-                return (base_order, 0)
-        
-        return (base_order, 0)
+        return get_machine_process_order(maquina, cfg)
 
     # --- FILTRO DE BLACKLIST ---
     if "manual_overrides" in cfg and "blacklist_ots" in cfg["manual_overrides"]:
@@ -272,51 +207,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     auto_name = auto_names[0] if auto_names else None
 
 
-    def _validar_medidas_troquel(maquina, anc, lar):
-        # Normalizar nombre
-        m = str(maquina).lower().strip()
-        # Dimensiones de la tarea (CON ROTACIÓN)
-        # Se compara el lado mayor del pliego con el lado mayor de la máquina
-        # y el lado menor del pliego con el lado menor de la máquina.
-        w_orig = float(anc or 0)
-        l_orig = float(lar or 0)
-        
-        pliego_min = min(w_orig, l_orig)
-        pliego_max = max(w_orig, l_orig)
 
-        if "autom" in m or "duyan" in m:
-            # Min 38x38 (Ambos lados deben ser >= 38)
-            # Como es minimo, ambos lados deben superar 38, asi que da igual la rotación si min(pliego) >= 38
-            return pliego_min >= 38
-        
-        # Manuales: Maximos definidos (Ancho y Largo)
-        
-        # Manual 1 (Troq Nº 2 Ema): Max 80 x 105
-        if "manual 1" in m or "manual1" in m or "ema" in m:
-             # Maquina: 80x105 -> Min: 80, Max: 105
-             mq_min, mq_max = 80, 105
-             return pliego_min <= mq_min and pliego_max <= mq_max
-        
-        # Manual 2 (Troq Nº 1 Gus): Max 66 x 90
-        # Maquina: 66x90 -> Min: 66, Max: 90
-        if "manual 2" in m or "manual2" in m or "gus" in m:
-             mq_min, mq_max = 66, 90
-             return pliego_min <= mq_min and pliego_max <= mq_max
-            
-        # Manual 3: Max 70 x 100
-        # Maquina: 70x100 -> Min: 70, Max: 100
-        if "manual 3" in m or "manual3" in m:
-             mq_min, mq_max = 70, 100
-             return pliego_min <= mq_min and pliego_max <= mq_max
-        
-        # Iberica: Max 70 x 100
-        #          Min 35 x 50
-        # Maquina: 70x100 -> Min: 86, Max: 110
-        if "iberica" in m:
-            mq_min, mq_max, mq_min2, mq_max2 = 86, 110, 35, 50
-            return (pliego_min <= mq_min and pliego_max <= mq_max) and (pliego_min >= mq_min2 and pliego_max >= mq_max2)
-        
-        return True # Por defecto si no matchea nombre
 
     if not tasks.empty and manuales: 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
@@ -362,17 +253,17 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     if "autom" in str(m).lower():
                         # Para Automatica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
                         # Si la hoja más chica es < 38, NO entra en Auto.
-                        if _validar_medidas_troquel(m, min_anc, min_lar):
+                        if validar_medidas_troquel(m, min_anc, min_lar):
                             candidatos_tamano.append(m)
                     elif "iberica" in str(m).lower():
                         # Para Iberica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
                         # Si la hoja más chica es < 38, NO entra en Auto.
-                        if _validar_medidas_troquel(m, min_anc, min_lar):
+                        if validar_medidas_troquel(m, min_anc, min_lar):
                             candidatos_tamano.append(m) 
                     else:
                         # Para Manuales (Restricción de MAXIMO), usamos las dimensiones MAXIMAS del grupo
                         # Si la hoja más grande es > 80, NO entra en Manual.
-                        if _validar_medidas_troquel(m, max_anc, max_lar):
+                        if validar_medidas_troquel(m, max_anc, max_lar):
                             candidatos_tamano.append(m)
                 
                 if not candidatos_tamano: continue
@@ -913,7 +804,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     
                     if is_ready_now:
                         if is_prep_machine:
-                            score = _get_downstream_presence_score(t_cand, colas, None, maquina, last_tasks_map=ultimo_en_maquina)
+                            score = get_downstream_presence_score(t_cand, colas, None, maquina, last_tasks_map=ultimo_en_maquina)
                             
                             # Decision Rule: Strictly better score wins
                             if score > best_group_score:
@@ -1143,7 +1034,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     
                                     # Validar medidas para Auto (Min 38x38)
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                    if not validar_medidas_troquel(maquina, anc, lar): continue
 
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -1167,7 +1058,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                                     # Validar medidas para ESTA manual
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                    if not validar_medidas_troquel(maquina, anc, lar): continue
                                     
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -1188,7 +1079,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                         
                                         # Validar medidas para ESTA manual
                                         anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                        if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                        if not validar_medidas_troquel(maquina, anc, lar): continue
 
                                         mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -1212,7 +1103,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     # AND "Iberica puede robar a las manuales y a la automatica".
                                     
                                     anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                    if not validar_medidas_troquel(maquina, anc, lar): continue
                                     
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -1230,7 +1121,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                         if t_cand["Proceso"].strip() != "Troquelado": continue
                                     
                                         anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                        if not _validar_medidas_troquel(maquina, anc, lar): continue
+                                        if not validar_medidas_troquel(maquina, anc, lar): continue
 
                                         mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                         mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")

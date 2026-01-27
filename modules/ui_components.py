@@ -325,7 +325,7 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
 def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
-    modo = st.radio("Ver detalle por:", ["Orden de Trabajo (OT)", "Máquina", "Día (Fecha)", "Plan Completo (Todas)"], horizontal=True)
+    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Día (Fecha)", "Orden de Trabajo (OT)"], horizontal=True)
 
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 

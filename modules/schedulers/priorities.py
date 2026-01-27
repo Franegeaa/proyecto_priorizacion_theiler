@@ -281,3 +281,56 @@ def _cola_cortadora_bobina(q):
     grupos.sort()
     
     return deque([item for _, _, _, _, _, _, recs in grupos for item in recs])
+
+def get_downstream_presence_score(task, colas, maquinas_info, maquina_actual, last_tasks_map=None):
+    """
+    Calcula un puntaje de prioridad basado en si el CLIENTE de la tarea
+    ya tiene otras tareas esperando o procesandose en la siguiente maquina (Impresión).
+    Sirve para agrupar tareas del mismo cliente en procesos previos (Guillotina/Corte).
+    """
+    cliente = str(task.get("Cliente", "")).strip().lower()
+    if not cliente: return 0
+    
+    # Determinar siguiente máquina probable (Impresión)
+    # Heurística simple: Si estoy en Guillotina/Corte, lo siguiente es Impresión.
+    # Necesitamos saber qué impresión usa esta tarea.
+    # Miramos _PEN_ImpresionFlexo o _PEN_ImpresionOffset.
+    
+    target_queues = []
+    
+    # Check flags in task
+    is_flexo = str(task.get("_PEN_ImpresionFlexo")).strip().lower() in ["sí", "si", "true"]
+    is_offset = str(task.get("_PEN_ImpresionOffset")).strip().lower() in ["sí", "si", "true"]
+    
+    
+    # Find printer names in colas keys
+    # Asumimos que las colas tienen nombres como "Impresora Flexo 1", "Heidelberg", etc.
+    # O usamos la configuración de máquinas.
+    
+    # Simple search in queues
+    for q_name in colas.keys():
+        qn = q_name.lower()
+        if is_flexo and ("flexo" in qn or "bhs" in qn):
+            target_queues.append(q_name)
+        if is_offset and ("offset" in qn or "heidelberg" in qn or "kba" in qn):
+             target_queues.append(q_name)
+             
+    score = 0
+    for tq in target_queues:
+        # Check Waiting Queue
+        queue_items = colas.get(tq, [])
+        for item in queue_items:
+            c_item = str(item.get("Cliente", "")).strip().lower()
+            if c_item == cliente:
+                score += 1
+
+        
+        # Check Currently Running / Last Scheduled Task
+        if last_tasks_map:
+            t_running = last_tasks_map.get(tq)
+            if t_running:
+                c_run = str(t_running.get("Cliente", "")).strip().lower()
+                if c_run == cliente:
+                    score += 2 # Running task is a strong signal!
+    
+    return score
