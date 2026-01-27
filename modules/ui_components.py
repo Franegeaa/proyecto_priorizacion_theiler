@@ -475,12 +475,32 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             df_full["Eliminar OT"] = False
             
             # --- FILTERING LOGIC ---
-            col_filter, _ = st.columns([1, 4])
-            show_skipped = col_filter.toggle("Mostrar Procesos Saltados", value=False)
+            # --- FILTERING LOGIC ---
+            col_f1, col_f2, col_f3 = st.columns([1, 2, 2])
             
+            with col_f1:
+                show_skipped = st.toggle("Mostrar Saltados", value=False)
+            
+            with col_f2:
+                # Get unique processes from the full dataset (before other filters to avoid disappearing options?)
+                # Or after? Usually user wants to see what's available. 
+                # Let's use unique values from df_full (which is sorted but not filtered yet)
+                unique_procs = sorted(df_full["Proceso"].astype(str).unique().tolist())
+                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)")
+                
+            with col_f3:
+                unique_maqs = sorted(df_full["Maquina"].astype(str).unique().tolist())
+                filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)")
+            
+            # Apply Filters
             if not show_skipped:
-                # Filter out rows where IsSkipped is True
                 df_full = df_full[~df_full["IsSkipped"].astype(bool)]
+            
+            if filtro_proc:
+                df_full = df_full[df_full["Proceso"].astype(str).isin(filtro_proc)]
+                
+            if filtro_maq:
+                df_full = df_full[df_full["Maquina"].astype(str).isin(filtro_maq)]
             
             # Rename for display
             df_editor = df_full.rename(columns={
