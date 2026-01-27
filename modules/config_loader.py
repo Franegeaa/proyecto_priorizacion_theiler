@@ -1,6 +1,8 @@
 import pandas as pd
 from datetime import date, datetime, time, timedelta
 import numpy as np
+import json
+import os
 
 def es_si(x):
     """Interpreta distintos formatos como 'sí' o verdadero."""
@@ -14,6 +16,27 @@ def es_si(x):
 
     s = str(x).strip().lower()
     return s in {"si", "sí", "s", "true", "1", "x", "ok", "offset", "flexo", "pegado", "verdadero"}
+
+def load_die_preferences(path="config/troquel_preferences.json"):
+    """Carga las preferencias de troqueles desde un JSON."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error cargando preferencias de troqueles: {e}")
+        return {}
+
+def save_die_preferences(prefs, path="config/troquel_preferences.json"):
+    """Guarda las preferencias de troqueles en un JSON."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(prefs, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error guardando preferencias de troqueles: {e}")
+        return False
 
 def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
     cfg = {}
@@ -45,6 +68,10 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
             index=df_abbr["Abbr"]
         ).to_dict()
     cfg["mapa_abreviaturas"] = mapa
+    
+    # Cargar preferencias de Troqueles
+    cfg["troquel_preferences"] = load_die_preferences()
+    
     return cfg
 
 # Machine name aliases for priority mapping

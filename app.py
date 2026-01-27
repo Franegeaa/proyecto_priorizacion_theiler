@@ -14,7 +14,8 @@ from modules.ui_components import (
     render_pending_processes_section,
     render_details_section,
     render_download_section,
-    render_descartonador_ids_section # New import
+    render_descartonador_ids_section, # New import
+    render_die_preferences # New import
 )
 
 from modules.visualizations import render_gantt_chart
@@ -70,7 +71,10 @@ if archivo is not None:
     # ----------------------------------
     
     # 3.1 UI: Descartonador IDs (New)
-    cfg["custom_ids"] = render_descartonador_ids_section(cfg_plan) # Pass filtered config or full config? Full config has all machines. Better to use cfg_plan if we only care about active ones? 
+    cfg["custom_ids"] = render_descartonador_ids_section(cfg_plan) 
+    
+    # 3.2 UI: Die Preferences (New)
+    render_die_preferences(cfg_plan) # Updates cfg in place (and saves to disk) 
     # Actually logic uses cfg["maquinas"] so it will see filtered ones.
     # But wait, render function uses cfg["maquinas"]. 
     # Let's pass cfg_plan so we only edit IDs for ACTIVE machines.

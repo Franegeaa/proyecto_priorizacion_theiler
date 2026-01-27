@@ -268,40 +268,77 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 if not candidatos_tamano: continue
 
-                # 2. REGLA DE BOCAS (> 6) -> Automática Obligatoria (si entra)
-                if bocas > 6:
-                    if auto_name and (auto_name in candidatos_tamano):
-                        candidatas = [auto_name]
-                    else:
-                        # Si no entra en Auto, va a manual compatible
-                        candidatas = [m for m in candidatos_tamano if m != auto_name]
+                # --- 1.5 CHECK PREFERENCIAS MANUALES (Config) ---
+                # Si el código de troquel está asignado a una máquina específica, 
+                # forzamos esa máquina (siempre que entre por tamaño).
+                prefs = cfg.get("troquel_preferences", {})
+                valid_preferred = []
                 
-                # 3. REGLA DE CANTIDAD (> 2500) -> Automática Obligatoria (si entra)
-                elif total_pliegos > 2500:
-                    if auto_name and (auto_name in candidatos_tamano):
-                        candidatas = [auto_name]
-                        # Fix: Iterar sobre la lista iberica para ver si alguna es candidata
-                        for ib in iberica:
-                            if ib in candidatos_tamano:
-                                candidatas.append(ib)
-                    else:
-                        candidatas = [m for m in candidatos_tamano if m != auto_name]
-                
-                # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Preferencia Manual Standard > Iberica > Auto
-                else:
-                    # Preference 1: Manuales Standard
-                    manuales_std = [m for m in candidatos_tamano if m in manuales]
+                if prefs:
+                    # Buscar en qué maquina(s) estÃ¡ este troquel
+                    for m_pref, codes in prefs.items():
+                        # Normalizar lista de codigos
+                        codes_norm = [str(c).lower().strip() for c in codes]
+                        if troq_key in codes_norm:
+                            # Encontrado! Chequear si es valid candidate por tamaño
+                            # Nota: prefs keys might not match official names exactly if changed, 
+                            # but usually they come from UI dropdowns which use official names.
+                            
+                            # Intentar matchear nombre
+                            # El nombre en prefs debe coincidir con 'posibles' list
+                            # Buscamos m_pref en candidatos_tamano'
+                            print("\n")
+                            print(f"Buscando match para {troq_key} en {m_pref}")
+                            print(f"Candidatos: {candidatos_tamano}")
+                            if m_pref in candidatos_tamano:
+                                print(f"Encontrado match para {troq_key} en {m_pref}")
+                                valid_preferred.append(m_pref)
+                            else:
+                                # Try fuzzy match if name changed slightly? 
+                                # Better stick to strict string match from config
+                                pass
+
+                if valid_preferred:
+                    # Override Logic: Si hay preferencias válidas, USARLAS EXCLUSIVAMENTE
+                    candidatas = valid_preferred
                     
-                    if manuales_std:
-                        candidatas = manuales_std
-                    else:
-                        # Preference 2: Iberica (Si no entra en ninguna standard)
-                        manuales_todas = [m for m in candidatos_tamano if m != auto_name]
-                        if manuales_todas:
-                            candidatas = manuales_todas
+                else:
+                    # --- LÓGICA ESTÁNDAR (Si no hay preferencia explícita) ---
+                    
+                    # 2. REGLA DE BOCAS (> 6) -> Automática Obligatoria (si entra)
+                    if bocas > 6:
+                        if auto_name and (auto_name in candidatos_tamano):
+                            candidatas = [auto_name]
                         else:
-                            # Preference 3: Auto (Si no entra en ninguna manual)
-                            candidatas = candidatos_tamano
+                            # Si no entra en Auto, va a manual compatible
+                            candidatas = [m for m in candidatos_tamano if m != auto_name]
+                    
+                    # 3. REGLA DE CANTIDAD (> 2500) -> Automática Obligatoria (si entra)
+                    elif total_pliegos > 2500:
+                        if auto_name and (auto_name in candidatos_tamano):
+                            candidatas = [auto_name]
+                            # Fix: Iterar sobre la lista iberica para ver si alguna es candidata
+                            for ib in iberica:
+                                if ib in candidatos_tamano:
+                                    candidatas.append(ib)
+                        else:
+                            candidatas = [m for m in candidatos_tamano if m != auto_name]
+                    
+                    # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Preferencia Manual Standard > Iberica > Auto
+                    else:
+                        # Preference 1: Manuales Standard
+                        manuales_std = [m for m in candidatos_tamano if m in manuales]
+                        
+                        if manuales_std:
+                            candidatas = manuales_std
+                        else:
+                            # Preference 2: Iberica (Si no entra en ninguna standard)
+                            manuales_todas = [m for m in candidatos_tamano if m != auto_name]
+                            if manuales_todas:
+                                candidatas = manuales_todas
+                            else:
+                                # Preference 3: Auto (Si no entra en ninguna manual)
+                                candidatas = candidatos_tamano
 
                 if not candidatas: continue
 
@@ -312,6 +349,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
                 
+                if troq_key == "k102":
+                    print("Encontrado match para k102 en", m_sel)
+
                 tasks.loc[idxs, "Maquina"] = m_sel
                 # Solo actualizamos carga estimada, NO reservamos tiempo real
                 load_h[m_sel] += total_pliegos / cap[m_sel]
@@ -342,23 +382,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         q = tasks[tasks["Maquina"] == m].copy()
         m_lower = m.lower()
         
-        # DEBUG: Check if ManualPriority exists and has values
-        if "troq" in m_lower or "manual" in m_lower:
-            print(f"\n=== DEBUG QUEUE FOR {m} ===")
-            print(f"Queue size: {len(q)}")
-            if "ManualPriority" in q.columns:
-                print(f"ManualPriority column EXISTS")
-                prio_tasks = q[q["ManualPriority"] < 9999]
-                if not prio_tasks.empty:
-                    print(f"Tasks with priority < 9999:")
-                    print(prio_tasks[["OT_id", "Maquina", "ManualPriority"]].to_string())
-                else:
-                    print(f"NO tasks with priority < 9999")
-                    print(f"Sample priorities: {q['ManualPriority'].head().tolist()}")
-            else:
-                print(f"ManualPriority column MISSING!")
-            print(f"================================\n")
-
         if q.empty: colas[m] = deque()
         elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower) or ("duyan" in m_lower) or ("iberica" in m_lower): colas[m] = _cola_troquelada(q)
         elif ("offset" in m_lower) or ("heidelberg" in m_lower): colas[m] = _cola_impresora_offset(q)
