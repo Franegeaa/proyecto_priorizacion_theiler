@@ -464,7 +464,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             st.caption("Editá la tabla para ajustar prioridades o marcar excepciones.")
             
             # --- PREPARE DATA FOR EDITOR ---
-            df_full = schedule.sort_values(by=["Inicio", "Maquina"]).copy()
+            df_full = schedule.sort_values(by=["Proceso", "Maquina", "Inicio"]).copy()
             
             # Add editing columns if not present
             if "ManualPriority" not in df_full.columns: df_full["ManualPriority"] = 9999
@@ -709,10 +709,10 @@ def render_download_section(schedule, resumen_ot, carga_md):
         st.caption("Visión de flujo (horizontal).")
 
         st.download_button(
-            "⬇️ Excel (Horizontal por OT)",
+            "⬇️ Excel 97-2003 (Horizontal por OT)",
             data=buf_ot,
-            file_name="Plan_Produccion_Por_OT.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            file_name="Plan_Produccion_Por_OT.xls",
+            mime="application/vnd.ms-excel",
             key="btn_excel_ot"
         )
         

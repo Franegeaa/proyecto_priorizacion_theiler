@@ -127,21 +127,85 @@ def generar_excel_bytes(schedule, resumen_ot, carga_md):
     buf.seek(0)
     return buf
 
+import xlwt
+from datetime import date, datetime
+
 def generar_excel_ot_bytes(schedule):
-    """Genera el archivo Excel solo con la hoja 'Plan por OT'."""
-    buf_ot = BytesIO()
-    with pd.ExcelWriter(buf_ot, engine="openpyxl") as w_ot:
-        try:
-            df_ot_horiz = generar_excel_ot_horizontal(schedule)
-            if not df_ot_horiz.empty:
-                df_ot_horiz.to_excel(w_ot, index=False, sheet_name="Plan por OT")
-            else:
-                pd.DataFrame({"Info": ["No hay datos"]}).to_excel(w_ot, sheet_name="Vacio")
-        except Exception as e:
-                pd.DataFrame({"Error": [str(e)]}).to_excel(w_ot, sheet_name="Error")
+    """Genera el archivo Excel solo con la hoja 'Plan por OT' en formato .xls (Excel 97-2003)."""
     
+    # Obtenemos el DataFrame horizontal
+    df_ot_horiz = generar_excel_ot_horizontal(schedule)
+    
+    buf_ot = BytesIO()
+    
+    try:
+        # Pandas ya no soporta 'xlwt' como engine nativo en versiones recientes.
+        # Usamos xlwt manualmente.
+        book = xlwt.Workbook(encoding='utf-8')
+        sheet = book.add_sheet("Plan por OT")
+        
+        if df_ot_horiz.empty:
+             sheet.write(0, 0, "No hay datos")
+        else:
+            # 1. Escribir encabezados
+            columns = df_ot_horiz.columns.tolist()
+            style_header = xlwt.easyxf('font: bold on; align: horiz center')
+            
+            for col_idx, col_name in enumerate(columns):
+                sheet.write(0, col_idx, col_name, style_header)
+                
+            # 2. Escribir datos
+            # Estilo para fechas
+            style_date = xlwt.XFStyle()
+            style_date.num_format_str = 'DD/MM/YYYY'
+            
+            style_time = xlwt.XFStyle()
+            style_time.num_format_str = 'HH:MM'
+            
+            for row_idx, row in df_ot_horiz.iterrows():
+                # row_idx es el indice del df, pero para xlwt la fila es row_idx + 1 (header es 0)
+                # Pero iterrows index puede no ser secuencial 0..N si filtramos.
+                # Mejor usamos un contador manual.
+                xls_row = row_idx + 1 if isinstance(row_idx, int) else 1 # Fallback, pero mejor enumerate abajo si iterrows no es confiable en orden.
+                
+            # Mejor iterar valores
+            for r_idx, (index, row) in enumerate(df_ot_horiz.iterrows()):
+                xls_r = r_idx + 1
+                for c_idx, col_name in enumerate(columns):
+                    val = row[col_name]
+                    
+                    # Manejo de tipos para xlwt
+                    if isinstance(val, (date, datetime)):
+                        # Si es NaT no escribimos nada o empty
+                        if pd.isna(val):
+                            sheet.write(xls_r, c_idx, "")
+                        else:
+                            # Detectar si es hora o fecha?
+                            # El nombre de columna puede darnos pista o el tipo
+                            if "Hora" in col_name and isinstance(val, (datetime, time)): # A veces string
+                                # Si viene como string HH:MM lo dejamos string
+                                sheet.write(xls_r, c_idx, val) 
+                            else:
+                                sheet.write(xls_r, c_idx, val, style_date)
+                    elif pd.isna(val):
+                        sheet.write(xls_r, c_idx, "")
+                    else:
+                        # Convertir a string si es necesario, o dejar int/float
+                        sheet.write(xls_r, c_idx, val)
+                        
+        book.save(buf_ot)
+        
+    except Exception as e:
+        # Fallback simple error txt
+        # Pero devolvemos bytes
+        buf_ot = BytesIO()
+        book_err = xlwt.Workbook()
+        sh_err = book_err.add_sheet("Error")
+        sh_err.write(0, 0, f"Error generando XLS: {str(e)}")
+        book_err.save(buf_ot)
+
     buf_ot.seek(0)
-    return buf_ot, df_ot_horiz # Retornamos también el DF para el CSV
+    return buf_ot, df_ot_horiz # Retornamos también el DF para el CSV o Debug
 
 def generar_csv_maquina_str(schedule):
     """Genera el CSV por máquina."""
