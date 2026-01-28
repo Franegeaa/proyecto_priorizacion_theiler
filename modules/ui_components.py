@@ -828,3 +828,113 @@ def render_die_preferences(cfg):
                     st.success("✅ Preferencias guardadas correctamente.")
                 else:
                     st.error("❌ Error al guardar preferencias.")
+
+def render_manual_machine_assignment(cfg, df, maquinas_activas):
+    """
+    Renders UI for manual assignment of OTs to specific machines:
+    - Troqueladora Manual 3
+    - Iberica
+    - Descartonadora 3
+    - Descartonadora 4
+    """
+
+    # Target machines for this feature
+    # We normalise names to partial matches as user requested: 
+    # "Troqueladora manual 3", "Iberica", "Descartonadora 3", "Descartonadora 4"
+    # But maquinas_activas comes from DB which might have different naming.
+    # We look for partial matches.
+    
+    target_keywords = ["Troq Nº 1 Gus", "Troq Nº 2 Ema", "Duyan", "Manual 3", "Iberica", "Descartonadora 3", "Descartonadora 4"]
+    
+    active_targets = []
+    for m in maquinas_activas:
+        for k in target_keywords:
+            if k.lower() in m.lower():
+                active_targets.append(m)
+                break
+    
+    active_targets = sorted(list(set(active_targets)))
+
+    if not active_targets:
+        return {}
+        
+    st.subheader("📌 Asignación Manual de Trabajos")
+    st.info("Utiliza esta sección para asignar manualmente órdenes a máquinas específicas. Estas órdenes **NO** serán procesadas por la lógica automática.")
+    
+    assignments = {}
+    
+    if "manual_assignments" not in st.session_state:
+        st.session_state.manual_assignments = {}
+
+    with st.expander("Configurar Asignaciones Manuales", expanded=False):
+        cols = st.columns(min(len(active_targets), 3))
+        
+        for i, maq in enumerate(active_targets):
+            col = cols[i % 3]
+            
+            # Determine candidates
+            candidates = []
+            if not df.empty:
+                # Ensure OT_id exists
+                if "OT_id" not in df.columns:
+                     if "CodigoProducto" in df.columns and "Subcodigo" in df.columns:
+                        temp_ots = df["CodigoProducto"].astype(str) + "-" + df["Subcodigo"].astype(str)
+                        # We can't easily filter by process if columns missing in raw DF
+                        candidates = sorted(temp_ots.unique().tolist())
+                else:
+                    # Filter based on process
+                    mask_relevant = pd.Series([True] * len(df), index=df.index)
+                    
+                    if "troquel" in maq.lower() or "manual" in maq.lower() or "iberica" in maq.lower():
+                        if "_PEN_Troquelado" in df.columns:
+                            mask_relevant = mask_relevant & df["_PEN_Troquelado"]
+                        
+                        # Check MP (MateriaPrimaPlanta='Si' means missing/blocking according to scheduler logic)
+                        if "MateriaPrimaPlanta" in df.columns:
+                            # We allow if NOT 'si'/'true'
+                             is_missing = df["MateriaPrimaPlanta"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
+                             mask_relevant = mask_relevant & (~is_missing)
+
+                        # Check Troquel (If TroquelArt='Si', need Date)
+                        if "TroquelArt" in df.columns and "FechaLlegadaTroquel" in df.columns:
+                             req_troq = df["TroquelArt"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
+                             has_date = pd.notna(df["FechaLlegadaTroquel"]) & (df["FechaLlegadaTroquel"].astype(str).str.strip() != "")
+                             # Allowed if: NOT required OR (Required AND HasDate)
+                             mask_relevant = mask_relevant & ((~req_troq) | has_date)
+
+                    elif "descartonad" in maq.lower():
+                        if "_PEN_Descartonado" in df.columns:
+                            mask_relevant = mask_relevant & df["_PEN_Descartonado"]
+                        
+                        # Apply MP Check to Descartonado as well (User said "cumplen con la mp", seemingly general)
+                        if "MateriaPrimaPlanta" in df.columns:
+                             is_missing = df["MateriaPrimaPlanta"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
+                             mask_relevant = mask_relevant & (~is_missing)
+                            
+                    candidates = sorted(df.loc[mask_relevant, "OT_id"].unique().tolist())
+
+            # Retrieve previous selection
+            prev_sel = st.session_state.manual_assignments.get(maq, [])
+            
+            with col:
+                sel = st.multiselect(
+                    f"Órdenes para {maq}",
+                    options=candidates,
+                    # Ensure defaults are still in candidates to avoid errors
+                    default=[x for x in prev_sel if x in candidates],
+                    key=f"manual_assign_{maq}"
+                )
+                
+                # Check for overlap with other machines? 
+                # Ideally we should warn if an OT is assigned to multiple manual machines.
+                # But for now, just save.
+                
+                if sel:
+                    assignments[maq] = sel
+                    st.session_state.manual_assignments[maq] = sel
+                else:
+                    # Clear from session state if empty to keep it clean
+                    if maq in st.session_state.manual_assignments:
+                         del st.session_state.manual_assignments[maq]
+    
+    return assignments

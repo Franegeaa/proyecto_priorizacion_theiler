@@ -197,11 +197,53 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # -------------------------------------
     
     # =================================================================
+    # 2.9 APLICAR ASIGNACIONES MANUALES (Override)
+    # =================================================================
+    if "manual_assignments" in cfg and cfg["manual_assignments"]:
+        if "ManualAssignment" not in tasks.columns: tasks["ManualAssignment"] = False
+        
+        for maq_target, ots_list in cfg["manual_assignments"].items():
+            if not ots_list: continue
+            
+            # Filter tasks that match the OTs
+            # Note: OTs might be strings, ensure type match
+            mask_ots = tasks["OT_id"].astype(str).isin([str(x) for x in ots_list])
+            
+            # We want to assign ONLY if the process matches the machine type? 
+            # Ideally the UI filtered this, but let's be safe or just trust the user.
+            # Trusting the user is better for "Manual". User might want to do weird stuff.
+            # But wait, if I assign a "Printing" job to "Troqueladora", it won't work well physically.
+            # But let's assume user knows what they are doing or the UI filtered it.
+            # However, we only claimed support for Troquelado / Descartonado in this feature.
+            
+            # Actually, let's filter by relevant process groups to avoid accidents (like assigning ALL ops of an OT to one machine)
+            # The 'tasks' dataframe has ONE row per operation.
+            # If I select OT "123", it has "Impresion", "Troquelado", "Pegado".
+            # If I assign OT "123" to "Manual 3", I only mean the "Troquelado" operation!!
+            # This is CRITICAL.
+            
+            target_lower = maq_target.lower()
+            if "troquel" in target_lower or "manual" in target_lower or "iberica" in target_lower:
+                mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("troquel")
+            elif "descartonad" in target_lower:
+                mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("descartonad")
+            else:
+                # Fallback: exact process match? Or just assignments are unsafe?
+                # Let's rely on standard logic or allow if nothing specific.
+                mask_proc = True 
+            
+            # Apply
+            mask_final = mask_ots & mask_proc
+            if mask_final.any():
+                tasks.loc[mask_final, "Maquina"] = maq_target
+                tasks.loc[mask_final, "ManualAssignment"] = True
+
+    # =================================================================
     # 3. REASIGNACIÓN TROQUELADO (Solo asigna, NO reserva tiempo)
     # =================================================================
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
-    manuales = [m for m in troq_cfg["Maquina"].tolist() if "manual" in str(m).lower() or "troq n" in str(m).lower()]
+    manuales = [m for m in troq_cfg["Maquina"].tolist() if "troq n" in str(m).lower()]
     iberica = [m for m in troq_cfg["Maquina"].tolist() if "iberica" in str(m).lower()]
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
@@ -214,7 +256,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
         
         cap = {} 
-        for m in manuales + ([auto_name] if auto_name else []) + iberica:
+        for m in manuales + ([auto_name] if auto_name else []):
             if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg))
         load_h = {m: 0.0 for m in cap.keys()} 
 
@@ -222,6 +264,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         agenda_m = {m: {"fecha": agenda[m]["fecha"], "hora": agenda[m]["hora"]} for m in cap.keys()}
 
         mask_troq = tasks["Proceso"].eq("Troquelado")
+        # EXCLUDE Manual Assignments logic
+        if "ManualAssignment" in tasks.columns:
+            mask_troq = mask_troq & (~tasks["ManualAssignment"])
         troq_df = tasks.loc[mask_troq].copy()
 
         if not troq_df.empty:
@@ -247,7 +292,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 candidatas = []
                 
                 # 1. Validar candidatos por TAMAÑO primero
-                posibles = manuales + ([auto_name] if auto_name else []) + iberica
+                posibles = manuales + ([auto_name] if auto_name else [])
                 candidatos_tamano = []
                 for m in posibles:
                     if "autom" in str(m).lower():
@@ -255,11 +300,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Si la hoja más chica es < 38, NO entra en Auto.
                         if validar_medidas_troquel(m, min_anc, min_lar):
                             candidatos_tamano.append(m)
-                    elif "iberica" in str(m).lower():
-                        # Para Iberica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
-                        # Si la hoja más chica es < 38, NO entra en Auto.
-                        if validar_medidas_troquel(m, min_anc, min_lar):
-                            candidatos_tamano.append(m) 
                     else:
                         # Para Manuales (Restricción de MAXIMO), usamos las dimensiones MAXIMAS del grupo
                         # Si la hoja más grande es > 80, NO entra en Manual.
@@ -287,15 +327,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             # Intentar matchear nombre
                             # El nombre en prefs debe coincidir con 'posibles' list
                             # Buscamos m_pref en candidatos_tamano'
-                            print("\n")
-                            print(f"Buscando match para {troq_key} en {m_pref}")
-                            print(f"Candidatos: {candidatos_tamano}")
                             if m_pref in candidatos_tamano:
-                                print(f"Encontrado match para {troq_key} en {m_pref}")
                                 valid_preferred.append(m_pref)
                             else:
-                                # Try fuzzy match if name changed slightly? 
-                                # Better stick to strict string match from config
                                 pass
 
                 if valid_preferred:
@@ -317,10 +351,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     elif total_pliegos > 2500:
                         if auto_name and (auto_name in candidatos_tamano):
                             candidatas = [auto_name]
-                            # Fix: Iterar sobre la lista iberica para ver si alguna es candidata
-                            for ib in iberica:
-                                if ib in candidatos_tamano:
-                                    candidatas.append(ib)
                         else:
                             candidatas = [m for m in candidatos_tamano if m != auto_name]
                     
@@ -349,9 +379,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
                 
-                if troq_key == "k102":
-                    print("Encontrado match para k102 en", m_sel)
-
                 tasks.loc[idxs, "Maquina"] = m_sel
                 # Solo actualizamos carga estimada, NO reservamos tiempo real
                 load_h[m_sel] += total_pliegos / cap[m_sel]
@@ -369,6 +396,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # Las máquinas tomarán tareas de ahí a medida que se liberen.
         
         mask_desc = tasks["Proceso"].eq("Descartonado")
+        
+        # EXCLUDE Manual Assignments logic
+        if "ManualAssignment" in tasks.columns:
+            mask_desc = mask_desc & (~tasks["ManualAssignment"])
         tasks.loc[mask_desc, "Maquina"] = "POOL_DESCARTONADO"
 
     # =================================================================
@@ -383,7 +414,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         m_lower = m.lower()
         
         if q.empty: colas[m] = deque()
-        elif ("manual" in m_lower) or ("autom" in m_lower) or ("troquel" in m_lower) or ("duyan" in m_lower) or ("iberica" in m_lower): colas[m] = _cola_troquelada(q)
+        elif ("troquel" in m_lower) or ("duyan" in m_lower) or ("manual" in m_lower): colas[m] = _cola_troquelada(q)
         elif ("offset" in m_lower) or ("heidelberg" in m_lower): colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
@@ -608,12 +639,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
              if requires_troquel:
                 fecha_troquel = t.get("FechaLlegadaTroquel")
-                with open("debug_scheduler.log", "a") as f:
-                    f.write(f"DEBUG: Checking TroquelArt for {ot}. Val: {t.get('TroquelArt')}. Date: {fecha_troquel}. NotNa: {pd.notna(fecha_troquel)}\n")
                 if pd.notna(fecha_troquel):
                     arrival_date = datetime.combine(fecha_troquel.date(), time(7,0))
-                    with open("debug_scheduler.log", "a") as f:
-                        f.write(f"DEBUG: Set arrival_date to {arrival_date}\n")
         
         # Fusionar restricciones: la fecha efectiva es el MAX(dependencia, llegada_insumo)
         if last_end and arrival_date:
@@ -1046,7 +1073,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # A: Auto roba a Manual o Iberica
                         elif maquina in auto_names:
                             # Targets: Manuales + Iberica
-                            targets_robo = manuales + iberica
+                            targets_robo = manuales 
                             for m_target in targets_robo:
                                 if not colas.get(m_target): continue
                                 for i, t_cand in enumerate(colas[m_target]):
@@ -1113,28 +1140,28 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                             tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
                                     if tarea_encontrada: break
 
-                        # Z: Iberica roba a Auto o Manual
-                        elif any(m in maquina for m in iberica):
-                            # Z.1: Robar a Auto
-                            if auto_name and colas.get(auto_name):
-                                for i, t_cand in enumerate(colas[auto_name]):
-                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                        # # Z: Iberica roba a Auto o Manual
+                        # elif any(m in maquina for m in iberica):
+                        #     # Z.1: Robar a Auto
+                        #     if auto_name and colas.get(auto_name):
+                        #         for i, t_cand in enumerate(colas[auto_name]):
+                        #             if t_cand["Proceso"].strip() != "Troquelado": continue
                                     
-                                    # REGLA: Iberica roba lo que le sirva (asumimos lógica similar a Manual/Auto)
-                                    # Preferencia: Si hay algo en auto, intentar robarlo?
-                                    # User dijo: "para el robo de la automatica hay que poner que la iberica este como opcion para robar"
-                                    # AND "Iberica puede robar a las manuales y a la automatica".
+                        #             # REGLA: Iberica roba lo que le sirva (asumimos lógica similar a Manual/Auto)
+                        #             # Preferencia: Si hay algo en auto, intentar robarlo?
+                        #             # User dijo: "para el robo de la automatica hay que poner que la iberica este como opcion para robar"
+                        #             # AND "Iberica puede robar a las manuales y a la automatica".
                                     
-                                    anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if not validar_medidas_troquel(maquina, anc, lar): continue
+                        #             anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                        #             if not validar_medidas_troquel(maquina, anc, lar): continue
                                     
-                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                    if not mp_ok: continue
+                        #             mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                        #             mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                        #             if not mp_ok: continue
                                     
-                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                                    if runnable and (not available_at or available_at <= current_agenda_dt):
-                                        tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
+                        #             runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                        #             if runnable and (not available_at or available_at <= current_agenda_dt):
+                        #                 tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
                             # Z.2: Robar a Manuales
                             if not tarea_encontrada:

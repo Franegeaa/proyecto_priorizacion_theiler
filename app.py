@@ -15,7 +15,8 @@ from modules.ui_components import (
     render_details_section,
     render_download_section,
     render_descartonador_ids_section, # New import
-    render_die_preferences # New import
+    render_die_preferences, # New import
+    render_manual_machine_assignment # New import
 )
 
 from modules.visualizations import render_gantt_chart
@@ -79,6 +80,7 @@ if archivo is not None:
     # But wait, render function uses cfg["maquinas"]. 
     # Let's pass cfg_plan so we only edit IDs for ACTIVE machines.
     
+
     # 4. UI: Downtimes
     # Returns the list of downtimes (dicts)
     cfg["downtimes"] = render_downtime_section(maquinas_activas, fecha_inicio_plan)
@@ -94,6 +96,9 @@ if archivo is not None:
     # 7. UI: Pending Processes (Imagen de Planta)
     # Returns list of pending processes (dicts)
     cfg["pending_processes"] = render_pending_processes_section(maquinas_activas, df, cfg)
+
+    # 7.1 UI: Manual Assignment (Moved here to use processed DF)
+    cfg["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
 
     # 8. Scheduler Execution
     st.info("🧠 Generando programa…")
