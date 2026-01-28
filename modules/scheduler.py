@@ -223,7 +223,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             # This is CRITICAL.
             
             target_lower = maq_target.lower()
-            if "troquel" in target_lower or "manual" in target_lower or "iberica" in target_lower:
+            if "troquel" in target_lower or "manual" in target_lower:
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("troquel")
             elif "descartonad" in target_lower:
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("descartonad")

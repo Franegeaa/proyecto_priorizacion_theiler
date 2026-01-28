@@ -14,6 +14,12 @@ Este proyecto es una herramienta avanzada de planificación y programación de l
     *   Gantt interactivos de la producción.
     *   Análisis de carga vs. capacidad para detectar cuellos de botella.
     *   Métricas de atrasos y ocupación.
+*   **Asignación Manual Controlada:**
+    *   Capacidad para reservar órdenes específicas a máquinas manuales (Troqueladoras manuales, Descartonadoras).
+    *   Filtrado inteligente de órdenes elegibles basado en:
+        *   Proceso pendiente (Troquelado/Descartonado).
+        *   Disponibilidad de materia prima en planta.
+        *   Llegada de troqueles físicos.
 *   **Reportes:** Exportación de resultados en múltiples formatos de Excel (Plan por Máquina, Plan por OT, Resumen General).
 
 ## 🛠️ Requisitos del Sistema
