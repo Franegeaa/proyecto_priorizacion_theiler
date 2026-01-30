@@ -157,6 +157,30 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                         matching_prios = [(k, v) for k, v in priorities.items() if k[0] == str_ot]
                         print(f"  Available: {matching_prios}")
 
+            # --- PERSISTENCE LOCKING LOGIC ---
+            # If this task was scheduled for "Today" in the previous run, FORCE it.
+            # We assume cfg["locked_assignments"] contains {(str_ot, str_proc): str_machine}
+            locked_assignments = cfg.get("locked_assignments", {})
+            lock_key = (str_ot, str_proc)
+            
+            if lock_key in locked_assignments:
+                locked_machine = locked_assignments[lock_key]
+                # Force assignment
+                maquina = locked_machine
+                # Mark as Manual Assignment so it sticks
+                # We need to make sure we don't accidentally prioritize it over dependencies,
+                # but we DO want to stick to the machine.
+                # Setting ManualAssignment in the returned dict is simpler, 
+                # but here we set local variables first.
+                
+                # Note: We should probably flag it so we know it was a History Lock
+                # But reusing 'ManualAssignment' logic (later in scheduler.py) handles the sticking.
+                # However, _expandir_tareas doesn't set "ManualAssignment" column directly, 
+                # that happens in scheduler.py. 
+                # WE NEED TO ADD "ManualAssignment" field to the task dict below.
+                pass 
+
+
             # Cálculo de pliegos
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
             poses = float(row.get("Poses", 1) or 1)
@@ -200,7 +224,9 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # Manual Override Params
                 "ManualPriority": manual_prio,
                 "IsOutsourced": is_outsourced,
-                "IsSkipped": is_skipped
+                "IsSkipped": is_skipped,
+                "ManualAssignment": (lock_key in locked_assignments), # Force stickiness if locked
+                "HistoryLocked": (lock_key in locked_assignments) # For UI/Debugging
             })  
 
     tasks = pd.DataFrame(tareas)

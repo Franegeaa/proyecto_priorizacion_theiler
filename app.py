@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from modules.config_loader import cargar_config, horas_por_dia, get_horas_totales_dia
 from modules.scheduler import programar
+from modules.persistence import PersistenceManager
 
 from modules.data_processor import process_uploaded_dataframe
 from modules.ui_components import (
@@ -40,6 +41,8 @@ with st.sidebar:
     cfg["ignore_constraints"] = ignore_constraints
     
     cfg["ignore_constraints"] = ignore_constraints
+    
+    cfg["ignore_constraints"] = ignore_constraints
 
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
@@ -59,6 +62,37 @@ if archivo is not None:
     # Filter config for scheduler
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
+    
+    # --- PERSISTENCE SETTINGS ---
+    st.markdown("### 💾 Persistencia")
+    usar_historial = st.checkbox(
+        "Usar historial (Respetar asignaciones previas)", 
+        value=True,
+        help="Si está activado, el sistema intentará mantener las máquinas asignadas en la planificación anterior para las órdenes de hoy."
+    )
+    
+    if "persistence" not in st.session_state:
+        st.session_state.persistence = PersistenceManager()
+    pm = st.session_state.persistence
+    
+    if pm.connected and usar_historial:
+        locks = pm.get_locked_assignments()
+        cfg_plan["locked_assignments"] = locks
+        if locks:
+            st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
+    else:
+        cfg_plan["locked_assignments"] = {}
+        
+    if st.button("Guardar Planificación Actual", help="Guarda la asignación de máquinas actual en la base de datos para que sea respetada mañana."):
+        if "last_schedule" in st.session_state and not st.session_state.last_schedule.empty:
+             if pm.connected:
+                 pm.save_schedule(st.session_state.last_schedule)
+                 st.success("✅ Planificación guardada exitosamente!")
+             else:
+                 st.error("Error: conexión a BD no disponible.")
+        else:
+             st.warning("⚠️ No hay una planificación generada para guardar.")
+    # ------------------------
     
     # --- MANUAL OVERRIDES INJECTION ---
     if "manual_overrides" not in st.session_state:
@@ -109,6 +143,7 @@ if archivo is not None:
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 
     schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
+    st.session_state.last_schedule = schedule
 
     # 9. Metrics
     col1, col2, col3, col4 = st.columns(4)
