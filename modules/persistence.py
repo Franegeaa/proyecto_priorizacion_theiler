@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import json
 from datetime import date, datetime
 import sqlalchemy
 from sqlalchemy import create_engine, text
@@ -65,9 +66,18 @@ class PersistenceManager:
             PRIMARY KEY (ot_id, proceso)
         );
         """
+
+        create_table_overrides = """
+        CREATE TABLE IF NOT EXISTS manual_overrides (
+            override_key TEXT PRIMARY KEY,
+            data_json TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
         try:
             with self.engine.connect() as conn:
                 conn.execute(text(create_table_query))
+                conn.execute(text(create_table_overrides))
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to init DB: {e}")
@@ -89,6 +99,9 @@ class PersistenceManager:
             df_save.columns = ["ot_id", "proceso", "maquina", "fecha_inicio", "fecha_fin"]
             
             # Add scheduled_date (the "Day" of the schedule, usually Inicio date)
+            # Use 'today' as the scheduled_date because this is WHEN we planned it.
+            # Using 'Inicio' might spread it across days, but the locking logic usually matches (OT, Proc).
+            # Let's keep using 'Inicio' date as reference for now, or just 'Today'.
             df_save["scheduled_date"] = df_save["fecha_inicio"].dt.date
             df_save["last_updated"] = datetime.now()
 
@@ -101,14 +114,7 @@ class PersistenceManager:
             virtuals = ["TERCERIZADO", "SALTADO", "POOL_DESCARTONADO"]
             df_save = df_save[~df_save["maquina"].isin(virtuals)]
 
-            # Upsert logic is complex in pandas+alchemy directly.
-            # Easiest way: Delete existing entries for these OTs and Insert new.
-            # OR iterate and execute UPSERT.
-            
-            # Since we want to update the plan for these specific OTs, let's use a transaction.
-            # Strategy: Temporary table or direct upsert loop.
-            # Let's use direct execution with bind parameters for safety and upsert support.
-            
+            # Upsert logic
             upsert_sql = """
             INSERT INTO schedule_history (ot_id, proceso, maquina, fecha_inicio, fecha_fin, scheduled_date, last_updated)
             VALUES (:ot_id, :proceso, :maquina, :fecha_inicio, :fecha_fin, :scheduled_date, :last_updated)
@@ -123,14 +129,140 @@ class PersistenceManager:
             records = df_save.to_dict(orient="records")
             
             with self.engine.connect() as conn:
-                conn.execute(text(upsert_sql), records)
-                conn.commit()
+                if records:
+                    conn.execute(text(upsert_sql), records)
+                    conn.commit()
                 
             logger.info(f"Saved {len(records)} assignments to history.")
             
         except Exception as e:
             logger.error(f"Failed to save schedule: {e}")
             st.warning(f"No se pudo guardar el historial: {e}")
+
+    def save_manual_overrides(self, overrides):
+        """
+        Saves the manual overrides dictionary.
+        Requires serialization of sets and tuple keys.
+        Structure of overrides:
+          - blacklist_ots: set
+          - manual_priorities: dict {(ot, maq): int}
+          - outsourced_processes: set (ot, proc)
+          - skipped_processes: set (ot, proc)
+        """
+        if not self.connected or not overrides: return
+
+        try:
+            # 1. Blacklist (Set of strings) -> List
+            blacklist = list(overrides.get("blacklist_ots", []))
+            
+            # 2. Priorities (Dict with Tuple keys) -> Dict with String keys "OT|MAQ"
+            priorities_raw = overrides.get("manual_priorities", {})
+            priorities_clean = {}
+            for (ot, maq), val in priorities_raw.items():
+                key_str = f"{ot}|{maq}"
+                priorities_clean[key_str] = val
+            
+            # 3. Outsourced (Set of Tuples) -> List of Strings "OT|PROC"
+            outsourced_raw = overrides.get("outsourced_processes", set())
+            outsourced_clean = [f"{ot}|{proc}" for ot, proc in outsourced_raw]
+
+            # 4. Skipped (Set of Tuples) -> List of Strings "OT|PROC"
+            skipped_raw = overrides.get("skipped_processes", set())
+            skipped_clean = [f"{ot}|{proc}" for ot, proc in skipped_raw]
+
+            # Prepare for DB
+            data_map = {
+                "blacklist_ots": json.dumps(blacklist),
+                "manual_priorities": json.dumps(priorities_clean),
+                "outsourced_processes": json.dumps(outsourced_clean),
+                "skipped_processes": json.dumps(skipped_clean)
+            }
+
+            upsert_query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+            
+            ts = datetime.now()
+            with self.engine.connect() as conn:
+                for k, v in data_map.items():
+                    conn.execute(text(upsert_query), {"key": k, "data": v, "ts": ts})
+                conn.commit()
+            
+            logger.info("Saved manual overrides.")
+
+        except Exception as e:
+            logger.error(f"Failed to save overrides: {e}")
+            st.warning(f"No se pudieron guardar las configuraciones manuales: {e}")
+
+    def load_manual_overrides(self):
+        """
+        Loads overrides and deserializes them into the expected python structures.
+        Returns: dict (compatible with st.session_state.manual_overrides)
+        """
+        if not self.connected: 
+            return {
+                "blacklist_ots": set(),
+                "manual_priorities": {},
+                "outsourced_processes": set(),
+                "skipped_processes": set()
+            }
+
+        try:
+            query = "SELECT override_key, data_json FROM manual_overrides"
+            with self.engine.connect() as conn:
+                rows = conn.execute(text(query)).fetchall()
+            
+            raw_data = {row[0]: row[1] for row in rows}
+            
+            # Reconstruct
+            
+            # 1. Blacklist
+            res_blacklist = set(json.loads(raw_data.get("blacklist_ots", "[]")))
+            
+            # 2. Priorities
+            res_prio = {}
+            prio_dict = json.loads(raw_data.get("manual_priorities", "{}"))
+            for k, v in prio_dict.items():
+                # k is "OT|MAQ"
+                if "|" in k:
+                    parts = k.split("|", 1) # Split only on first pipe just in case
+                    res_prio[(parts[0], parts[1])] = v
+            
+            # 3. Outsourced
+            res_outsourced = set()
+            out_list = json.loads(raw_data.get("outsourced_processes", "[]"))
+            for item in out_list:
+                if "|" in item:
+                    parts = item.split("|", 1)
+                    res_outsourced.add((parts[0], parts[1]))
+
+            # 4. Skipped
+            res_skipped = set()
+            skip_list = json.loads(raw_data.get("skipped_processes", "[]"))
+            for item in skip_list:
+                if "|" in item:
+                    parts = item.split("|", 1)
+                    res_skipped.add((parts[0], parts[1]))
+            
+            return {
+                "blacklist_ots": res_blacklist,
+                "manual_priorities": res_prio,
+                "outsourced_processes": res_outsourced,
+                "skipped_processes": res_skipped
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to load overrides: {e}")
+            return {
+                "blacklist_ots": set(),
+                "manual_priorities": {},
+                "outsourced_processes": set(),
+                "skipped_processes": set()
+            }
 
     def get_locked_assignments(self, lookahead_days=0):
         """

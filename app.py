@@ -80,6 +80,19 @@ if archivo is not None:
         cfg_plan["locked_assignments"] = locks
         if locks:
             st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
+            
+        # --- LOAD MANUAL OVERRIDES ---
+        db_overrides = pm.load_manual_overrides()
+        # Merge or Replace? 
+        # Ideally, if I load history, I want the saved state.
+        # But if the user JUST did something in the UI before checking this box?
+        # Usually checking the box happens at start.
+        # Let's override.
+        if db_overrides["blacklist_ots"] or db_overrides["manual_priorities"] or db_overrides["outsourced_processes"] or db_overrides["skipped_processes"]:
+             st.session_state.manual_overrides = db_overrides
+             st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
+        # -----------------------------
+            
     else:
         cfg_plan["locked_assignments"] = {}
         
@@ -87,7 +100,9 @@ if archivo is not None:
         if "last_schedule" in st.session_state and not st.session_state.last_schedule.empty:
              if pm.connected:
                  pm.save_schedule(st.session_state.last_schedule)
-                 st.success("✅ Planificación guardada exitosamente!")
+                 # SAVE OVERRIDES ALSO
+                 pm.save_manual_overrides(st.session_state.manual_overrides)
+                 st.success("✅ Planificación y configuraciones guardadas exitosamente!")
              else:
                  st.error("Error: conexión a BD no disponible.")
         else:
