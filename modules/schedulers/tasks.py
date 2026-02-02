@@ -144,9 +144,19 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # Check for (OT, Machine)
                 # We use the assigned machine 'maquina'
                 # Note: 'elegir_maquina' might return generic; need to match what User sees (Specific Machine).
-                # The user selects from valid machines. `elegir_maquina` returns one of those.
-                key_prio = (str_ot, str_maq)
+                # Need to use normalized name for lookup because Priority Keys are normalized
+                # but 'maquina' variable might come from:
+                # 1. 'maquina_from_priority' (Normalized, if priorities loaded correctly)
+                # 2. 'elegir_maquina' (Normalized, from Config)
+                # 3. 'locked_assignments' (Potentially UN-NORMALIZED if from old history)
+                
+                from modules.config_loader import normalize_machine_name
+                str_maq_norm = normalize_machine_name(str_maq)
+                
+                key_prio = (str_ot, str_maq_norm)
                 manual_prio = priorities.get(key_prio, 9999)
+
+
                 
                 # DEBUG: Show priority lookup for troquelado
                 if "troquel" in str_proc.lower():
