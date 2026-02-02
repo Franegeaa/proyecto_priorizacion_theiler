@@ -82,15 +82,14 @@ if archivo is not None:
             st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
             
         # --- LOAD MANUAL OVERRIDES ---
-        db_overrides = pm.load_manual_overrides()
-        # Merge or Replace? 
-        # Ideally, if I load history, I want the saved state.
-        # But if the user JUST did something in the UI before checking this box?
-        # Usually checking the box happens at start.
-        # Let's override.
-        if db_overrides["blacklist_ots"] or db_overrides["manual_priorities"] or db_overrides["outsourced_processes"] or db_overrides["skipped_processes"]:
-             st.session_state.manual_overrides = db_overrides
-             st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
+        if "overrides_loaded" not in st.session_state:
+            db_overrides = pm.load_manual_overrides()
+            # Only apply if there is data
+            if db_overrides["blacklist_ots"] or db_overrides["manual_priorities"] or db_overrides["outsourced_processes"] or db_overrides["skipped_processes"]:
+                 st.session_state.manual_overrides = db_overrides
+                 st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
+            
+            st.session_state.overrides_loaded = True
         # -----------------------------
             
     else:
