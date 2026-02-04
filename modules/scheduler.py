@@ -46,6 +46,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+    # 1.0b GESTIONAR PROCESOS SALTADOS (IsSkipped)
+    # NO eliminamos las tareas, simplemente las asignamos a una máquina virtual "SALTADO"
+    # para que el visualizador las pueda mostrar si se solicita.
+    if "IsSkipped" in tasks.columns:
+        # Asignar maquina "SALTADO" a las que tengan IsSkipped=True
+        tasks.loc[tasks["IsSkipped"] == True, "Maquina"] = "SALTADO"
+
+
 
     # Identify Pending tasks to avoid double-locking (Pending wins)
     pending_list = cfg.get("pending_processes", [])
@@ -223,7 +231,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             # This is CRITICAL.
             
             target_lower = maq_target.lower()
-            if "troquel" in target_lower or "manual" in target_lower:
+            if any(k in target_lower for k in ["troquel", "troq", "manual", "iberica", "duyan", "autom"]):
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("troquel")
             elif "descartonad" in target_lower:
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("descartonad")

@@ -62,6 +62,49 @@ if archivo is not None:
     # Filter config for scheduler
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
+
+    # --- PERSISTENCE INITIALIZATION (MOVED TO TOP) ---
+    st.markdown("### 💾 Persistencia")
+    usar_historial = st.checkbox(
+        "Usar historial (Respetar asignaciones previas)", 
+        value=False,
+        help="Si está activado, el sistema intentará mantener las máquinas asignadas en la planificación anterior para las órdenes de hoy."
+    )
+    
+    if "persistence" not in st.session_state:
+        st.session_state.persistence = PersistenceManager()
+    pm = st.session_state.persistence
+    
+    # Initialize defaults for locked_assignments
+    cfg_plan["locked_assignments"] = {}
+    
+    if pm.connected:
+        # 1. LOAD LOCKED ASSIGNMENTS (History)
+        if usar_historial:
+            # 1. LOAD LOCKED ASSIGNMENTS (History)
+            locks = pm.get_locked_assignments()
+            cfg_plan["locked_assignments"] = locks
+            if locks:
+                st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
+        
+            # 2. LOAD MANUAL OVERRIDES (Config params)
+            # Remove caching check to force sync with checkbox state
+            db_overrides = pm.load_manual_overrides()
+            
+            # Update session state if we found data
+            has_data = (db_overrides["blacklist_ots"] or 
+                        db_overrides["manual_priorities"] or 
+                        db_overrides["outsourced_processes"] or 
+                        db_overrides["skipped_processes"] or
+                        db_overrides.get("manual_assignments"))
+
+            if has_data:
+                 st.session_state.manual_overrides = db_overrides
+                 if "manual_assignments" in db_overrides:
+                     st.session_state.manual_assignments = db_overrides["manual_assignments"]
+
+                 st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
+    # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
     if "manual_overrides" not in st.session_state:
@@ -520,42 +563,17 @@ if archivo is not None:
     render_details_section(schedule, detalle_maquina, df, cfg)
 
         # --- PERSISTENCE SETTINGS ---
-    st.markdown("### 💾 Persistencia")
-    usar_historial = st.checkbox(
-        "Usar historial (Respetar asignaciones previas)", 
-        value=True,
-        help="Si está activado, el sistema intentará mantener las máquinas asignadas en la planificación anterior para las órdenes de hoy."
-    )
-    
-    if "persistence" not in st.session_state:
-        st.session_state.persistence = PersistenceManager()
-    pm = st.session_state.persistence
-    
-    if pm.connected and usar_historial:
-        locks = pm.get_locked_assignments()
-        cfg_plan["locked_assignments"] = locks
-        if locks:
-            st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
-            
-        # --- LOAD MANUAL OVERRIDES ---
-        if "overrides_loaded" not in st.session_state:
-            db_overrides = pm.load_manual_overrides()
-            # Only apply if there is data
-            if db_overrides["blacklist_ots"] or db_overrides["manual_priorities"] or db_overrides["outsourced_processes"] or db_overrides["skipped_processes"]:
-                 st.session_state.manual_overrides = db_overrides
-                 st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
-            
-            st.session_state.overrides_loaded = True
-        # -----------------------------
-            
-    else:
-        cfg_plan["locked_assignments"] = {}
+
         
     if st.button("Guardar Planificación Actual", help="Guarda la asignación de máquinas actual en la base de datos para que sea respetada mañana."):
         if "last_schedule" in st.session_state and not st.session_state.last_schedule.empty:
              if pm.connected:
                  pm.save_schedule(st.session_state.last_schedule)
                  # SAVE OVERRIDES ALSO
+                 # Inject manual_assignments into overrides dict for saving
+                 if "manual_overrides" in st.session_state:
+                     st.session_state.manual_overrides["manual_assignments"] = st.session_state.get("manual_assignments", {})
+                 
                  pm.save_manual_overrides(st.session_state.manual_overrides)
                  st.success("✅ Planificación y configuraciones guardadas exitosamente!")
              else:

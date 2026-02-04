@@ -175,7 +175,8 @@ class PersistenceManager:
                 "blacklist_ots": json.dumps(blacklist),
                 "manual_priorities": json.dumps(priorities_clean),
                 "outsourced_processes": json.dumps(outsourced_clean),
-                "skipped_processes": json.dumps(skipped_clean)
+                "skipped_processes": json.dumps(skipped_clean),
+                "manual_assignments": json.dumps(overrides.get("manual_assignments", {}))
             }
 
             upsert_query = """
@@ -248,11 +249,16 @@ class PersistenceManager:
                     parts = item.split("|", 1)
                     res_skipped.add((parts[0], parts[1]))
             
+            # 5. Manual Assignments
+            res_assignments = json.loads(raw_data.get("manual_assignments", "{}"))
+            
             return {
                 "blacklist_ots": res_blacklist,
                 "manual_priorities": res_prio,
                 "outsourced_processes": res_outsourced,
-                "skipped_processes": res_skipped
+                "outsourced_processes": res_outsourced,
+                "skipped_processes": res_skipped,
+                "manual_assignments": res_assignments
             }
 
         except Exception as e:
