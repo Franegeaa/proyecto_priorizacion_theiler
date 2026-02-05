@@ -488,7 +488,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                 # Or after? Usually user wants to see what's available. 
                 # Let's use unique values from df_full (which is sorted but not filtered yet)
                 unique_procs = sorted(df_full["Proceso"].astype(str).unique().tolist())
-                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs + ["Impresión"], placeholder="(Todos)")
+                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)")
                 
             with col_f3:
                 unique_maqs = sorted(df_full["Maquina"].astype(str).unique().tolist())
@@ -499,18 +499,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                 df_full = df_full[~df_full["IsSkipped"].astype(bool)]
             
             if filtro_proc:
-                mask_final = pd.Series(False, index=df_full.index)
-                
-                # 1. match exact selections
-                cleaned_filter = [f for f in filtro_proc if f != "Impresión"]
-                if cleaned_filter:
-                    mask_final |= df_full["Proceso"].astype(str).isin(cleaned_filter)
-                
-                # 2. match "Impresión" group
-                if "Impresión" in filtro_proc:
-                    mask_final |= df_full["Proceso"].astype(str).str.lower().str.contains("impres")
-                    
-                df_full = df_full[mask_final]
+                df_full = df_full[df_full["Proceso"].astype(str).isin(filtro_proc)]
                 
             if filtro_maq:
                 df_full = df_full[df_full["Maquina"].astype(str).isin(filtro_maq)]
@@ -856,7 +845,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
     # But maquinas_activas comes from DB which might have different naming.
     # We look for partial matches.
     
-    target_keywords = ["Troq Nº 1 Gus", "Troq Nº 2 Ema", "Duyan", "Manual 3", "Iberica"] # Removed Descartonadoras per user request
+    target_keywords = ["Troq Nº 1 Gus", "Troq Nº 2 Ema", "Duyan", "Manual 3", "Iberica", "Descartonadora 3", "Descartonadora 4"]
     
     active_targets = []
     for m in maquinas_activas:
@@ -932,145 +921,135 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                     )
                     
                     if sel:
-                        # assignments[maq] = sel  <-- Error: assignments undefined. Redundant.
+                        assignments[maq] = sel
                         st.session_state.manual_assignments[maq] = sel
                     else:
                         if maq in st.session_state.manual_assignments:
                              del st.session_state.manual_assignments[maq]
 
-    else: # "Por Tarea (Tabla Dinámica)"
-        st.caption("Visión tabular de tareas de Troquelado/Descartonado con su asignación automática y posibilidad de override.")
+    else: # "Por Tarea (Búsqueda inteligente)"
+        st.caption("Busca una tarea específica y asígnala a una máquina compatible (se validan medidas y restricciones).")
         
+        # 1. Prepare global candidates list (All Troquelado/Descartonado tasks)
+        # We need a dataframe with ID + Description for search
         if not df.empty:
-            df_table = df.copy()
-            if "OT_id" not in df_table.columns:
-                 df_table["OT_id"] = df_table["CodigoProducto"].astype(str) + "-" + df_table["Subcodigo"].astype(str)
+            df_search = df.copy()
+            if "OT_id" not in df_search.columns:
+                 df_search["OT_id"] = df_search["CodigoProducto"].astype(str) + "-" + df_search["Subcodigo"].astype(str)
             
-            # 1. Filter relevant tasks - ONLY TROQUELADO as requested
-            mask_troq = df_table["_PEN_Troquelado"] if "_PEN_Troquelado" in df_table.columns else pd.Series([False]*len(df_table))
-            # mask_desc = df_table["_PEN_Descartonado"] if "_PEN_Descartonado" in df_table.columns else pd.Series([False]*len(df_table))
+            # Filter only relevant tasks (Troquelado OR Descartonado pending)
+            mask_troq = df_search["_PEN_Troquelado"] if "_PEN_Troquelado" in df_search.columns else pd.Series([False]*len(df_search))
+            mask_desc = df_search["_PEN_Descartonado"] if "_PEN_Descartonado" in df_search.columns else pd.Series([False]*len(df_search))
             
-            # df_table = df_table[mask_troq | mask_desc].copy()
-            df_table = df_table[mask_troq].copy()
-
-            if not df_table.empty:
-                # 2. Get Automatic Assignments (if available)
-                schedule = st.session_state.get("last_schedule", pd.DataFrame())
-                auto_map = {}
+            df_search = df_search[mask_troq | mask_desc].copy()
+            
+            if not df_search.empty:
+                # Create Search Column: Safe access to columns
+                # Descripcion might not exist, use 'Cliente-articulo' or try to get Descripcion safely
+                desc_col = df_search["Descripcion"].astype(str) if "Descripcion" in df_search.columns else df_search.get("Cliente-articulo", pd.Series([""]*len(df_search))).astype(str)
                 
-                if not schedule.empty:
-                    # Filter schedule ONLY for Troquelado to ensure we get the Troqueladora assignment
-                    # If we include Descartonado, it might overwrite the Troqueladora assignment for the same OT
-                    mask_sched = schedule["Proceso"].astype(str).str.lower().str.contains("troquel")
+                df_search["SearchLabel"] = df_search["OT_id"] + " | " + df_search["Cliente"].astype(str) + " | " + desc_col
+                search_options = sorted(df_search["SearchLabel"].unique().tolist())
+                
+                selected_label = st.selectbox("🔍 Buscar Tarea (OT | Cliente | Descripción):", [""] + search_options, index=0)
+                
+                if selected_label:
+                    ot_id = selected_label.split(" | ")[0]
+                    # Get Task Details
+                    task_row = df_search[df_search["OT_id"] == ot_id].iloc[0]
                     
-                    sched_rel = schedule[mask_sched][["OT_id", "Maquina", "Proceso"]].copy()
+                    st.markdown(f"#### Detalles para OT: **{ot_id}**")
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1: st.write(f"**Cliente:** {task_row['Cliente']}")
+                    with c2: st.write(f"**Artículo:** {task_row.get('Descripcion', '-')}")
+                    with c3: 
+                        anc = task_row.get('PliAnc', 0)
+                        lar = task_row.get('PliLar', 0)
+                        st.write(f"**Medidas:** {anc} x {lar} cm")
+                    with c4: st.write(f"**Cantidad:** {task_row.get('CantidadPliegos', 0)}")
                     
-                    # Create dictionary: OT_id -> Machine
-                    for _, row in sched_rel.iterrows():
-                        auto_map[str(row["OT_id"])] = row["Maquina"]
-                
-                df_table["Máquina Automática"] = df_table["OT_id"].astype(str).map(auto_map).fillna("-")
-                
-                # 3. Get Current Manual Assignments
-                # Reverse the dict: Machine -> [OTs]  to  OT -> Machine
-                current_overrides = {}
-                for m, ots in st.session_state.manual_assignments.items():
-                    for ot in ots:
-                        current_overrides[ot] = m
-                
-                df_table["Asignación Manual"] = df_table["OT_id"].astype(str).map(current_overrides).fillna("(Auto)")
-                
-                # 4. Prepare Display Columns
-                # Add Medidas info
-                df_table["Medidas"] = df_table.apply(lambda r: f"{r.get('PliAnc',0)} x {r.get('PliLar',0)}", axis=1)
-                
-                display_cols = ["OT_id", "Cliente", "Descripcion", "Medidas", "CantidadPliegos", "Máquina Automática", "Asignación Manual"]
-                
-                # Handle missing cols safely
-                for c in display_cols:
-                    if c not in df_table.columns:
-                        if c == "Descripcion":
-                             df_table[c] = df_table.get("Cliente-articulo", "")
+                    # 2. Check Compatibility with Active Targets
+                    compatible_machines = []
+                    rejected_machines = []
+                    
+                    # Need dimensions for validation
+                    anc = float(task_row.get('PliAnc', 0) or 0)
+                    lar = float(task_row.get('PliLar', 0) or 0)
+                    
+                    # Is it Troquelado or Descartonado?
+                    is_troq = task_row.get("_PEN_Troquelado", False)
+                    is_desc = task_row.get("_PEN_Descartonado", False)
+                    
+                    for maq in active_targets:
+                        # Check Process Match
+                        maq_lower = maq.lower()
+                        match_proc = False
+                        if is_troq and any(k in maq_lower for k in ["troq", "manual", "iberica", "duyan"]): match_proc = True
+                        if is_desc and "descartonad" in maq_lower: match_proc = True
+                        
+                        if not match_proc: continue
+                        
+                        # VALIDATE CONSTRAINTS
+                        reason = None
+                        
+                        # Dimension Check (Only for Troquelado machines)
+                        if is_troq:
+                            if not validar_medidas_troquel(maq, anc, lar):
+                                reason = f"Medidas {anc}x{lar} fuera de rango."
+                        
+                        # If passed logic checks, check hard constraints like MatPrima if needed?
+                        # User said "parametros limitantes", usually refers to physical size.
+                        # We also check MP status just in case to be helpful.
+                        if "MateriaPrimaPlanta" in task_row:
+                             is_missing = str(task_row["MateriaPrimaPlanta"]).strip().lower() in ["si", "true", "verdadero", "1", "x"]
+                             if is_missing:
+                                 reason = "Falta Materia Prima."
+                        
+                        if reason:
+                            rejected_machines.append((maq, reason))
                         else:
-                             df_table[c] = ""
-                             
-                df_display = df_table[display_cols].copy()
-                
-                # Sort by Client
-                df_display.sort_values("Cliente", inplace=True)
-                
-                # 5. Render Data Editor
-                # Options: active_targets + ["(Auto)"]
-                options_list = sorted(active_targets) + ["(Auto)"]
-                
-                edited_df = st.data_editor(
-                    df_display,
-                    column_config={
-                        "OT_id": st.column_config.TextColumn("OT", disabled=True),
-                        "Cliente": st.column_config.TextColumn("Cliente", disabled=True),
-                        "Medidas": st.column_config.TextColumn("Medidas", disabled=True),
-                        "CantidadPliegos": st.column_config.NumberColumn("Cant.", disabled=True),
-                        "Máquina Automática": st.column_config.TextColumn("Sug. Auto", disabled=True),
-                        "Asignación Manual": st.column_config.SelectboxColumn(
-                            "Asignación Manual",
-                            help="Seleccioná una máquina para forzar su asignación.",
-                            width="medium",
-                            options=options_list,
-                            required=True
-                        )
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    height=500,
-                    key="editor_manual_assign"
-                )
-                
-                # 6. Process Changes via Button
-                st.write("") # Spacer
-                if st.button("💾 Guardar y Recalcular", type="primary", use_container_width=True):
-                    # Extract changes from edited_df
-                    new_assignments = {} # Machine -> [OTs]
-                    
-                    for index, row in edited_df.iterrows():
-                        ot = str(row["OT_id"])
-                        choice = str(row["Asignación Manual"])
-                        
-                        if choice and choice != "(Auto)" and choice in active_targets:
-                            if choice not in new_assignments: new_assignments[choice] = []
-                            new_assignments[choice].append(ot)
-                    
-                    # Update Session State
-                    # 1. Remove all visible OTs from current state to avoid duplicates/stale data
-                    visible_ots = set(df_display["OT_id"].astype(str).tolist())
-                    cleaned_state = {}
-                    
-                    for m, ots in st.session_state.manual_assignments.items():
-                        # Keep OTs that are NOT in the current view
-                        kept_ots = [o for o in ots if o not in visible_ots]
-                        if kept_ots:
-                            cleaned_state[m] = kept_ots
+                            compatible_machines.append(maq)
                             
-                    # 2. Add new assignments from the editor
-                    for m, ots in new_assignments.items():
-                        if m not in cleaned_state:
-                            cleaned_state[m] = []
-                        cleaned_state[m].extend(ots)
-                    
-                    # 3. Commit to Persistence & Session
-                    st.session_state.manual_assignments = cleaned_state
-                    
-                    # Sync with manual_overrides dict for persistence
-                    if "manual_overrides" not in st.session_state:
-                         st.session_state.manual_overrides = {}
-                    st.session_state.manual_overrides["manual_assignments"] = cleaned_state
-                    
-                    # Save to DB
-                    if "persistence" in st.session_state and st.session_state.persistence.connected:
-                        st.session_state.persistence.save_manual_overrides(st.session_state.manual_overrides)
+                    # 3. Render Assignment UI
+                    if compatible_machines:
+                        st.success(f"✅ {len(compatible_machines)} máquinas compatibles encontradas.")
                         
-                    st.toast("✅ Asignaciones guardadas. Recalculando plan...", icon="🔄")
-                    st.rerun()
-
+                        target_maq = st.selectbox("Seleccionar Máquina Destino:", compatible_machines)
+                        
+                        # Check if already assigned
+                        current_assign = None
+                        for m, ots in st.session_state.manual_assignments.items():
+                            if ot_id in ots:
+                                current_assign = m
+                                break
+                        
+                        if current_assign:
+                            st.warning(f"⚠️ Esta OT ya está asignada manualmente a: **{current_assign}**")
+                            if st.button(f"Mover a {target_maq}"):
+                                # Remove from old
+                                st.session_state.manual_assignments[current_assign].remove(ot_id)
+                                if not st.session_state.manual_assignments[current_assign]:
+                                    del st.session_state.manual_assignments[current_assign]
+                                
+                                # Add to new
+                                if target_maq not in st.session_state.manual_assignments:
+                                    st.session_state.manual_assignments[target_maq] = []
+                                st.session_state.manual_assignments[target_maq].append(ot_id)
+                                st.rerun()
+                        else:
+                            if st.button(f"Asignar a {target_maq}"):
+                                if target_maq not in st.session_state.manual_assignments:
+                                    st.session_state.manual_assignments[target_maq] = []
+                                st.session_state.manual_assignments[target_maq].append(ot_id)
+                                st.success(f"Asignada correctamente a {target_maq}")
+                                st.rerun()
+                                
+                    else:
+                        st.error("❌ No se encontraron máquinas compatibles para esta tarea.")
+                        if rejected_machines:
+                            with st.expander("Ver razones de rechazo"):
+                                for m, r in rejected_machines:
+                                    st.write(f"- **{m}**: {r}")
             else:
                 st.info("No hay tareas pendientes de Troquelado/Descartonado.")
         else:
