@@ -148,6 +148,7 @@ class PersistenceManager:
           - manual_priorities: dict {(ot, maq): int}
           - outsourced_processes: set (ot, proc)
           - skipped_processes: set (ot, proc)
+          - manual_assignments: dict {Machine: [OT, OT]}
         """
         if not self.connected or not overrides: return
 
@@ -178,6 +179,9 @@ class PersistenceManager:
                 "skipped_processes": json.dumps(skipped_clean),
                 "manual_assignments": json.dumps(overrides.get("manual_assignments", {}))
             }
+
+            # Debug Log
+            logger.info(f"Saving manual_assignments: {overrides.get('manual_assignments', {})}")
 
             upsert_query = """
             INSERT INTO manual_overrides (override_key, data_json, last_updated)

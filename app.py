@@ -144,7 +144,9 @@ if archivo is not None:
     cfg["pending_processes"] = render_pending_processes_section(maquinas_activas, df, cfg)
 
     # 7.1 UI: Manual Assignment (Moved here to use processed DF)
-    cfg["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
+    # 7.1 UI: Manual Assignment (Moved here to use processed DF)
+    # Important update to CFG_PLAN to ensure it invalidates cache and reaches scheduler
+    cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
 
     # 8. Scheduler Execution
     st.info("🧠 Generando programa…")

@@ -208,40 +208,45 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # 2.9 APLICAR ASIGNACIONES MANUALES (Override)
     # =================================================================
     if "manual_assignments" in cfg and cfg["manual_assignments"]:
-        if "ManualAssignment" not in tasks.columns: tasks["ManualAssignment"] = False
+        # Ensure column exists and is boolean
+        if "ManualAssignment" not in tasks.columns: 
+             tasks["ManualAssignment"] = False
+        tasks["ManualAssignment"] = tasks["ManualAssignment"].astype(bool)
+
+        # Import normalization helper if not available, or just define locally if simple. 
+        # But we have it imported via modules.config_loader. Let's assume passed cfg handles it or we do simple matching.
+        # Actually, UI sends the raw name selected from dropdown (which comes from Active Machines).
         
         for maq_target, ots_list in cfg["manual_assignments"].items():
             if not ots_list: continue
             
             # Filter tasks that match the OTs
-            # Note: OTs might be strings, ensure type match
             mask_ots = tasks["OT_id"].astype(str).isin([str(x) for x in ots_list])
+            if not mask_ots.any(): continue
             
-            # We want to assign ONLY if the process matches the machine type? 
-            # Ideally the UI filtered this, but let's be safe or just trust the user.
-            # Trusting the user is better for "Manual". User might want to do weird stuff.
-            # But wait, if I assign a "Printing" job to "Troqueladora", it won't work well physically.
-            # But let's assume user knows what they are doing or the UI filtered it.
-            # However, we only claimed support for Troquelado / Descartonado in this feature.
+            # Determine Target Process based on Machine Name
+            target_lower = str(maq_target).lower()
             
-            # Actually, let's filter by relevant process groups to avoid accidents (like assigning ALL ops of an OT to one machine)
-            # The 'tasks' dataframe has ONE row per operation.
-            # If I select OT "123", it has "Impresion", "Troquelado", "Pegado".
-            # If I assign OT "123" to "Manual 3", I only mean the "Troquelado" operation!!
-            # This is CRITICAL.
+            # Explicit logic to map Machine -> Process
+            is_troquel = any(k in target_lower for k in ["troq", "manual", "iberica", "duyan", "autom"])
+            is_descartonado = "descartonad" in target_lower
             
-            target_lower = maq_target.lower()
-            if any(k in target_lower for k in ["troquel", "troq", "manual", "iberica", "duyan", "autom"]):
+            mask_proc = pd.Series([False] * len(tasks), index=tasks.index)
+            
+            if is_troquel:
+                # Match "Troquelado" process
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("troquel")
-            elif "descartonad" in target_lower:
+                print(f"DEBUG MANUAL: Target={maq_target} (Troquel). Matching 'troquel' in Proceso.")
+            elif is_descartonado:
+                # Match "Descartonado" process
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("descartonad")
             else:
-                # Fallback: exact process match? Or just assignments are unsafe?
-                # Let's rely on standard logic or allow if nothing specific.
-                mask_proc = True 
-            
+                # Fallback
+                mask_proc = pd.Series([True] * len(tasks), index=tasks.index) 
+
             # Apply
             mask_final = mask_ots & mask_proc
+            
             if mask_final.any():
                 tasks.loc[mask_final, "Maquina"] = maq_target
                 tasks.loc[mask_final, "ManualAssignment"] = True
@@ -256,9 +261,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
 
-
-
-
     if not tasks.empty and manuales: 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
@@ -272,9 +274,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         agenda_m = {m: {"fecha": agenda[m]["fecha"], "hora": agenda[m]["hora"]} for m in cap.keys()}
 
         mask_troq = tasks["Proceso"].eq("Troquelado")
+        
         # EXCLUDE Manual Assignments logic
         if "ManualAssignment" in tasks.columns:
             mask_troq = mask_troq & (~tasks["ManualAssignment"])
+            
         troq_df = tasks.loc[mask_troq].copy()
 
         if not troq_df.empty:
@@ -414,6 +418,15 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
     # =================================================================
 
+    # DEBUG check before queues
+    debug_ot = "E7493-2025101" 
+    debug_mask = tasks["OT_id"] == debug_ot
+    print(f"DEBUG PRE-STEP-4: Status for {debug_ot}:")
+    print(tasks.loc[debug_mask, ["OT_id", "Proceso", "Maquina", "ManualAssignment"]])
+
+    colas = {}
+    buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
+    
     colas = {}
     buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
     
