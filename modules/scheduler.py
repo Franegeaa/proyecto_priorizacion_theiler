@@ -307,7 +307,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 posibles = manuales + ([auto_name] if auto_name else [])
                 candidatos_tamano = []
                 for m in posibles:
-                    if "autom" in str(m).lower():
+                    if "autom" in str(m).lower() or "duyan" in str(m).lower():
                         # Para Automatica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
                         # Si la hoja más chica es < 38, NO entra en Auto.
                         if validar_medidas_troquel(m, min_anc, min_lar):

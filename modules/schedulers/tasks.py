@@ -123,7 +123,6 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             
             # --- Check Outsourced/Skipped/Priority ---
             str_maq = str(maquina)
-            
             key_proc = (str_ot, str_proc)
             
             is_outsourced = key_proc in outsourced
@@ -134,7 +133,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 maquina = "SALTADO"
             elif is_outsourced:
                 maquina = "TERCERIZADO"
-            
+
             # Manual Priority (check with ORIGINAL machine name or new one? Original makes sense for user input)
             # User selected "Imp. Offset 1" in UI. If we change it to TERCERIZADO, we lose that key.
             # But priority only matters if it stays internal. 
@@ -155,17 +154,6 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 
                 key_prio = (str_ot, str_maq_norm)
                 manual_prio = priorities.get(key_prio, 9999)
-
-
-                
-                # DEBUG: Show priority lookup for troquelado
-                if "troquel" in str_proc.lower():
-                    if manual_prio < 9999:
-                        print(f"DEBUG PRIORITY FOUND: OT={str_ot}, Maq={str_maq}, Prio={manual_prio}")
-                    elif str_ot in [k[0] for k in priorities.keys()]:
-                        print(f"DEBUG PRIORITY MISMATCH: OT={str_ot}, Maq={str_maq}")
-                        matching_prios = [(k, v) for k, v in priorities.items() if k[0] == str_ot]
-                        print(f"  Available: {matching_prios}")
 
             # --- PERSISTENCE LOCKING LOGIC ---
             # If this task was scheduled for "Today" in the previous run, FORCE it.

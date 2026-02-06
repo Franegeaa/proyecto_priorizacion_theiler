@@ -24,10 +24,32 @@ def obtener_descripcion_rango(maquina):
 
 def elegir_maquina(proceso, orden, cfg, plan_actual=None):
     proc_lower = proceso.lower().strip()
-    candidatos = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains(proc_lower.split()[0])]["Maquina"].tolist()
+    # Filtro basico por nombre de proceso
+    # spliteamos para tomar "Impresión" de "Impresión Flexo" o "Troquelado" de "Troquelado"
+    candidatos_df = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains(proc_lower.split()[0])]
+    candidatos = candidatos_df["Maquina"].tolist()
+    
     if not candidatos:
         return None
-    if "impresión" in proc_lower:
+
+    # Lógica Específica por Tipo de Proceso
+    
+    # 1. Troquelado: Validar dimensiones (CRÍTICO)
+    if "troquel" in proc_lower:
+        anc = float(orden.get("PliAnc", 0) or 0)
+        lar = float(orden.get("PliLar", 0) or 0)
+        
+        # Buscar primer candidato que soporte las medidas
+        for cand in candidatos:
+            if validar_medidas_troquel(cand, anc, lar):
+                return cand
+        
+        # Si ninguno soporta, retornamos el primero por defecto (aunque sea inválido)
+        # Esto sucede si el usuario desactivó las máquinas válidas o la OT es gigante.
+        return candidatos[0]
+
+    # 2. Impresión: Distinguir Flexo vs Offset por material
+    if "impresión" in proc_lower or "impresion" in proc_lower:
         mat = str(orden.get("MateriaPrima", "")).lower()
         if "flexo" in proc_lower and ("micro" in mat or "carton" in mat):
             flexos = [m for m in candidatos if "flexo" in m.lower()]
@@ -35,16 +57,24 @@ def elegir_maquina(proceso, orden, cfg, plan_actual=None):
         if "offset" in proc_lower and ("cartulin" in mat or "papel" in mat):
             offsets = [m for m in candidatos if "heidel" in m.lower()]
             return offsets[0] if offsets else candidatos[0]
+
+    # 3. Ventana
     if "ventan" in proc_lower:
         vent = [m for m in candidatos if "ventan" in m.lower()]
         return vent[0] if vent else candidatos[0]
+
+    # 4. Pegado
     if "peg" in proc_lower:
         pegs = [m for m in candidatos if "peg" in m.lower() or "pegad" in m.lower()]
         return pegs[0] if pegs else candidatos[0]
-    if "descartonad in" in proc_lower:
+
+    # 5. Descartonado (Typo fix: "descartonad" simple)
+    if "descartonad" in proc_lower:
         descs = [m for m in candidatos if "descartonad" in m.lower()]
         if descs:
             return descs[0]
+
+    # Default fallback
     return candidatos[0]
 
 def validar_medidas_troquel(maquina, anc, lar):
