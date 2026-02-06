@@ -39,31 +39,8 @@ with st.sidebar:
         help="Si se activa, el planificador ignorará la falta de Materia Prima, Chapas o Troqueles. Útil para ver capacidad teórica."
     )
     cfg["ignore_constraints"] = ignore_constraints
-    
-    cfg["ignore_constraints"] = ignore_constraints
-    
-    cfg["ignore_constraints"] = ignore_constraints
 
-archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
-
-if archivo is not None:
-    df = pd.read_excel(archivo)
-    
-    # 1. UI: Machine Speeds
-    render_machine_speed_inputs(cfg)
-    
-    # 2. UI: Daily Parameters
-    fecha_inicio_plan, hora_inicio_plan, feriados_lista = render_daily_params_section()
-    cfg["feriados"] = feriados_lista 
-
-    # 3. UI: Active Machines
-    maquinas_activas = render_active_machines_selector(cfg)
-
-    # Filter config for scheduler
-    cfg_plan = cfg.copy()
-    cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
-
-    # --- PERSISTENCE INITIALIZATION (MOVED TO TOP) ---
+    # --- PERSISTENCE INITIALIZATION (MOVED TO SIDEBAR) ---
     st.markdown("### 💾 Persistencia")
     usar_historial = st.checkbox(
         "Usar historial (Respetar asignaciones previas)", 
@@ -75,15 +52,14 @@ if archivo is not None:
         st.session_state.persistence = PersistenceManager()
     pm = st.session_state.persistence
     
-    # Initialize defaults for locked_assignments
-    cfg_plan["locked_assignments"] = {}
+    # Initialize defaults
+    cfg["locked_assignments"] = {}
     
     if pm.connected:
         # 1. LOAD LOCKED ASSIGNMENTS (History)
         if usar_historial:
-            # 1. LOAD LOCKED ASSIGNMENTS (History)
             locks = pm.get_locked_assignments()
-            cfg_plan["locked_assignments"] = locks
+            cfg["locked_assignments"] = locks
             if locks:
                 st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
         
@@ -104,6 +80,14 @@ if archivo is not None:
                      st.session_state.manual_assignments = db_overrides["manual_assignments"]
 
                  st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
+
+            # 3. LOAD DIE PREFERENCES
+            db_die_prefs = pm.load_die_preferences()
+            if db_die_prefs:
+                cfg["troquel_preferences"] = db_die_prefs
+                # Also save locally to keep in sync? Optional. 
+                # Let's just use it in memory.
+                st.toast("⚙️ Preferencias de troquel recuperadas de BD.", icon="🏭")
     # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
@@ -114,8 +98,27 @@ if archivo is not None:
             "outsourced_processes": set(),
             "skipped_processes": set()
         }
-    cfg_plan["manual_overrides"] = st.session_state.manual_overrides
+    cfg["manual_overrides"] = st.session_state.manual_overrides
     # ----------------------------------
+
+archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
+
+if archivo is not None:
+    df = pd.read_excel(archivo)
+    
+    # 1. UI: Machine Speeds
+    render_machine_speed_inputs(cfg)
+    
+    # 2. UI: Daily Parameters
+    fecha_inicio_plan, hora_inicio_plan, feriados_lista = render_daily_params_section()
+    cfg["feriados"] = feriados_lista 
+
+    # 3. UI: Active Machines
+    maquinas_activas = render_active_machines_selector(cfg)
+
+    # Filter config for scheduler
+    cfg_plan = cfg.copy()
+    cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
     
     # 3.1 UI: Descartonador IDs (New)
     cfg["custom_ids"] = render_descartonador_ids_section(cfg_plan) 

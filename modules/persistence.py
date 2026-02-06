@@ -306,11 +306,60 @@ class PersistenceManager:
             for row in rows:
                 # row is (ot_id, proceso, maquina)
                 key = (str(row[0]), str(row[1])) # (ot, proc)
-                val = str(row[2]) # machine
-                locked[key] = val
-                
             return locked
 
         except Exception as e:
             logger.error(f"Failed to load history: {e}")
             return {}
+
+    def save_die_preferences(self, prefs):
+        """
+        Saves die preferences to the 'manual_overrides' table under key 'troquel_preferences'.
+        """
+        if not self.connected or not prefs: return
+
+        try:
+            ts = datetime.now()
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+            
+            with self.engine.connect() as conn:
+                conn.execute(
+                    text(query), 
+                    {"key": "troquel_preferences", "data": json.dumps(prefs), "ts": ts}
+                )
+                conn.commit()
+            
+            logger.info("Saved die preferences to DB.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save die preferences: {e}")
+            st.warning(f"Error guardando preferencias en BD: {e}")
+            return False
+
+    def load_die_preferences(self):
+        """
+        Loads die preferences from DB.
+        Returns: dict or None
+        """
+        if not self.connected: return None
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = 'troquel_preferences'"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query)).fetchone()
+            
+            if result and result[0]:
+                return json.loads(result[0])
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to load die preferences: {e}")
+            return None
+

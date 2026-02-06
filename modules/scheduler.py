@@ -996,8 +996,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                         # ------------------------------------------------------
                         # NUEVO: Robo desde el POOL (Prioridad Máxima para Descartonadoras)
+                        # EXCEPCIÓN: Descartonadora 3 y 4 NO roban del pool (son solo manuales)
                         # ------------------------------------------------------
-                        if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO"):
+                        is_restricted_desc = "descartonadora 3" in maquina.lower() or "descartonadora 4" in maquina.lower()
+                        
+                        if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO") and not is_restricted_desc:
                             best_pool_idx = -1
                             best_pool_future = None # (idx, available_at)
                             best_has_successor = False # Flag for priority
@@ -1204,7 +1207,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     if tarea_encontrada: break
 
                         # D: Robo entre Descartonadoras
-                        elif "descartonad" in maquina.lower():
+                        # D: Robo entre Descartonadoras
+                        # Tampoco roban si son las restringidas
+                        elif "descartonad" in maquina.lower() and not is_restricted_desc:
                             vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
                             for vecina in vecinas_desc:
                                 if not colas.get(vecina): continue

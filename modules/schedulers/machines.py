@@ -1,5 +1,27 @@
 import pandas as pd
 
+
+def obtener_descripcion_rango(maquina):
+    """Devuelve un string describiendo el rango válido de medidas para la máquina."""
+    m = str(maquina).lower().strip()
+    
+    if "autom" in m or "duyan" in m:
+        return "Mínimo: 38x38 cm"
+    
+    if "manual 1" in m or "manual1" in m or "ema" in m:
+        return "Máximo: 80x105 cm"
+    
+    if "manual 2" in m or "manual2" in m or "gus" in m:
+        return "Máximo: 66x90 cm"
+        
+    if "manual 3" in m or "manual3" in m:
+        return "Máximo: 70x100 cm"
+    
+    if "iberica" in m:
+        return "Mín: 35x50 cm | Máx: 86x110 cm"
+    
+    return "Sin restricciones de medidas conocidas"
+
 def elegir_maquina(proceso, orden, cfg, plan_actual=None):
     proc_lower = proceso.lower().strip()
     candidatos = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains(proc_lower.split()[0])]["Maquina"].tolist()

@@ -467,6 +467,42 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             
             # --- PREPARE DATA FOR EDITOR ---
             df_full = schedule.sort_values(by=["Proceso", "Maquina", "Inicio"]).copy()
+
+            # --- MERGE STATIC COLUMNS (Colores, Troquel) ---
+            # Needed because schedule might not carry them by default, but df (input) does.
+            if "CodigoTroquel" not in df_full.columns and "CodigoTroquel" in df.columns:
+                 # Use drop_duplicates on right side to avoid exploding rows if product repeats in df
+                 right_df = df[["CodigoProducto", "Subcodigo", "CodigoTroquel"]].drop_duplicates()
+                 df_full = df_full.merge(
+                     right_df,
+                     how="left",
+                     on=["CodigoProducto", "Subcodigo"]
+                 )
+            
+            if "Colores" not in df_full.columns and "Colores" in df.columns:
+                 right_df = df[["CodigoProducto", "Subcodigo", "Colores"]].drop_duplicates()
+                 df_full = df_full.merge(
+                     right_df,
+                     how="left",
+                     on=["CodigoProducto", "Subcodigo"]
+                 )
+
+            if "PliAnc" not in df_full.columns and "PliAnc" in df.columns:
+                 right_df = df[["CodigoProducto", "Subcodigo", "PliAnc"]].drop_duplicates()
+                 df_full = df_full.merge(
+                     right_df,
+                     how="left",
+                     on=["CodigoProducto", "Subcodigo"]
+                 )
+
+            if "PliLar" not in df_full.columns and "PliLar" in df.columns:
+                 right_df = df[["CodigoProducto", "Subcodigo", "PliLar"]].drop_duplicates()
+                 df_full = df_full.merge(
+                     right_df,
+                     how="left",
+                     on=["CodigoProducto", "Subcodigo"]
+                 )
+
             
             # Add editing columns if not present
             if "ManualPriority" not in df_full.columns: df_full["ManualPriority"] = 9999
@@ -512,7 +548,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "OT_id", "Cliente", "Proceso", "Prioridad Manual", "Tercerizar", "Saltar", "Eliminar OT", "Inicio", "Fin", "Duracion_h", "DueDate"]
+            cols_editable = ["Maquina", "OT_id", "Cliente", "Proceso", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Prioridad Manual", "Tercerizar", "Saltar", "Eliminar OT", "Inicio", "Fin", "Duracion_h", "DueDate"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -548,6 +584,10 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     "OT_id": st.column_config.TextColumn(disabled=True),
                     "Cliente": st.column_config.TextColumn(disabled=True),
                     "Proceso": st.column_config.TextColumn(disabled=True),
+                    "Colores": st.column_config.TextColumn(disabled=True),
+                    "CodigoTroquel": st.column_config.TextColumn(disabled=True),
+                    "PliAnc": st.column_config.TextColumn("Ancho", disabled=True),
+                    "PliLar": st.column_config.TextColumn("Largo", disabled=True),
                 },
                 use_container_width=True,
                 height=600,
@@ -671,7 +711,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
 
 def render_download_section(schedule, resumen_ot, carga_md):
     """Renders the unified download section."""
-    st.subheader("💾 Exportar")
+    st.subheader("📋 Exportar")
 
     if schedule.empty:
         st.info("No hay plan para exportar.")
@@ -826,6 +866,11 @@ def render_die_preferences(cfg):
                 cfg["troquel_preferences"] = new_prefs
                 # Save to disk
                 if save_die_preferences(new_prefs):
+                    # --- DB PERSISTENCE ---
+                    if "persistence" in st.session_state and st.session_state.persistence.connected:
+                        if st.session_state.persistence.save_die_preferences(new_prefs):
+                             st.toast("Y también en la base de datos!", icon="☁️")
+                    # ----------------------
                     st.success("✅ Preferencias guardadas correctamente.")
                 else:
                     st.error("❌ Error al guardar preferencias.")
@@ -995,7 +1040,9 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                         # Dimension Check (Only for Troquelado machines)
                         if is_troq:
                             if not validar_medidas_troquel(maq, anc, lar):
-                                reason = f"Medidas {anc}x{lar} fuera de rango."
+                                from modules.schedulers.machines import obtener_descripcion_rango
+                                rango_desc = obtener_descripcion_rango(maq)
+                                reason = f"Medidas {anc}x{lar} fuera de rango. ({rango_desc})"
                         
                         # If passed logic checks, check hard constraints like MatPrima if needed?
                         # User said "parametros limitantes", usually refers to physical size.
@@ -1011,6 +1058,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                             compatible_machines.append(maq)
                             
                     # 3. Render Assignment UI
+                                
                     if compatible_machines:
                         st.success(f"✅ {len(compatible_machines)} máquinas compatibles encontradas.")
                         
@@ -1043,13 +1091,14 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                                 st.session_state.manual_assignments[target_maq].append(ot_id)
                                 st.success(f"Asignada correctamente a {target_maq}")
                                 st.rerun()
-                                
                     else:
                         st.error("❌ No se encontraron máquinas compatibles para esta tarea.")
-                        if rejected_machines:
-                            with st.expander("Ver razones de rechazo"):
-                                for m, r in rejected_machines:
-                                    st.write(f"- **{m}**: {r}")
+
+                    # SHOW REJECTED MACHINES ALWAYS
+                    if rejected_machines:
+                        with st.expander(f"Ver {len(rejected_machines)} máquinas no compatibles y razones", expanded=not compatible_machines):
+                            for m, r in rejected_machines:
+                                st.write(f"- **{m}**: {r}")
             else:
                 st.info("No hay tareas pendientes de Troquelado/Descartonado.")
         else:
