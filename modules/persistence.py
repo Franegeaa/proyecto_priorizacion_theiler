@@ -306,6 +306,7 @@ class PersistenceManager:
             for row in rows:
                 # row is (ot_id, proceso, maquina)
                 key = (str(row[0]), str(row[1])) # (ot, proc)
+                locked[key] = str(row[2])
             return locked
 
         except Exception as e:

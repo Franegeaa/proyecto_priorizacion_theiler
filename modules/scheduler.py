@@ -205,6 +205,31 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # -------------------------------------
     
     # =================================================================
+    # 2.5 APLICAR HISTORIAL (Locked Assignments)
+    # =================================================================
+    if "locked_assignments" in cfg and cfg["locked_assignments"]:
+        locks = cfg["locked_assignments"]
+        # locks is Dict {(ot, proc): maquina}
+        
+        # Optimize: Create a mapping column in tasks to match keys
+        # We need to match (OT_id, Proceso) against the keys in locks
+        
+        for (ot, proc), maq_locked in locks.items():
+            # Find task
+            # Check if machine exists in current config to avoid assigning disabled machines
+            if maq_locked not in maquinas and maq_locked not in ["TERCERIZADO", "SALTADO", "POOL_DESCARTONADO"]:
+                 continue
+
+            mask = (tasks["OT_id"].astype(str) == str(ot)) & (tasks["Proceso"].astype(str) == str(proc))
+            
+            if mask.any():
+                tasks.loc[mask, "Maquina"] = maq_locked
+                # Mark as ManualAssignment so it is NOT re-optimized by Troquelado logic
+                if "ManualAssignment" not in tasks.columns:
+                    tasks["ManualAssignment"] = False
+                tasks.loc[mask, "ManualAssignment"] = True
+    
+    # =================================================================
     # 2.9 APLICAR ASIGNACIONES MANUALES (Override)
     # =================================================================
     if "manual_assignments" in cfg and cfg["manual_assignments"]:
