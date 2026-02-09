@@ -225,7 +225,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "OT_id", "Cliente", "Proceso", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Prioridad Manual", "Tercerizar", "Saltar", "Eliminar OT", "Inicio", "Fin", "Duracion_h", "DueDate"]
+            cols_editable = ["Maquina", "OT_id", "Cliente", "Cliente-articulo", "Proceso", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Prioridad Manual", "Tercerizar", "Saltar", "Eliminar OT", "Inicio", "Fin", "Duracion_h", "DueDate"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -260,6 +260,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     "Maquina": st.column_config.TextColumn(disabled=True),
                     "OT_id": st.column_config.TextColumn(disabled=True),
                     "Cliente": st.column_config.TextColumn(disabled=True),
+                    "Cliente-articulo": st.column_config.TextColumn("Producto", disabled=True),
                     "Proceso": st.column_config.TextColumn(disabled=True),
                     "Colores": st.column_config.TextColumn(disabled=True),
                     "CodigoTroquel": st.column_config.TextColumn(disabled=True),
