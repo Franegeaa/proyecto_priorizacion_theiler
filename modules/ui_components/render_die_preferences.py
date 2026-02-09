@@ -1,4 +1,5 @@
 import streamlit as st
+from modules.utils.config_loader import save_die_preferences
 
 def render_die_preferences(cfg):
     """
