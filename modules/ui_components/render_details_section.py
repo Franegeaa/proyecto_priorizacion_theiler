@@ -1,5 +1,6 @@
 import streamlit as st
-
+from modules.utils.exporters import dataframe_to_excel_bytes
+from modules.utils.app_utils import ordenar_maquinas_personalizado
 def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
