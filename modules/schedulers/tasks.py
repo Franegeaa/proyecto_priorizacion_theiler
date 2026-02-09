@@ -1,5 +1,5 @@
 import pandas as pd
-from modules.config_loader import es_si 
+from modules.utils.config_loader import es_si 
 from .machines import elegir_maquina
 from .priorities import _clave_prioridad_maquina
 
@@ -149,7 +149,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # 2. 'elegir_maquina' (Normalized, from Config)
                 # 3. 'locked_assignments' (Potentially UN-NORMALIZED if from old history)
                 
-                from modules.config_loader import normalize_machine_name
+                from modules.utils.config_loader import normalize_machine_name
                 str_maq_norm = normalize_machine_name(str_maq)
                 
                 key_prio = (str_ot, str_maq_norm)

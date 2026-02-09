@@ -1,6 +1,6 @@
 import pandas as pd 
 from collections import deque
-from modules.config_loader import es_si
+from modules.utils.config_loader import es_si
 
 def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
     marca = str(orden.get("Cliente") or "").strip().lower()

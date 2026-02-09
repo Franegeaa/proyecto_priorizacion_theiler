@@ -8,9 +8,9 @@ from collections import deque
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Mocks
-from modules.config_loader import cargar_config
+from modules.utils.config_loader import cargar_config
 from modules.scheduler import programar
-from modules.tiempos_y_setup import tiempo_operacion_h
+from modules.utils.tiempos_y_setup import tiempo_operacion_h
 
 def log(msg):
     with open("tests/debug_barnizado_backfill.txt", "a", encoding="utf-8") as f:

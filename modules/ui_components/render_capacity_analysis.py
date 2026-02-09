@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
 import plotly.express as px
-from modules.config_loader import horas_por_dia, get_horas_totales_dia
+from modules.utils.config_loader import horas_por_dia, get_horas_totales_dia
 
 def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md):
     """

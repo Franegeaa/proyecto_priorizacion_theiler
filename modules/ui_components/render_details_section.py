@@ -293,7 +293,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                         maq = str(row["Maquina"])
                         
                         # Normalize machine name to handle aliases (Manual 1 -> Troq Nº 2 Ema, etc)
-                        from modules.config_loader import normalize_machine_name
+                        from modules.utils.config_loader import normalize_machine_name
                         maq_normalized = normalize_machine_name(maq)
                         
                         print(f"DEBUG SAVE PRIORITY: OT={ot}, Original Maq={maq}, Normalized={maq_normalized}, Prio={row['Prioridad Manual']}")

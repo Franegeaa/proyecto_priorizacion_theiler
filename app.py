@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-from modules.config_loader import cargar_config, horas_por_dia
+from modules.utils.config_loader import cargar_config, horas_por_dia
 from modules.scheduler import programar
-from modules.persistence import PersistenceManager
-from modules.data_processor import process_uploaded_dataframe
+from modules.utils.persistence import PersistenceManager
+from modules.utils.data_processor import process_uploaded_dataframe
 
 from modules.ui_components import (
     render_machine_speed_inputs,
@@ -21,7 +21,7 @@ from modules.ui_components import (
     render_save_section
 )
 
-from modules.visualizations import render_gantt_chart
+from modules.utils.visualizations import render_gantt_chart
 
 st.set_page_config(page_title="Priorización de Órdenes", layout="wide")
 st.title("📦 Planificador de Producción – Theiler Packaging")
