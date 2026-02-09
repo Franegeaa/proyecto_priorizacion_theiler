@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import date, time
+from datetime import datetime, date, time
 import pandas as pd
 
 def render_downtime_section(maquinas_activas, fecha_inicio_plan):
