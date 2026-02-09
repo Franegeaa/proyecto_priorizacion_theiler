@@ -261,7 +261,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             if is_troquel:
                 # Match "Troquelado" process
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("troquel")
-                print(f"DEBUG MANUAL: Target={maq_target} (Troquel). Matching 'troquel' in Proceso.")
             elif is_descartonado:
                 # Match "Descartonado" process
                 mask_proc = tasks["Proceso"].astype(str).str.lower().str.contains("descartonad")
@@ -443,15 +442,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
     # =================================================================
 
-    # DEBUG check before queues
-    debug_ot = "E7493-2025101" 
-    debug_mask = tasks["OT_id"] == debug_ot
-    print(f"DEBUG PRE-STEP-4: Status for {debug_ot}:")
-    print(tasks.loc[debug_mask, ["OT_id", "Proceso", "Maquina", "ManualAssignment"]])
-
-    colas = {}
-    buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
-    
     colas = {}
     buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
     
