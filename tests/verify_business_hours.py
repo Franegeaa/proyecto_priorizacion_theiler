@@ -6,7 +6,7 @@ import pandas as pd
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from modules.config_loader import sumar_horas_habiles, proximo_dia_habil, es_feriado
+from modules.utils.config_loader import sumar_horas_habiles, proximo_dia_habil, es_feriado
 
 def test_sumar_horas_habiles():
     # Mock config

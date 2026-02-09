@@ -7,7 +7,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from modules.scheduler import programar
-from modules.config_loader import horas_por_dia
+from modules.utils.config_loader import horas_por_dia
 
 def test_gap_filling():
     print("=== Testing Gap Filling Logic ===")
@@ -32,7 +32,7 @@ def test_gap_filling():
     }
     
     # Mock helper functions in config_loader if needed, but we are importing real ones.
-    # We rely on the fact that scheduler imports them from modules.config_loader
+    # We rely on the fact that scheduler imports them from modules.utils.config_loader
     
     # 2. Create Test Data
     # Scenario:

@@ -11,12 +11,23 @@ from modules.schedulers.agenda import _reservar_en_agenda
 from modules.schedulers.tasks import _procesos_pendientes_de_orden, _expandir_tareas
 
 # Importaciones de tus módulos auxiliares
-from modules.config_loader import (
-    es_si, horas_por_dia, proximo_dia_habil, construir_calendario, es_dia_habil, sumar_horas_habiles
+from modules.utils.config_loader import (
+    es_si, 
+    horas_por_dia, 
+    proximo_dia_habil, 
+    construir_calendario, 
+    es_dia_habil, 
+    sumar_horas_habiles,
+    cargar_config, 
+    es_feriado
 )
 
-from modules.tiempos_y_setup import (
-    capacidad_pliegos_h, setup_base_min, setup_menor_min, usa_setup_menor, tiempo_operacion_h
+from modules.utils.tiempos_y_setup import (
+    capacidad_pliegos_h, 
+    setup_base_min, 
+    setup_menor_min, 
+    usa_setup_menor, 
+    tiempo_operacion_h
 )
 
 

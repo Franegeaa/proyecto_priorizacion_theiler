@@ -8,7 +8,7 @@ from datetime import datetime, time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from modules.scheduler import programar
-from modules.config_loader import cargar_config
+from modules.utils.config_loader import cargar_config
 
 def test_arrival_dates():
     print("--- Test Start: Arrival Dates Verification ---")

@@ -1,5 +1,5 @@
 import pandas as pd
-from modules.config_loader import cargar_config, es_si
+from .config_loader import cargar_config, es_si
 
 # Duraciones fijas para procesos tercerizados sin cola (horas)
 TERCERIZADOS_DURACION_FIJA_H = {
