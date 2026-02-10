@@ -3,10 +3,11 @@ from datetime import date
 import pandas as pd
 from modules.utils.exporters import dataframe_to_excel_bytes
 from modules.utils.app_utils import ordenar_maquinas_personalizado
+
 def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
-    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Día (Fecha)", "Orden de Trabajo (OT)"], horizontal=True)
+    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True)
 
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 
@@ -103,43 +104,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
         else:
             st.info("No hay detalle por máquina disponible.")
 
-    elif modo == "Día (Fecha)":
-        if not schedule.empty:
-            st.write("📆 **Visualización por Día**")
-            d_seleccionado = st.date_input("Seleccioná la fecha a visualizar:", value=date.today())
-            
-            sel_start = pd.to_datetime(d_seleccionado)
-            sel_end = sel_start + pd.Timedelta(days=1)
-            
-            mask = (schedule["Inicio"] < sel_end) & (schedule["Fin"] > sel_start)
-            df_dia = schedule[mask].copy()
-            
-            if not df_dia.empty:
-                df_dia.sort_values(by=["Maquina", "Inicio"], inplace=True)
-                cols_day = ["Maquina", "OT_id", "Cliente", "Cliente-articulo", "Proceso", "Inicio", "Fin", "Duracion_h", "CantidadPliegos", "DueDate"]
-                cols_final = [c for c in cols_day if c in df_dia.columns]
-                
-                df_show_day = df_dia[cols_final]
-                
-                for col in df_show_day.select_dtypes(include=['object']).columns:
-                    df_show_day[col] = df_show_day[col].fillna("").astype(str)
-
-                st.dataframe(df_show_day, use_container_width=True)
-                
-                buf = dataframe_to_excel_bytes(df_show_day, sheet_name=f"Dia {d_seleccionado}")
-                st.download_button(
-                    label=f"⬇️ Descargar Plan del {d_seleccionado}",
-                    data=buf,
-                    file_name=f"Plan_Dia_{d_seleccionado}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="btn_dl_day_view"
-                )
-            else:
-                st.warning(f"No hay tareas planificadas para el {d_seleccionado}.")
-        else:
-            st.info("No hay tareas planificadas.")
-
     else: # "Plan Completo (Todas)"
+
         if not schedule.empty:
             st.write("📋 **Planificación Completa (Todas las Órdenes) - Edición**")
             st.caption("Editá la tabla para ajustar prioridades o marcar excepciones.")
@@ -191,7 +157,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             # Add "Eliminar" column (Virtual)
             df_full["Eliminar OT"] = False
             
-            # --- FILTERING LOGIC ---
             # --- FILTERING LOGIC ---
             col_f1, col_f2, col_f3 = st.columns([1, 2, 2])
             
@@ -278,18 +243,10 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             # --- PROCESS CHANGES BUTTON ---
             col_btn, col_info = st.columns([1, 3])
             
-            if col_btn.button("💾 Aplicar Cambios y Recalcular"):
+            if col_btn.button("Aplicar Cambios y Recalcular"):
                 if cfg and "manual_overrides" in st.session_state:
                     overrides = st.session_state.manual_overrides
                     has_changes = False
-                    
-                    # 1. Update Priorities
-                    # Diff: Look for rows where Priority != 9999
-                    # Note: We iterate ALL rows effectively in edited_df. 
-                    # Optimization: Iterate only where 'Prioridad Manual' != 9999
-                    
-                    # Reset priorities locally first? Or merge? 
-                    # Merging is safer. If user sets 9999, we remove it.
                     
                     rows_prio = edited_df[edited_df["Prioridad Manual"] != 9999]
                     for idx, row in rows_prio.iterrows():
@@ -300,12 +257,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                         from modules.utils.config_loader import normalize_machine_name
                         maq_normalized = normalize_machine_name(maq)
                         
-                        # If renamed to TERCERIZADO/SALTADO, we might lose original machine key for priority assignment
-                        # But priority only matters for REAL machines.
-                        # If user sets priority on TERCERIZADO row, it's useless but harmless.
-                        # Ideally we need original machine.
-                        # Luckily, if it is TERCERIZADO, the 'Maquina' col says TERCERIZADO.
-                        # If it is NOT outsourced, it says real machine.
                         if maq_normalized not in ["TERCERIZADO", "SALTADO"]:
                             key = (ot, maq_normalized)
                             overrides["manual_priorities"][key] = int(row["Prioridad Manual"])
@@ -320,22 +271,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                          if key in overrides["manual_priorities"]:
                              del overrides["manual_priorities"][key]
                              has_changes = True
-
-                    # 2. Update Outsourced / Skipped
-                    # We can't detect "unchecking" easily without comparing to previous state or iterating all.
-                    # Simpler: Iterate all rows where Checkbox is TRUE to ADD.
-                    # Iterate rows where Checkox is FALSE to REMOVE?
-                    # Since we show ALL tasks, we can just rebuild the sets based on what is visible?
-                    # RISK: If filter hides some tasks, we might miss them. But "Plan Completo" shows ALL.
-                    # So rebuilding sets from this view is (mostly) safe IF this view contains everything.
-                    # BUT: Deleted items are NOT here. Outsourced items ARE here.
-                    
-                    # Safer: Only process CHANGES. But st.data_editor doesn't give diff easily unless used with experimental callbacks or comparing.
-                    # Just iterating "True" values to ADD is safe. 
-                    # To REMOVE, we need to find "False" values that WERE in the set.
-                    
-                    # Let's iterate the whole edited_df since it's the source of truth for "Active" items.
-                    # If an item is here and unchecked, it is NOT outsourced.
                     
                     for idx, row in edited_df.iterrows():
                         ot = str(row["OT_id"])
@@ -386,3 +321,56 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                             
         else:
             st.info("No hay tareas planificadas.")
+
+    if not schedule.empty:
+        st.subheader("📆 **Visualización por Día**")
+        d_seleccionado = st.date_input("Seleccioná la fecha a visualizar:", value=date.today())
+        
+        sel_start = pd.to_datetime(d_seleccionado)
+        sel_end = sel_start + pd.Timedelta(days=1)
+        
+        mask = (schedule["Inicio"] < sel_end) & (schedule["Fin"] > sel_start)
+        df_dia = schedule[mask].copy()
+        
+        if not df_dia.empty:
+            df_dia.sort_values(by=["Maquina", "Inicio"], inplace=True)
+
+            # --- FILTERS ---
+            col_f1, col_f2 = st.columns(2)
+            
+            with col_f1:
+                unique_procs = sorted(df_dia["Proceso"].astype(str).unique().tolist())
+                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)", key="daily_proc_filter")
+                
+            with col_f2:
+                unique_maqs = sorted(df_dia["Maquina"].astype(str).unique().tolist())
+                filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)", key="daily_maq_filter")
+
+            if filtro_proc:
+                df_dia = df_dia[df_dia["Proceso"].astype(str).isin(filtro_proc)]
+                
+            if filtro_maq:
+                df_dia = df_dia[df_dia["Maquina"].astype(str).isin(filtro_maq)]
+            # ----------------
+            cols_day = ["Maquina", "OT_id", "Cliente", "Cliente-articulo", "Proceso", "Inicio", "Fin", "Duracion_h", "CantidadPliegos", "DueDate"]
+            cols_final = [c for c in cols_day if c in df_dia.columns]
+            
+            df_show_day = df_dia[cols_final]
+            
+            for col in df_show_day.select_dtypes(include=['object']).columns:
+                df_show_day[col] = df_show_day[col].fillna("").astype(str)
+
+            st.dataframe(df_show_day, use_container_width=True)
+            
+            buf = dataframe_to_excel_bytes(df_show_day, sheet_name=f"Dia {d_seleccionado}")
+            st.download_button(
+                label=f"⬇️ Descargar Plan del {d_seleccionado}",
+                data=buf,
+                file_name=f"Plan_Dia_{d_seleccionado}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="btn_dl_day_view"
+            )
+        else:
+            st.warning(f"No hay tareas planificadas para el {d_seleccionado}.")
+    else:
+        st.info("No hay tareas planificadas.")
