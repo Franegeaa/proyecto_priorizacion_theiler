@@ -61,8 +61,8 @@ with st.sidebar:
         if usar_historial:
             locks = pm.get_locked_assignments()
             cfg["locked_assignments"] = locks
-            if locks:
-                st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
+            # if locks:
+            #     st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
         
             # 2. LOAD MANUAL OVERRIDES (Config params)
             # Remove caching check to force sync with checkbox state
@@ -80,7 +80,7 @@ with st.sidebar:
                  if "manual_assignments" in db_overrides:
                      st.session_state.manual_assignments = db_overrides["manual_assignments"]
 
-                 st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
+                 # st.toast("⚙️ Configuraciones manuales recuperadas.", icon="📝")
 
             # 3. LOAD DIE PREFERENCES
             db_die_prefs = pm.load_die_preferences()
@@ -88,7 +88,7 @@ with st.sidebar:
                 cfg["troquel_preferences"] = db_die_prefs
                 # Also save locally to keep in sync? Optional. 
                 # Let's just use it in memory.
-                st.toast("⚙️ Preferencias de troquel recuperadas de BD.", icon="🏭")
+                # st.toast("⚙️ Preferencias de troquel recuperadas de BD.", icon="🏭")
     # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
