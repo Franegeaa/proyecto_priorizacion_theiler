@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from modules.schedulers.machines import validar_medidas_troquel
 
 def render_manual_machine_assignment(cfg, df, maquinas_activas):
     """

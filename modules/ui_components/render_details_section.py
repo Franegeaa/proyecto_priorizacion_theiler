@@ -190,7 +190,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                 "IsSkipped": "Saltar",
                 "ManualPriority": "Prioridad Manual"
             })
-            #
+            
             # Select columns to show/edit
             cols_editable = ["Maquina", "OT_id", "Cliente-articulo", "CantidadPliegos", "Proceso", "Inicio", "Fin", "Prioridad Manual", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Tercerizar", "Saltar", "Eliminar OT", "Duracion_h", "DueDate"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
