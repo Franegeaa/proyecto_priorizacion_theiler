@@ -476,8 +476,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     if "POOL_DESCARTONADO" in tasks["Maquina"].values:
         q_pool = tasks[tasks["Maquina"] == "POOL_DESCARTONADO"].copy()
         
-        q_pool.sort_values(by=["Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
-                           ascending=[False, True, True, False], inplace=True)
+        q_pool.sort_values(by=["ManualPriority", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                           ascending=[True, False, True, True, False], inplace=True)
         colas["POOL_DESCARTONADO"] = deque(q_pool.to_dict("records"))
     else:
         colas["POOL_DESCARTONADO"] = deque()
@@ -1062,35 +1062,51 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 # Si está lista YA
                                 if not available_at or available_at <= current_agenda_dt:
                                     # Logic Refined:
-                                    # 1. Urgency is King. (Urgente="Si" > "No")
+                                    # 0. Manual Priority (Lower is better)
+                                    # 1. Urgency is King (Urgente="Si" > "No") IF Priority is equal
                                     # 2. If Urgency is same, prefer Successor.
                                     # 3. If both same, prefer original order (DueDate).
                                     
+                                    current_prio = int(t_cand.get("ManualPriority", 9999))
                                     is_urgent = str(t_cand.get("Urgente", "")).lower() == "si"
                                     
                                     if best_pool_idx == -1:
                                         best_pool_idx = i
                                         best_has_successor = has_successor
                                         best_is_urgent = is_urgent
+                                        best_prio = current_prio
                                     else:
                                         # Compare current candidate (i) with best so far
                                         
-                                        # 1. Urgency Check
-                                        if is_urgent and not best_is_urgent:
-                                            # Found urgent, replace non-urgent best
+                                        # 0. Manual Priority Check
+                                        if current_prio < best_prio:
+                                            # Found better priority, replace best
                                             best_pool_idx = i
                                             best_has_successor = has_successor
-                                            best_is_urgent = True
-                                        elif not is_urgent and best_is_urgent:
-                                            # Current is not urgent, best is. Keep best.
+                                            best_is_urgent = is_urgent
+                                            best_prio = current_prio
+                                        elif current_prio > best_prio:
+                                            # Current is worse priority, keep best.
                                             pass
                                         else:
-                                            # Same urgency status. Check Successor.
-                                            if has_successor and not best_has_successor:
+                                            # Same Manual Priority. Check Urgency.
+                                            if is_urgent and not best_is_urgent:
+                                                # Found urgent, replace non-urgent best
                                                 best_pool_idx = i
-                                                best_has_successor = True
-                                                best_is_urgent = is_urgent
-                                            # Else: Keep best (respects original sort order which is DueDate)
+                                                best_has_successor = has_successor
+                                                best_is_urgent = True
+                                                best_prio = current_prio
+                                            elif not is_urgent and best_is_urgent:
+                                                # Current is not urgent, best is. Keep best.
+                                                pass
+                                            else:
+                                                # Same urgency status. Check Successor.
+                                                if has_successor and not best_has_successor:
+                                                    best_pool_idx = i
+                                                    best_has_successor = True
+                                                    best_is_urgent = is_urgent
+                                                    best_prio = current_prio
+                                                # Else: Keep best (respects original sort order which is DueDate)
                                     
                                     # Note: We don't break immediately anymore because we want to scan for a better priority task
                                     continue
