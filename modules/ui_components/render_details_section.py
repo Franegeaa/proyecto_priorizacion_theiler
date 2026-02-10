@@ -300,8 +300,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                         from modules.utils.config_loader import normalize_machine_name
                         maq_normalized = normalize_machine_name(maq)
                         
-                        print(f"DEBUG SAVE PRIORITY: OT={ot}, Original Maq={maq}, Normalized={maq_normalized}, Prio={row['Prioridad Manual']}")
-                        
                         # If renamed to TERCERIZADO/SALTADO, we might lose original machine key for priority assignment
                         # But priority only matters for REAL machines.
                         # If user sets priority on TERCERIZADO row, it's useless but harmless.

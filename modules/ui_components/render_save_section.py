@@ -4,7 +4,7 @@ def render_save_section(pm):
     """
     Renders the section to save the current schedule and overrides to the database.
     """
-    if st.button("Guardar Planificación Actual", help="Guarda la asignación de máquinas actual en la base de datos para que sea respetada mañana."):
+    if st.button("💾 Guardar Planificación Actual", help="Guarda la asignación de máquinas actual en la base de datos para que sea respetada mañana."):
         if "last_schedule" in st.session_state and not st.session_state.last_schedule.empty:
              if pm.connected:
                  pm.save_schedule(st.session_state.last_schedule)
