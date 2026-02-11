@@ -3,8 +3,9 @@ from datetime import date
 import pandas as pd
 from modules.utils.exporters import dataframe_to_excel_bytes
 from modules.utils.app_utils import ordenar_maquinas_personalizado
+from modules.ui_components.render_save_section import render_save_section
 
-def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg param
+def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
     modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True)
@@ -334,6 +335,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     else:
                         st.info("No se detectaron cambios.")
 
+            # --- SAVE SECTION ---
+            render_save_section(pm)
+            
             # --- RESTORE SECTION (For Blacklisted OTs) ---
             if cfg and "manual_overrides" in st.session_state:
                 blacklist = st.session_state.manual_overrides["blacklist_ots"]
