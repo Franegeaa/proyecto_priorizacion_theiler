@@ -14,6 +14,7 @@ from modules.ui_components import (
     render_pending_processes_section,
     render_details_section,
     render_download_section,
+    render_daily_details_section,
     render_descartonador_ids_section,
     render_die_preferences,
     render_manual_machine_assignment,
@@ -184,6 +185,9 @@ if archivo is not None:
 
     # --- SAVE SECTION ---
     render_save_section(pm)
+
+    # 12. Daily Details Section
+    render_daily_details_section(schedule)
 
     # 13. Delayed Orders Section
     render_delayed_orders_section(resumen_ot)
