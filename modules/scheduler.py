@@ -1510,6 +1510,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         resumen_ot = (
             schedule.groupby("OT_id").agg(
                 Cliente=('Cliente', 'first'),
+                Producto=('Cliente-articulo', 'first'),
                 Fin_OT=('Fin', 'max'),
                 DueDate=('DueDate', 'max')
             ).reset_index()
