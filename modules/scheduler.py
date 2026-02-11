@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta, time, date
 from collections import defaultdict, deque
 
-from modules.schedulers.machines import elegir_maquina, validar_medidas_troquel, get_machine_process_order
+from modules.schedulers.machines import validar_medidas_troquel, get_machine_process_order
 from modules.schedulers.priorities import (
     _clave_prioridad_maquina, _cola_impresora_flexo, _cola_impresora_offset, 
     _cola_troquelada, _cola_cortadora_bobina, get_downstream_presence_score
@@ -1270,7 +1270,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                             tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
                                     if tarea_encontrada: break
 
-                        # D: Robo entre Descartonadoras
                         # D: Robo entre Descartonadoras
                         # Tampoco roban si son las restringidas
                         elif "descartonad" in maquina.lower() and not is_restricted_desc:

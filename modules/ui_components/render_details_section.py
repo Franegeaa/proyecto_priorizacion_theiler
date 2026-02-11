@@ -193,7 +193,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "OT_id", "Cliente-articulo", "CantidadPliegos", "Proceso", "Prioridad Manual", "Inicio", "Fin", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Urgente", "Tercerizar", "Saltar", "Eliminar OT", "Duracion_h", "DueDate"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "Urgente", "Tercerizar", "Saltar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -234,7 +234,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     "OT_id": st.column_config.TextColumn(disabled=True), 
                     "Cliente-articulo": st.column_config.TextColumn("Producto", disabled=True),
                     "CantidadPliegos": st.column_config.NumberColumn("Cant. Pliegos", disabled=True),
-                    "Proceso": st.column_config.TextColumn(disabled=True),
+                    "Proceso": None,
                     "Colores": st.column_config.TextColumn(disabled=True),
                     "CodigoTroquel": st.column_config.TextColumn(disabled=True),
                     "PliAnc": st.column_config.TextColumn("Ancho", disabled=True),

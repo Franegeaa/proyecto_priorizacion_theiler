@@ -23,7 +23,7 @@ def render_daily_params_section(default_date=None, default_time=None):
         )
 
         # Input de Feriados
-        placeholder_feriados = "Pega una lista de fechas (ej. 21/11/2025), una por línea o separadas por coma."
+        placeholder_feriados = "Pega una lista de fechas una debajo de la otra (ej. 21/11/2025)"
         feriados_texto = st.text_area(
             "Días feriados (opcional):",
             placeholder_feriados,
