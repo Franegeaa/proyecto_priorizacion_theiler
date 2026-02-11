@@ -157,6 +157,14 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             # Add "Eliminar" column (Virtual)
             df_full["Eliminar OT"] = False
             
+            # --- CALCULATE ESTIMATED COMPLETION DATE PER OT ---
+            # Group by OT_id and get the max 'Fin' date
+            ot_completion = df_full.groupby("OT_id")["Fin"].max().reset_index()
+            ot_completion.rename(columns={"Fin": "FechaEntregaEstimada"}, inplace=True)
+            
+            # Merge back into df_full
+            df_full = df_full.merge(ot_completion, on="OT_id", how="left")
+            
             # --- FILTERING LOGIC ---
             col_f1, col_f2, col_f3 = st.columns([1, 2, 2])
             
@@ -193,7 +201,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "Urgente", "Tercerizar", "Saltar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Urgente", "Tercerizar", "Saltar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -230,8 +238,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     ),
                     "Inicio": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True),
                     "Fin": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True),
+                    "FechaEntregaEstimada": st.column_config.DatetimeColumn("Fin Estimado", format="D/M HH:mm", disabled=True),
                     "Maquina": st.column_config.TextColumn(disabled=True),
-                    "OT_id": st.column_config.TextColumn(disabled=True), 
+                    "OT_id": None, 
                     "Cliente-articulo": st.column_config.TextColumn("Producto", disabled=True),
                     "CantidadPliegos": st.column_config.NumberColumn("Cant. Pliegos", disabled=True),
                     "Proceso": None,

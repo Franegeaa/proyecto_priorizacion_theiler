@@ -364,3 +364,60 @@ class PersistenceManager:
             logger.error(f"Failed to load die preferences: {e}")
             return None
 
+    def save_holidays(self, holidays_list):
+        """
+        Saves the list of holiday dates to 'manual_overrides' table under key 'feriados'.
+        Dates are stored as a list of "YYYY-MM-DD" strings.
+        """
+        if not self.connected: return False
+
+        try:
+            # Convert [date(2025,12,25), ...] -> ["2025-12-25", ...]
+            data_str_list = [d.strftime("%Y-%m-%d") for d in holidays_list]
+            
+            ts = datetime.now()
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+            
+            with self.engine.connect() as conn:
+                conn.execute(
+                    text(query), 
+                    {"key": "feriados", "data": json.dumps(data_str_list), "ts": ts}
+                )
+                conn.commit()
+            
+            logger.info(f"Saved {len(data_str_list)} holidays to DB.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save holidays: {e}")
+            st.warning(f"Error guardando feriados en BD: {e}")
+            return False
+
+    def load_holidays(self):
+        """
+        Loads holidays from DB.
+        Returns: list of datetime.date objects or []
+        """
+        if not self.connected: return []
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = 'feriados'"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query)).fetchone()
+            
+            if result and result[0]:
+                date_strs = json.loads(result[0])
+                # Convert ["2025-12-25", ...] -> [date(2025,12,25), ...]
+                return [datetime.strptime(s, "%Y-%m-%d").date() for s in date_strs]
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to load holidays: {e}")
+            return []
+

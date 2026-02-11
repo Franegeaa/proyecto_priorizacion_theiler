@@ -89,6 +89,12 @@ with st.sidebar:
                 # Also save locally to keep in sync? Optional. 
                 # Let's just use it in memory.
                 # st.toast("⚙️ Preferencias de troquel recuperadas de BD.", icon="🏭")
+            
+            # 4. LOAD HOLIDAYS
+            db_holidays = pm.load_holidays()
+            if db_holidays:
+                 st.session_state.db_holidays = db_holidays
+
     # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
@@ -111,7 +117,10 @@ if archivo is not None:
     render_machine_speed_inputs(cfg)
     
     # 2. UI: Daily Parameters
-    fecha_inicio_plan, hora_inicio_plan, feriados_lista = render_daily_params_section()
+    fecha_inicio_plan, hora_inicio_plan, feriados_lista = render_daily_params_section(
+        default_holidays=st.session_state.get("db_holidays", []),
+        persistence=pm
+    )
     cfg["feriados"] = feriados_lista 
 
     # 3. UI: Active Machines
