@@ -336,7 +336,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         st.info("No se detectaron cambios.")
 
             # --- SAVE SECTION ---
-            render_save_section(pm)
+            #render_save_section(pm)
             
             # --- RESTORE SECTION (For Blacklisted OTs) ---
             if cfg and "manual_overrides" in st.session_state:

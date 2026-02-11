@@ -183,7 +183,7 @@ if archivo is not None:
     render_details_section(schedule, detalle_maquina, df, cfg)
 
     # --- SAVE SECTION ---
-    # render_save_section(pm)
+    render_save_section(pm)
 
     # 13. Delayed Orders Section
     render_delayed_orders_section(resumen_ot)
