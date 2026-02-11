@@ -18,7 +18,8 @@ from modules.ui_components import (
     render_die_preferences,
     render_manual_machine_assignment,
     render_capacity_analysis,
-    render_save_section
+    render_save_section,
+    render_delayed_orders_section
 )
 
 from modules.utils.visualizations import render_gantt_chart
@@ -182,9 +183,12 @@ if archivo is not None:
     render_details_section(schedule, detalle_maquina, df, cfg)
 
     # --- SAVE SECTION ---
-    render_save_section(pm)
+    # render_save_section(pm)
 
-    # 12. Export Section
+    # 13. Delayed Orders Section
+    render_delayed_orders_section(resumen_ot)
+
+    # 14. Export Section
     render_download_section(schedule, resumen_ot, carga_md)
 
 else:

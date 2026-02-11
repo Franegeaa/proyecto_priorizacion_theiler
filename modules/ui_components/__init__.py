@@ -11,3 +11,4 @@ from .render_die_preferences import render_die_preferences
 from .render_manual_machine_assignment import render_manual_machine_assignment
 from .render_capacity_analysis import render_capacity_analysis
 from .render_save_section import render_save_section
+from .render_delayed_orders_section import render_delayed_orders_section
