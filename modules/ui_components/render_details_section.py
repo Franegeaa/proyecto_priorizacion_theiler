@@ -231,7 +231,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     "Inicio": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True),
                     "Fin": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True),
                     "Maquina": st.column_config.TextColumn(disabled=True),
-                    "OT_id": st.column_config.TextColumn(disabled=True),
+                    "OT_id": st.column_config.TextColumn(disabled=True), 
                     "Cliente-articulo": st.column_config.TextColumn("Producto", disabled=True),
                     "CantidadPliegos": st.column_config.NumberColumn("Cant. Pliegos", disabled=True),
                     "Proceso": st.column_config.TextColumn(disabled=True),
@@ -239,6 +239,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     "CodigoTroquel": st.column_config.TextColumn(disabled=True),
                     "PliAnc": st.column_config.TextColumn("Ancho", disabled=True),
                     "PliLar": st.column_config.TextColumn("Largo", disabled=True),
+                    "Duracion_h": st.column_config.NumberColumn("Duración (hs)", disabled=True),
+                    "DueDate": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True), 
                 },
                 use_container_width=True,
                 height=600,
@@ -306,19 +308,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                                 overrides["skipped_processes"].remove(key_op)
                                 has_changes = True
 
-                        # Urgente Overrides
-                        # Logic: We only store if it DIFFERS from the original dataframe's value?
-                        # Or simpler: we just store the CURRENT state of the checkbox for every row if it was toggled.
-                        # But wait, we don't know if the user toggled it or if it came from Excel that way.
-                        # The df_editor has the CURRENT state. We should store it.
-                        # To avoid bloating the dict, maybe check against original df?
-                        # Using original df in df_full is tricky because row index matches edited_df only if not filtered?
-                        # edited_df has the same index as df_editor which was df_full filtered.
-                        # Let's iterate and save urgency state for all visible rows? No, that's inefficient.
-                        # Better strategy: Save EVERYTHING to urgency_overrides for visible rows?
-                        # Or just accept that we might save redundant True/False.
-                        # Let's save it.
-                        
                         current_urgency = bool(row["Urgente"])
                         # We store the state. The scheduler applies it.
                         if overrides["urgency_overrides"].get(key_op) != current_urgency:
