@@ -107,5 +107,8 @@ def process_uploaded_dataframe(df):
         df["OT_id"] = (
            df["CodigoProducto"].astype(str).str.strip() + "-" + df["Subcodigo"].astype(str).str.strip() 
         )
+
+    # --- URGENCIA (Check multiple possible headers) ---
+    df["Urgente"] = to_bool_series(["Urgencia", "UrgePed", "Urgente", "EsUrgente"])
     
     return df

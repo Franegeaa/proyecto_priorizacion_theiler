@@ -199,9 +199,31 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         return get_machine_process_order(maquina, cfg)
 
     # --- FILTRO DE BLACKLIST ---
-    if "manual_overrides" in cfg and "blacklist_ots" in cfg["manual_overrides"]:
-        bl = cfg["manual_overrides"]["blacklist_ots"]
-        tasks = tasks[~tasks["OT_id"].isin(bl)]
+    if "manual_overrides" in cfg:
+        # 1. Apply Urgency Overrides
+        if "urgency_overrides" in cfg["manual_overrides"]:
+            urg_overrides = cfg["manual_overrides"]["urgency_overrides"]
+            # urg_overrides is Dict {(ot_id, proceso): bool}
+            
+            # Iterate through overrides and apply
+            # Optimization: Create a key column in tasks? Or iterate if overrides are few.
+            # Generally manual overrides are few, so iteration is fine.
+            for (ot_urg, proc_urg), is_urgent in urg_overrides.items():
+                # Normalize Match
+                # We need to match OT and Process. 
+                # Process matching might need 'contains' logic similar to manual assignments if names vary
+                # But since UI returns exact process name from scheduler, direct match should work if data is consistent.
+                
+                # Check 1: Exact Match
+                mask = (tasks["OT_id"].astype(str) == str(ot_urg)) & (tasks["Proceso"].astype(str) == str(proc_urg))
+                
+                if mask.any():
+                    tasks.loc[mask, "Urgente"] = is_urgent
+
+        # 2. Apply Blacklist
+        if "blacklist_ots" in cfg["manual_overrides"]:
+            bl = cfg["manual_overrides"]["blacklist_ots"]
+            tasks = tasks[~tasks["OT_id"].isin(bl)]
         
     # ---------------------------------------------
 

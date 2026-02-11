@@ -188,11 +188,12 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             df_editor = df_full.rename(columns={
                 "IsOutsourced": "Tercerizar",
                 "IsSkipped": "Saltar",
-                "ManualPriority": "Prioridad Manual"
+                "ManualPriority": "Prioridad Manual",
+                "Urgente": "Urgente" 
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "OT_id", "Cliente-articulo", "CantidadPliegos", "Proceso", "Inicio", "Fin", "Prioridad Manual", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Tercerizar", "Saltar", "Eliminar OT", "Duracion_h", "DueDate"]
+            cols_editable = ["Maquina", "OT_id", "Cliente-articulo", "CantidadPliegos", "Proceso", "Prioridad Manual", "Inicio", "Fin", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Urgente", "Tercerizar", "Saltar", "Eliminar OT", "Duracion_h", "DueDate"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -200,6 +201,11 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
             edited_df = st.data_editor(
                 df_editor,
                 column_config={
+                    "Urgente": st.column_config.CheckboxColumn(
+                        "Urgente",
+                        help="Prioridad absoluta en este proceso.",
+                        default=False,
+                    ),
                     "Prioridad Manual": st.column_config.NumberColumn(
                         "Prioridad",
                         help="1 = Máxima prioridad. Dejá 9999 para auto.",
@@ -248,6 +254,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                     overrides = st.session_state.manual_overrides
                     has_changes = False
                     
+                    if "urgency_overrides" not in overrides:
+                        overrides["urgency_overrides"] = {}
+
                     rows_prio = edited_df[edited_df["Prioridad Manual"] != 9999]
                     for idx, row in rows_prio.iterrows():
                         ot = str(row["OT_id"])
@@ -296,6 +305,25 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None): # Added cfg
                             if key_op in overrides["skipped_processes"]:
                                 overrides["skipped_processes"].remove(key_op)
                                 has_changes = True
+
+                        # Urgente Overrides
+                        # Logic: We only store if it DIFFERS from the original dataframe's value?
+                        # Or simpler: we just store the CURRENT state of the checkbox for every row if it was toggled.
+                        # But wait, we don't know if the user toggled it or if it came from Excel that way.
+                        # The df_editor has the CURRENT state. We should store it.
+                        # To avoid bloating the dict, maybe check against original df?
+                        # Using original df in df_full is tricky because row index matches edited_df only if not filtered?
+                        # edited_df has the same index as df_editor which was df_full filtered.
+                        # Let's iterate and save urgency state for all visible rows? No, that's inefficient.
+                        # Better strategy: Save EVERYTHING to urgency_overrides for visible rows?
+                        # Or just accept that we might save redundant True/False.
+                        # Let's save it.
+                        
+                        current_urgency = bool(row["Urgente"])
+                        # We store the state. The scheduler applies it.
+                        if overrides["urgency_overrides"].get(key_op) != current_urgency:
+                             overrides["urgency_overrides"][key_op] = current_urgency
+                             has_changes = True
                                 
                         # Delete OT (Blacklist)
                         if row["Eliminar OT"]:
