@@ -2,6 +2,7 @@ import streamlit as st
 
 def render_machine_speed_inputs(cfg):
     """Renders the section to adjust machine speeds and setup times."""
+    st.subheader("Configurar velocidades de máquina")
     maquinas_todas = sorted(cfg["maquinas"]["Maquina"].unique().tolist())
     
     with st.expander("Añadir un velocidades de máquina (opcional)"):
