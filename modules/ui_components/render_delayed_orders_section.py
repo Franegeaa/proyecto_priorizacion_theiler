@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-def render_delayed_orders_section(resumen_ot):
+def render_delayed_orders_section(resumen_ot, schedule):
     """
     Renders a table of delayed orders (where Estimated Completion > Due Date).
     """
@@ -39,7 +39,7 @@ def render_delayed_orders_section(resumen_ot):
     
     st.markdown(f"**Total de órdenes atrasadas:** {len(display_df)}")
     
-    st.dataframe(
+    event = st.dataframe(
         display_df,
         column_config={
             "Fecha Prometida": st.column_config.DatetimeColumn(format="D/M HH:mm"),
@@ -47,5 +47,94 @@ def render_delayed_orders_section(resumen_ot):
             "Horas de Atraso": st.column_config.NumberColumn(format="%.1f h"),
         },
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row"
     )
+
+    # --- BOTTLENECK ANALYSIS ---
+    if event.selection and event.selection["rows"]:
+        idx = event.selection["rows"][0]
+        selected_row = display_df.iloc[idx]
+        ot_id = selected_row["OT_id"]
+        
+        st.markdown(f"### 🕵️ Análisis de Cuellos de Botella: **{ot_id}**")
+        
+        # Filter schedule for this OT
+        tasks = schedule[schedule["OT_id"] == ot_id].copy()
+        
+        if tasks.empty:
+            st.warning("No se encontraron tareas planificadas para esta orden.")
+            return
+
+        # Sort by actual start time
+        tasks = tasks.sort_values("Inicio")
+        
+        # Calculate Wait Times
+        # We need to know when the previous task ended to calculate wait for current task.
+        bottlenecks = []
+        prev_end = None
+        
+        # Also need 'Plan Start' to calculate wait for first task? 
+        # Usually first task wait is TimeNow -> Start.
+        
+        for i, row in tasks.iterrows():
+            proc = row["Proceso"]
+            start = row["Inicio"]
+            end = row["Fin"]
+            maq = row["Maquina"]
+            
+            wait_h = 0.0
+            if prev_end:
+                # Wait = Start - Previous End. 
+                # If Start < Previous End (shouldn't happen in single thread), wait is 0.
+                diff = (start - prev_end).total_seconds() / 3600.0
+                wait_h = max(0.0, diff)
+            else:
+                # First task. Wait is Start - (Plan Start / Material Arrival)?
+                # Difficult to know exact 'Ready Date' without more inputs.
+                # Let's assume 0 for first task or check if materials were late?
+                # For now simplify: 0.
+                wait_h = 0.0
+            
+            bottlenecks.append({
+                "Proceso": proc,
+                "Máquina": maq,
+                "Inicio": start,
+                "Fin": end,
+                "Tiempo Espera (h)": wait_h,
+                "Duración (h)": row["Duracion_h"]
+            })
+            
+            prev_end = end
+            
+        bn_df = pd.DataFrame(bottlenecks)
+        
+        # Highlight longest wait
+        if not bn_df.empty:
+            max_wait_idx = bn_df["Tiempo Espera (h)"].idxmax()
+            
+            # Show Table
+            st.dataframe(
+                bn_df,
+                column_config={
+                    "Inicio": st.column_config.DatetimeColumn(format="D/M HH:mm"),
+                    "Fin": st.column_config.DatetimeColumn(format="D/M HH:mm"),
+                    "Tiempo Espera (h)": st.column_config.ProgressColumn(
+                        format="%.1f h", 
+                        min_value=0, 
+                        max_value=max(bn_df["Tiempo Espera (h)"].max(), 1.0)
+                    ),
+                    "Duración (h)": st.column_config.NumberColumn(format="%.1f h")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            if bn_df.loc[max_wait_idx, "Tiempo Espera (h)"] > 0.1:
+                worst_proc = bn_df.loc[max_wait_idx, "Proceso"]
+                worst_maq = bn_df.loc[max_wait_idx, "Máquina"]
+                wait_val = bn_df.loc[max_wait_idx, "Tiempo Espera (h)"]
+                st.error(f"🚨 **Cuello de Botella Principal:** {worst_proc} ({worst_maq}) demoró **{wait_val:.1f} horas** en arrancar después del proceso anterior.")
+            else:
+                st.success("✅ Flujo continuo (sin esperas significativas entre procesos).")

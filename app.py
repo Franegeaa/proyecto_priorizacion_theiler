@@ -197,7 +197,7 @@ if archivo is not None:
     cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan)
     
     # 13. Delayed Orders Section
-    render_delayed_orders_section(resumen_ot)
+    render_delayed_orders_section(resumen_ot, schedule)
 
     # 14. Export Section
     render_download_section(schedule, resumen_ot, carga_md)
