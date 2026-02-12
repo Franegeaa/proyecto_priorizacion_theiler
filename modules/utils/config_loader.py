@@ -248,3 +248,42 @@ def sumar_horas_habiles(inicio: datetime, horas: float, cfg: dict) -> datetime:
         cursor = datetime.combine(siguiente_dia, time.min)
         
     return cursor
+
+def calculate_business_hours(start_dt, end_dt, cfg, machine_name=None):
+    """
+    Calcula la cantidad de horas hábiles entre start_dt y end_dt.
+    Excluye horas fuera de turno, fines de semana y feriados.
+    """
+    if start_dt >= end_dt:
+        return 0.0
+    
+    total_hours = 0.0
+    cursor_date = start_dt.date()
+    end_date = end_dt.date()
+    
+    # Iterar por cada día en el rango
+    days_diff = (end_date - cursor_date).days
+    
+    for i in range(days_diff + 1):
+        d = cursor_date + timedelta(days=i)
+        
+        # Obtener horas totales para este día (considera feriados/finde retorno 0)
+        h_dia = get_horas_totales_dia(d, cfg, maquina=machine_name)
+        
+        if h_dia <= 0:
+            continue
+            
+        # Definir inicio y fin de turno para este día
+        # Asumimos inicio a las 07:00 como en el resto del sistema
+        shift_start = datetime.combine(d, time(7, 0))
+        shift_end = shift_start + timedelta(hours=h_dia)
+        
+        # Calcular solapamiento entre [start_dt, end_dt] y [shift_start, shift_end]
+        overlap_start = max(start_dt, shift_start)
+        overlap_end = min(end_dt, shift_end)
+        
+        if overlap_start < overlap_end:
+            diff = (overlap_end - overlap_start).total_seconds() / 3600.0
+            total_hours += diff
+            
+    return total_hours

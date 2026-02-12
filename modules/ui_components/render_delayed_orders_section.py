@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 
-def render_delayed_orders_section(resumen_ot, schedule):
+from modules.utils.config_loader import calculate_business_hours
+
+def render_delayed_orders_section(resumen_ot, schedule, cfg):
     """
     Renders a table of delayed orders (where Estimated Completion > Due Date).
     """
@@ -86,10 +88,8 @@ def render_delayed_orders_section(resumen_ot, schedule):
             
             wait_h = 0.0
             if prev_end:
-                # Wait = Start - Previous End. 
-                # If Start < Previous End (shouldn't happen in single thread), wait is 0.
-                diff = (start - prev_end).total_seconds() / 3600.0
-                wait_h = max(0.0, diff)
+                # Usar cálculo de horas hábiles para descontar noches y findes
+                wait_h = calculate_business_hours(prev_end, start, cfg, machine_name=maq)
             else:
                 # First task. Wait is Start - (Plan Start / Material Arrival)?
                 # Difficult to know exact 'Ready Date' without more inputs.
