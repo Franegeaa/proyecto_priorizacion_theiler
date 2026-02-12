@@ -114,7 +114,17 @@ archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)
 
 if archivo is not None:
     df = pd.read_excel(archivo)
+    # 3.1 UI: Descartonador IDs (New)
+
+    # 8. Scheduler Execution
+    st.info("🧠 Generando programa…")
     
+
+    # Apply transformations to DF
+    df = process_uploaded_dataframe(df)
+
+    cfg["custom_ids"] = render_descartonador_ids_section(cfg) 
+
     # 1. UI: Machine Speeds
     render_machine_speed_inputs(cfg)
     
@@ -129,33 +139,20 @@ if archivo is not None:
     maquinas_activas = render_active_machines_selector(cfg)
 
     # Filter config for scheduler
-    cfg_plan = cfg.copy()
-    cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
-    
-    # 3.1 UI: Descartonador IDs (New)
-    cfg["custom_ids"] = render_descartonador_ids_section(cfg_plan) 
-    
-    # 3.2 UI: Die Preferences (New)
-    render_die_preferences(cfg_plan) # Updates cfg in place (and saves to disk) 
+ 
     
     # 4. UI: Downtimes
     cfg["downtimes"] = render_downtime_section(maquinas_activas, fecha_inicio_plan)
 
-    # 5. UI: Overtime
-    cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan)
+    # 3.2 UI: Die Preferences (New)
+    render_die_preferences(cfg)
 
-    # 6. Data Processing
-    # Apply transformations to DF
-    df = process_uploaded_dataframe(df)
-
-    # 7. UI: Pending Processes (Imagen de Planta)
     cfg["pending_processes"] = render_pending_processes_section(maquinas_activas, df, cfg)
 
-    # 7.1 UI: Manual Assignment
-    cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
+    cfg_plan = cfg.copy()
+    cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
 
-    # 8. Scheduler Execution
-    st.info("🧠 Generando programa…")
+    cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
 
     @st.cache_data(show_spinner="🧠 Calculando planificación...")
     def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
@@ -163,6 +160,19 @@ if archivo is not None:
 
     schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
     st.session_state.last_schedule = schedule
+
+    render_gantt_chart(schedule, cfg)
+
+    # 11. Details Section
+    render_details_section(schedule, detalle_maquina, df, cfg)
+
+    # --- SAVE SECTION ---
+    render_save_section(pm)
+
+    # 12. Daily Details Section
+    render_daily_details_section(schedule)
+    
+    # Updates cfg in place (and saves to disk) 
 
     # 9. Metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -178,17 +188,9 @@ if archivo is not None:
     # 10. Capacity Analysis
     render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md)
 
-    render_gantt_chart(schedule, cfg)
-
-    # 11. Details Section
-    render_details_section(schedule, detalle_maquina, df, cfg)
-
-    # --- SAVE SECTION ---
-    render_save_section(pm)
-
-    # 12. Daily Details Section
-    render_daily_details_section(schedule)
-
+    # 5. UI: Overtime
+    cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan)
+    
     # 13. Delayed Orders Section
     render_delayed_orders_section(resumen_ot)
 

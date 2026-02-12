@@ -37,7 +37,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
     if "manual_assignments" not in st.session_state:
         st.session_state.manual_assignments = {}
 
-    mode = st.radio("Modo de Asignación:", ["Por Tarea (Búsqueda inteligente)", "Por Máquina (Lista)"], horizontal=True)
+    mode = st.radio("Modo de Asignación:", ["Por Tarea (Búsqueda inteligente)"], horizontal=True)
 
     if mode == "Por Máquina (Lista)":
         with st.expander("Configurar Asignaciones Manuales", expanded=True):
@@ -93,7 +93,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                     )
                     
                     if sel:
-                        assignments[maq] = sel
+
                         st.session_state.manual_assignments[maq] = sel
                     else:
                         if maq in st.session_state.manual_assignments:

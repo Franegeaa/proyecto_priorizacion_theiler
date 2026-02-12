@@ -124,3 +124,24 @@ def get_machine_process_order(maquina, cfg):
             return (base_order, 0)
     
     return (base_order, 0)
+
+def obtener_descripcion_rango(maquina):
+    """Devuelve un string describiendo el rango válido de medidas para la máquina."""
+    m = str(maquina).lower().strip()
+    
+    if "autom" in m or "duyan" in m:
+         return "Min: 38x38 cm"
+    
+    if "manual 1" in m or "manual1" in m or "ema" in m:
+        return "Max: 80x105 cm"
+
+    if "manual 2" in m or "manual2" in m or "gus" in m:
+        return "Max: 66x90 cm"
+        
+    if "manual 3" in m or "manual3" in m:
+        return "Max: 70x100 cm"
+    
+    if "iberica" in m:
+       return "Min: 35x50 cm, Max: 86x110 cm"
+       
+    return "Sin restricciones de medidas conocidas"
