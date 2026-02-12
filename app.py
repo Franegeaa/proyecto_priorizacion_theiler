@@ -97,6 +97,11 @@ with st.sidebar:
             if db_holidays:
                  st.session_state.db_holidays = db_holidays
 
+            # 5. LOAD DOWNTIMES
+            db_downtimes = pm.load_downtimes()
+            if db_downtimes:
+                st.session_state.downtimes = db_downtimes
+
     # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
@@ -142,7 +147,7 @@ if archivo is not None:
  
     
     # 4. UI: Downtimes
-    cfg["downtimes"] = render_downtime_section(maquinas_activas, fecha_inicio_plan)
+    cfg["downtimes"] = render_downtime_section(maquinas_activas, fecha_inicio_plan, persistence=pm)
 
     # 3.2 UI: Die Preferences (New)
     render_die_preferences(cfg)

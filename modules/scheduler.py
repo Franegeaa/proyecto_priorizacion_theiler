@@ -318,6 +318,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
 
+    # DEBUG DOWNTIMES
+    print(f"DEBUG: Maquinas activas Troquelado: {manuales + ([auto_name] if auto_name else [])}")
+    print(f"DEBUG: Downtimes en CFG: {len(cfg.get('downtimes', []))}")
+    for dt in cfg.get("downtimes", []):
+        print(f"  - {dt}")
+
     if not tasks.empty and manuales: 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
@@ -327,8 +333,17 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg))
         load_h = {m: 0.0 for m in cap.keys()} 
 
-        # Agenda simulada solo para lectura de fechas (no escritura)
-        agenda_m = {m: {"fecha": agenda[m]["fecha"], "hora": agenda[m]["hora"]} for m in cap.keys()}
+        # Agenda simulada solo para lectura de fechas (ahora con escritura simulada)
+        # IMPORTANTE: Incluir "nombre" para que _reservar_en_agenda pueda buscar los downtimes
+        agenda_m = {
+            m: {
+                "fecha": agenda[m]["fecha"], 
+                "hora": agenda[m]["hora"],
+                "resto_horas": agenda[m]["resto_horas"], 
+                "nombre": m
+            } 
+            for m in cap.keys()
+        }
 
         mask_troq = tasks["Proceso"].eq("Troquelado")
         
@@ -442,15 +457,27 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 if not candidatas: continue
 
                 def criterio_balanceo(m):
-                    # Sin penalización artificial para Manual 3
-                    fecha_orden = agenda_m[m]["fecha"]
-                    return (fecha_orden, agenda_m[m]["hora"], load_h[m])
+                    # Balancear por: FECHA TERMINACION ESTIMADA (incluyendo downtimes) -> HORA -> CARGA
+                    # agenda_m se ira actualizando con cada asignacion
+                    f = agenda_m[m]["fecha"]
+                    h = agenda_m[m]["hora"]
+                    l = load_h[m]
+                    # print(f"  DEBUG COMPARE {m}: {f} {h} (Load: {l})")
+                    return (f, h, l)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
-                
+                # print(f"DEBUG CHOICE for group {troq_key} (Size {len(idxs)}): {m_sel}")
+
                 tasks.loc[idxs, "Maquina"] = m_sel
-                # Solo actualizamos carga estimada, NO reservamos tiempo real
-                load_h[m_sel] += total_pliegos / cap[m_sel]
+                
+                # ACTUALIZAR SIMULACION: Reservar tiempo en agenda_m para que la proxima iteracion "vea" que esta ocupada
+                duracion_estimada = total_pliegos / cap[m_sel]
+                
+                # Usamos la funcion real de agenda para saltar paros/feriados y mover el puntero fecha/hora
+                _reservar_en_agenda(agenda_m[m_sel], duracion_estimada, cfg)
+                
+                # Tambien actualizamos carga bruta por si acaso
+                load_h[m_sel] += duracion_estimada
 
     # =====================================================================
     # 3.1 REASIGNACIÓN DESCARTONADO (Solo asigna, NO reserva tiempo)

@@ -421,3 +421,73 @@ class PersistenceManager:
             logger.error(f"Failed to load holidays: {e}")
             return []
 
+    def save_downtimes(self, downtimes_list):
+        """
+        Saves the list of downtimes to 'manual_overrides' table under key 'downtimes'.
+        Structure: List of dicts with 'maquina', 'start' (isoformat), 'end' (isoformat).
+        """
+        if not self.connected: return False
+
+        try:
+            # Serialize datetimes
+            data_to_save = []
+            for dt in downtimes_list:
+                item = dt.copy()
+                if isinstance(item.get("start"), datetime):
+                    item["start"] = item["start"].isoformat()
+                if isinstance(item.get("end"), datetime):
+                    item["end"] = item["end"].isoformat()
+                data_to_save.append(item)
+            
+            ts = datetime.now()
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+            
+            with self.engine.connect() as conn:
+                conn.execute(
+                    text(query), 
+                    {"key": "downtimes", "data": json.dumps(data_to_save), "ts": ts}
+                )
+                conn.commit()
+            
+            logger.info(f"Saved {len(downtimes_list)} downtimes to DB.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save downtimes: {e}")
+            st.warning(f"Error guardando paros en BD: {e}")
+            return False
+
+    def load_downtimes(self):
+        """
+        Loads downtimes from DB.
+        Returns: list of dicts with 'start' and 'end' converted back to datetime objects.
+        """
+        if not self.connected: return []
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = 'downtimes'"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query)).fetchone()
+            
+            if result and result[0]:
+                raw_list = json.loads(result[0])
+                # Convert ISO strings back to datetime
+                cleaned_list = []
+                for item in raw_list:
+                    if "start" in item:
+                        item["start"] = datetime.fromisoformat(item["start"])
+                    if "end" in item:
+                        item["end"] = datetime.fromisoformat(item["end"])
+                    cleaned_list.append(item)
+                return cleaned_list
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to load downtimes: {e}")
+            return []

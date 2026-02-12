@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, date, time
 import pandas as pd
 
-def render_downtime_section(maquinas_activas, fecha_inicio_plan):
+def render_downtime_section(maquinas_activas, fecha_inicio_plan, persistence=None):
     """Manages downtime inputs and returns the list of downtimes."""
     st.subheader("🔧 Tiempo Fuera de Servicio (Paros Programados)")
 
@@ -42,15 +42,38 @@ def render_downtime_section(maquinas_activas, fecha_inicio_plan):
                     "start": dt_inicio,
                     "end": dt_fin
                 })
+                
+                # Save to DB
+                if persistence and persistence.connected:
+                    persistence.save_downtimes(st.session_state.downtimes)
+                    
                 st.success(f"Paro añadido para {d_maquina} de {dt_inicio} a {dt_fin}")
 
-        # Ensure dictionary format
-        downtimes = pd.DataFrame(st.session_state.downtimes).drop_duplicates().to_dict(orient="records")
-        st.session_state.downtimes = downtimes
-
+    # Ensure dictionary format AND Manage Deletions
     if st.session_state.downtimes:
-        st.write("Paros programados:")
+        st.write("### Paros programados:")
+        
+        to_remove = []
         for i, dt in enumerate(st.session_state.downtimes):
-            st.info(f"{i+1}: **{dt['maquina']}** fuera de servicio desde {dt['start']} hasta {dt['end']}")
+            col_info, col_del = st.columns([4, 1])
+            with col_info:
+                st.info(f"🛑 **{dt['maquina']}**: {dt['start']} -> {dt['end']}")
+            with col_del:
+                if st.button("🗑️", key=f"del_dt_{i}", help="Eliminar paro"):
+                    to_remove.append(i)
+        
+        if to_remove:
+            # Remove in reverse order to maintain indices
+            for idx in sorted(to_remove, reverse=True):
+                del st.session_state.downtimes[idx]
             
-    return st.session_state.downtimes
+            # Save updates
+            if persistence and persistence.connected:
+                persistence.save_downtimes(st.session_state.downtimes)
+            
+            st.rerun()
+
+    # Pass final list to scheduler
+    final_list = pd.DataFrame(st.session_state.downtimes).drop_duplicates().to_dict(orient="records") if st.session_state.downtimes else []
+    
+    return final_list
