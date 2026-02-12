@@ -463,6 +463,75 @@ class PersistenceManager:
             st.warning(f"Error guardando paros en BD: {e}")
             return False
 
+    def save_overtime(self, overtime_dict):
+        """
+        Guarda la configuración de horas extras.
+        Format: {machine_name: {date_obj: hours, ...}, ...}
+        """
+        if not self.connected: return
+
+        try:
+            # Serialize: Convert date objects to string keys for JSON
+            data_to_save = {}
+            for machine, dates_dict in overtime_dict.items():
+                data_to_save[machine] = {}
+                for d, hours in dates_dict.items():
+                    # Handle both date and datetime objects
+                    d_str = d.isoformat() if isinstance(d, (date, datetime)) else str(d)
+                    data_to_save[machine][d_str] = hours
+
+            json_data = json.dumps(data_to_save)
+            
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, CURRENT_TIMESTAMP)
+            ON CONFLICT (override_key) 
+            DO UPDATE SET data_json = EXCLUDED.data_json, last_updated = CURRENT_TIMESTAMP;
+            """
+            
+            with self.engine.connect() as conn:
+                conn.execute(text(query), {"key": "overtime_settings", "data": json_data})
+                conn.commit()
+            logger.info(f"Saved overtime settings to DB.")
+            return True
+                
+        except Exception as e:
+            logger.error(f"Failed to save overtime: {e}")
+            st.error(f"Error guardando horas extras en BD: {e}")
+            return False
+
+    def load_overtime(self):
+        """
+        Carga la configuración de horas extras.
+        Returns: {machine_name: {date_obj: hours, ...}, ...}
+        """
+        if not self.connected: return {}
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = :key"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query), {"key": "overtime_settings"}).fetchone()
+                
+            if result and result[0]:
+                raw_data = json.loads(result[0])
+                # Deserialize: Convert string keys back to date objects
+                cleaned_data = {}
+                for machine, dates_dict in raw_data.items():
+                    cleaned_data[machine] = {}
+                    for d_str, hours in dates_dict.items():
+                        try:
+                            # Try parsing as datetime then convert to date
+                            d_obj = datetime.fromisoformat(d_str).date()
+                            cleaned_data[machine][d_obj] = hours
+                        except ValueError:
+                            pass # Skip invalid dates
+                return cleaned_data
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to load overtime: {e}")
+            # st.error(f"Error cargando horas extras de BD: {e}")
+            return {}
+
     def load_downtimes(self):
         """
         Loads downtimes from DB.

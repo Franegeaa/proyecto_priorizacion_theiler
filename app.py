@@ -43,6 +43,8 @@ with st.sidebar:
     )
     cfg["ignore_constraints"] = ignore_constraints
 
+
+
     # --- PERSISTENCE INITIALIZATION (MOVED TO SIDEBAR) ---
     st.markdown("### 💾 Persistencia")
     usar_historial = st.checkbox(
@@ -101,6 +103,13 @@ with st.sidebar:
             db_downtimes = pm.load_downtimes()
             if db_downtimes:
                 st.session_state.downtimes = db_downtimes
+
+            # 6. LOAD OVERTIME
+            db_overtime = pm.load_overtime()
+            if db_overtime:
+                st.session_state.overtime_config = db_overtime
+            elif "overtime_config" not in st.session_state:
+                st.session_state.overtime_config = {}
 
     # -------------------------------------------------
         
@@ -194,7 +203,7 @@ if archivo is not None:
     render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md)
 
     # 5. UI: Overtime
-    cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan)
+    cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan, persistence=pm)
     
     # 13. Delayed Orders Section
     render_delayed_orders_section(resumen_ot, schedule, cfg)

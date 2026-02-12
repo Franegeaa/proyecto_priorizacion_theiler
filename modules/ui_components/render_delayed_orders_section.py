@@ -27,17 +27,19 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
     # Select and format columns
     # Available in resumen_ot: OT_id, Cliente, Producto, Fin_OT, DueDate, Atraso_h, EnRiesgo
     cols_to_show = ["OT_id", "Producto", "DueDate", "Fin_OT", "Atraso_h"]
+    display_df = delayed_df[cols_to_show].copy()
+    display_df["Atraso_d"] = display_df["Atraso_h"] / 24.0
     
     # Rename for clearer display
-    display_df = delayed_df[cols_to_show].rename(columns={
+    display_df = display_df[["OT_id", "Producto", "DueDate", "Fin_OT", "Atraso_d"]].rename(columns={
         "Producto": "Cliente - Artículo",
         "Fin_OT": "Fecha Estimada Entrega",
-        "Atraso_h": "Horas de Atraso",
+        "Atraso_d": "Días de Atraso",
         "DueDate": "Fecha Prometida"
     })
     
     # Sort by amount of delay (descending)
-    display_df = display_df.sort_values("Horas de Atraso", ascending=False)
+    display_df = display_df.sort_values("Días de Atraso", ascending=False)
     
     st.markdown(f"**Total de órdenes atrasadas:** {len(display_df)}")
     
@@ -46,7 +48,7 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
         column_config={
             "Fecha Prometida": st.column_config.DatetimeColumn(format="D/M HH:mm"),
             "Fecha Estimada Entrega": st.column_config.DatetimeColumn(format="D/M HH:mm"),
-            "Horas de Atraso": st.column_config.NumberColumn(format="%.1f h"),
+            "Días de Atraso": st.column_config.NumberColumn(format="%.1f d"),
         },
         use_container_width=True,
         hide_index=True,
