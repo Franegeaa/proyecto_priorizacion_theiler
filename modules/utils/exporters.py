@@ -84,6 +84,7 @@ def generar_excel_ot_horizontal(schedule_df):
                     row_data[f"{prefix} - Hora Fin"]      = ""
                 
                 row_data[f"{prefix} - Duracion"]      = row.get("Duracion_h", 0)
+                row_data[f"{prefix} - Prioridad"]     = row.get("ManualPriority", "")
             else:
                 # Celdas vacías si no hay proceso
                 row_data[f"{prefix} - Maquina"]       = ""
@@ -91,7 +92,8 @@ def generar_excel_ot_horizontal(schedule_df):
                 row_data[f"{prefix} - Hora Inicio"]   = ""
                 row_data[f"{prefix} - Fecha Fin"]     = ""
                 row_data[f"{prefix} - Hora Fin"]      = ""
-                row_data[f"{prefix} - Duracion"]  = ""
+                row_data[f"{prefix} - Duracion"]      = ""
+                row_data[f"{prefix} - Prioridad"]     = ""
         
         data_rows.append(row_data)
 
