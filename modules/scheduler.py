@@ -15,11 +15,10 @@ from modules.utils.config_loader import (
     es_si, 
     horas_por_dia, 
     proximo_dia_habil, 
-    construir_calendario, 
-    es_dia_habil, 
-    sumar_horas_habiles,
-    cargar_config, 
-    es_feriado
+    construir_calendario,
+    es_feriado,
+    es_dia_habil,
+    sumar_horas_habiles
 )
 
 from modules.utils.tiempos_y_setup import (

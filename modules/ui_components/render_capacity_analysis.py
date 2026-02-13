@@ -393,3 +393,10 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                 st.plotly_chart(fig_temp, use_container_width=True)
             else:
                 st.warning("No hay datos de carga ni capacidad para el periodo seleccionado.")
+
+        # ---------------------------------------------------------
+        # 3. REPORTE DE HORAS EXTRA (SOLICITUD USUARIO)
+        # ---------------------------------------------------------
+        st.markdown("---")
+        st.markdown("---")
+
