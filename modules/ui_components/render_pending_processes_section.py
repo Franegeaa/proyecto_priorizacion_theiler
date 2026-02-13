@@ -7,6 +7,9 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
     if "pending_processes" not in st.session_state:
         st.session_state.pending_processes = []
 
+    # Get persistence manager from session state if available
+    pm = st.session_state.get("persistence")
+
     with st.expander("Cargar procesos en curso (Prioridad Absoluta)"):
         st.info("⚠️ Los procesos cargados aquí se agendarán **primero** en la máquina seleccionada.")
         
@@ -83,7 +86,9 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
                     "ot_id": pp_ot,
                     "cantidad_pendiente": pp_qty
                 })
+                if pm: pm.save_pending_processes(st.session_state.pending_processes)
                 st.success(f"Cargado: {pp_maquina} -> {pp_ot} ({pp_qty})")
+                st.rerun()
 
         if st.session_state.pending_processes:
             st.write("📋 **Procesos en Curso Cargados:**")
@@ -100,11 +105,13 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
                 with c4:
                     if st.button("❌", key=f"del_pp_{i}"):
                         st.session_state.pending_processes.pop(i)
+                        if pm: pm.save_pending_processes(st.session_state.pending_processes)
                         st.rerun()
             
             st.markdown("---")
             if st.button("Limpiar TODO", key="btn_clear_pp"):
                st.session_state.pending_processes = []
+               if pm: pm.save_pending_processes(st.session_state.pending_processes)
                st.rerun()
 
     return st.session_state.pending_processes

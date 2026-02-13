@@ -560,3 +560,55 @@ class PersistenceManager:
         except Exception as e:
             logger.error(f"Failed to load downtimes: {e}")
             return []
+
+    def save_pending_processes(self, pending_list):
+        """
+        Saves the list of pending processes (Imagen de Planta).
+        Structure: List of dicts with 'maquina', 'ot_id', 'cantidad_pendiente'.
+        """
+        if not self.connected: return False
+
+        try:
+            ts = datetime.now()
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+            
+            with self.engine.connect() as conn:
+                conn.execute(
+                    text(query), 
+                    {"key": "pending_processes_data", "data": json.dumps(pending_list), "ts": ts}
+                )
+                conn.commit()
+            
+            logger.info(f"Saved {len(pending_list)} pending processes to DB.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save pending processes: {e}")
+            st.warning(f"Error guardando procesos pendientes en BD: {e}")
+            return False
+
+    def load_pending_processes(self):
+        """
+        Loads pending processes from DB.
+        Returns: list of dicts.
+        """
+        if not self.connected: return []
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = 'pending_processes_data'"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query)).fetchone()
+            
+            if result and result[0]:
+                return json.loads(result[0])
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to load pending processes: {e}")
+            return []

@@ -111,6 +111,11 @@ with st.sidebar:
             elif "overtime_config" not in st.session_state:
                 st.session_state.overtime_config = {}
 
+            # 7. LOAD PENDING PROCESSES
+            db_pending = pm.load_pending_processes()
+            if db_pending:
+                 st.session_state.pending_processes = db_pending
+
     # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
