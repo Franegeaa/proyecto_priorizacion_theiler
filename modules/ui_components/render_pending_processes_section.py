@@ -10,7 +10,7 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
     with st.expander("Cargar procesos en curso (Prioridad Absoluta)"):
         st.info("⚠️ Los procesos cargados aquí se agendarán **primero** en la máquina seleccionada.")
         
-        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([2, 1.5, 2, 1, 1])
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1.5, 3.5, 1, 1, 1])
         
         with col_p1:
             pp_maquina = st.selectbox("Máquina", options=maquinas_activas, key="pp_maquina")
@@ -43,21 +43,33 @@ def render_pending_processes_section(maquinas_activas, df, cfg):
             elif "pegad" in p_clean: col_target = "_PEN_Pegado"
         
         if col_target and col_target in df.columns:
-            ots_disponibles = sorted(df[df[col_target] == True]["OT_id"].unique().tolist())
+            ots_disponibles = df[df[col_target] == True]["OT_id"].unique().tolist()
         else:
-            ots_disponibles = sorted(df["OT_id"].unique().tolist()) if "OT_id" in df.columns else []
+            ots_disponibles = df["OT_id"].unique().tolist() if "OT_id" in df.columns else []
+
+        # Create a display map for OTs: "Client - Product | OT: ID"
+        ot_display_map = {}
+        for ot in ots_disponibles:
+             try:
+                 row = df[df["OT_id"] == ot].iloc[0]
+                 cli_art = row.get("Cliente-articulo", "S/D")
+                 ot_display_map[ot] = f"{cli_art}"
+             except:
+                 ot_display_map[ot] = f"OT: {ot}"
+        
+        # Sort OTs based on the display string (alphabetical by Client-Product)
+        ots_disponibles = sorted(ots_disponibles, key=lambda x: ot_display_map.get(x, ""))
 
         with col_p2:
-            pp_ot = st.selectbox("Orden de Trabajo (OT)", options=ots_disponibles, key="pp_ot")
+            pp_ot = st.selectbox(
+                "Orden de Trabajo (OT)", 
+                options=ots_disponibles, 
+                format_func=lambda x: ot_display_map.get(x, str(x)),
+                key="pp_ot"
+            )
             
         with col_p3:
-            cliente_val = ""
-            if pp_ot:
-                 try: 
-                     cliente_val = df.loc[df["OT_id"] == pp_ot, "Cliente"].iloc[0]
-                 except: 
-                     cliente_val = ""
-            st.text_input("Cliente", value=cliente_val, disabled=True, key=f"pp_cli_{pp_ot}")
+            st.text_input("OT ID", value=str(pp_ot) if pp_ot else "", disabled=True, key=f"pp_ot_disp_{pp_ot}")
 
         with col_p4:
             pp_qty = st.number_input("Cant. Pendiente", min_value=1, value=1000, step=100, key="pp_qty")
