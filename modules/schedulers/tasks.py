@@ -4,7 +4,7 @@ from .machines import elegir_maquina
 from .priorities import _clave_prioridad_maquina
 
 
-def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
+def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_constraints=False):
     flujo = orden_std or [
         "Cortadora Bobina", "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
         "OPP", "Stamping", "Plastificado", "Encapado", "Cuño","Troquelado", 
@@ -25,6 +25,11 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     tiene_troquel = es_si(orden.get("TroquelArt"))
     fecha_troquel = orden.get("FechaLlegadaTroquel")
     bloqueado_por_troquel = tiene_troquel and (pd.isna(fecha_troquel) or str(fecha_troquel).strip() == "")
+
+    # OVERRIDE: Si ignoramos restricciones, no bloqueamos por falta de película/troquel
+    if ignore_constraints:
+        bloqueado_por_pelicula = False
+        bloqueado_por_troquel = False
 
     if es_si(orden.get("CorteSNDdp")): pendientes.append("Cortadora Bobina")
     
@@ -92,7 +97,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
         if ot in blacklist:
             continue
             
-        pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio)
+        pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio, ignore_constraints=cfg.get("ignore_constraints", False))
 
         if not pendientes:
             continue
