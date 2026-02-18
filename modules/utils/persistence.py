@@ -171,13 +171,29 @@ class PersistenceManager:
             skipped_raw = overrides.get("skipped_processes", set())
             skipped_clean = [f"{ot}|{proc}" for ot, proc in skipped_raw]
 
+            # 5. Urgency Overrides (Dict with Tuple keys) -> Dict with String keys "OT|PROC"
+            urgency_raw = overrides.get("urgency_overrides", {})
+            urgency_clean = {}
+            for (ot, proc), val in urgency_raw.items():
+                key_str = f"{ot}|{proc}"
+                urgency_clean[key_str] = val
+
+            # 6. MP Overrides (Dict with Tuple keys) -> Dict with String keys "OT|PROC"
+            mp_raw = overrides.get("mp_overrides", {})
+            mp_clean = {}
+            for (ot, proc), val in mp_raw.items():
+                key_str = f"{ot}|{proc}"
+                mp_clean[key_str] = val
+
             # Prepare for DB
             data_map = {
                 "blacklist_ots": json.dumps(blacklist),
                 "manual_priorities": json.dumps(priorities_clean),
                 "outsourced_processes": json.dumps(outsourced_clean),
                 "skipped_processes": json.dumps(skipped_clean),
-                "manual_assignments": json.dumps(overrides.get("manual_assignments", {}))
+                "manual_assignments": json.dumps(overrides.get("manual_assignments", {})),
+                "urgency_overrides": json.dumps(urgency_clean),
+                "mp_overrides": json.dumps(mp_clean)
             }
 
             # Debug Log
@@ -213,7 +229,9 @@ class PersistenceManager:
                 "blacklist_ots": set(),
                 "manual_priorities": {},
                 "outsourced_processes": set(),
-                "skipped_processes": set()
+                "skipped_processes": set(),
+                "urgency_overrides": {},
+                "mp_overrides": {}
             }
 
         try:
@@ -255,14 +273,31 @@ class PersistenceManager:
             
             # 5. Manual Assignments
             res_assignments = json.loads(raw_data.get("manual_assignments", "{}"))
+
+            # 6. Urgency Overrides
+            res_urgency = {}
+            urg_dict = json.loads(raw_data.get("urgency_overrides", "{}"))
+            for k, v in urg_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_urgency[(parts[0], parts[1])] = v
+
+            # 7. MP Overrides
+            res_mp = {}
+            mp_dict = json.loads(raw_data.get("mp_overrides", "{}"))
+            for k, v in mp_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_mp[(parts[0], parts[1])] = v
             
             return {
                 "blacklist_ots": res_blacklist,
                 "manual_priorities": res_prio,
                 "outsourced_processes": res_outsourced,
-                "outsourced_processes": res_outsourced,
                 "skipped_processes": res_skipped,
-                "manual_assignments": res_assignments
+                "manual_assignments": res_assignments,
+                "urgency_overrides": res_urgency,
+                "mp_overrides": res_mp
             }
 
         except Exception as e:

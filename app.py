@@ -124,7 +124,9 @@ with st.sidebar:
             "blacklist_ots": set(),
             "manual_priorities": {},
             "outsourced_processes": set(),
-            "skipped_processes": set()
+            "skipped_processes": set(),
+            "urgency_overrides": {},
+            "mp_overrides": {}
         }
     cfg["manual_overrides"] = st.session_state.manual_overrides
     # ----------------------------------

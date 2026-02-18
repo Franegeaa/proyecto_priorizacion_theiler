@@ -177,7 +177,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 # Guardamos resultado
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                         "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel"]} | 
+                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta"]} | 
                                  {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
                                   "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
                 
@@ -203,22 +203,18 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # 1. Apply Urgency Overrides
         if "urgency_overrides" in cfg["manual_overrides"]:
             urg_overrides = cfg["manual_overrides"]["urgency_overrides"]
-            # urg_overrides is Dict {(ot_id, proceso): bool}
-            
-            # Iterate through overrides and apply
-            # Optimization: Create a key column in tasks? Or iterate if overrides are few.
-            # Generally manual overrides are few, so iteration is fine.
             for (ot_urg, proc_urg), is_urgent in urg_overrides.items():
-                # Normalize Match
-                # We need to match OT and Process. 
-                # Process matching might need 'contains' logic similar to manual assignments if names vary
-                # But since UI returns exact process name from scheduler, direct match should work if data is consistent.
-                
-                # Check 1: Exact Match
                 mask = (tasks["OT_id"].astype(str) == str(ot_urg)) & (tasks["Proceso"].astype(str) == str(proc_urg))
-                
                 if mask.any():
                     tasks.loc[mask, "Urgente"] = is_urgent
+
+        # 1b. Apply MP Overrides (MateriaPrimaPlanta)
+        if "mp_overrides" in cfg["manual_overrides"]:
+            mp_overrides = cfg["manual_overrides"]["mp_overrides"]
+            for (ot_mp, proc_mp), mp_val in mp_overrides.items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_mp)) & (tasks["Proceso"].astype(str) == str(proc_mp))
+                if mask.any():
+                    tasks.loc[mask, "MateriaPrimaPlanta"] = mp_val
 
         # 2. Apply Blacklist
         if "blacklist_ots" in cfg["manual_overrides"]:
@@ -796,7 +792,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Register Result
                         filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped"]} | 
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "MateriaPrimaPlanta"]} | 
                                         {"Setup_min": 0.0, "Proceso_h": duration_virt,
                                         "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
                                         "Motivo": "Outsourced/Skipped", "Maquina": maquina})
@@ -1411,7 +1407,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "MateriaPrimaPlanta"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1447,7 +1443,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "MateriaPrimaPlanta"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 

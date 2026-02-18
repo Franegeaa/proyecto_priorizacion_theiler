@@ -155,6 +155,12 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             if "IsOutsourced" not in df_full.columns: df_full["IsOutsourced"] = False
             if "IsSkipped" not in df_full.columns: df_full["IsSkipped"] = False
             
+            # Ensure MateriaPrimaPlanta is boolean for checkbox display
+            if "MateriaPrimaPlanta" in df_full.columns:
+                df_full["MateriaPrimaPlanta"] = df_full["MateriaPrimaPlanta"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
+            else:
+                df_full["MateriaPrimaPlanta"] = False
+            
             # Add "Eliminar" column (Virtual)
             df_full["Eliminar OT"] = False
             
@@ -198,11 +204,12 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 "IsOutsourced": "Tercerizar",
                 "IsSkipped": "Saltar",
                 "ManualPriority": "Prioridad Manual",
-                "Urgente": "Urgente" 
+                "Urgente": "Urgente",
+                "MateriaPrimaPlanta": "MP Pendiente"
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Urgente", "Tercerizar", "Saltar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Urgente", "MP Pendiente", "Tercerizar", "Saltar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -213,6 +220,11 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     "Urgente": st.column_config.CheckboxColumn(
                         "Urgente",
                         help="Prioridad absoluta en este proceso.",
+                        default=False,
+                    ),
+                    "MP Pendiente": st.column_config.CheckboxColumn(
+                        "MP Pend.",
+                        help="Materia Prima pendiente. Desactivar cuando llegue el material.",
                         default=False,
                     ),
                     "Prioridad Manual": st.column_config.NumberColumn(
@@ -268,6 +280,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     
                     if "urgency_overrides" not in overrides:
                         overrides["urgency_overrides"] = {}
+                    if "mp_overrides" not in overrides:
+                        overrides["mp_overrides"] = {}
 
                     rows_prio = edited_df[edited_df["Prioridad Manual"] != 9999]
                     for idx, row in rows_prio.iterrows():
@@ -318,10 +332,19 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                                 overrides["skipped_processes"].remove(key_op)
                                 has_changes = True
 
+                        # Urgente override
                         current_urgency = bool(row["Urgente"])
-                        # We store the state. The scheduler applies it.
                         if overrides["urgency_overrides"].get(key_op) != current_urgency:
                              overrides["urgency_overrides"][key_op] = current_urgency
+                             has_changes = True
+
+                        # MP Pendiente override — propagar a TODOS los procesos de la OT
+                        current_mp = bool(row["MP Pendiente"])
+                        if overrides["mp_overrides"].get(key_op) != current_mp:
+                             # Buscar todos los procesos de esta OT y aplicar el mismo valor
+                             all_procs_for_ot = edited_df[edited_df["OT_id"] == ot]["Proceso"].unique()
+                             for p in all_procs_for_ot:
+                                 overrides["mp_overrides"][(ot, str(p))] = current_mp
                              has_changes = True
                                 
                         # Delete OT (Blacklist)
