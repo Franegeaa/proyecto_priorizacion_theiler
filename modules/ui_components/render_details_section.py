@@ -222,7 +222,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         help="Prioridad absoluta en este proceso.",
                         default=False,
                     ),
-                    # "MP Pendiente": st.column_config.CheckboxColumn(
+                    # "MP Pendie
+                    # nte": st.column_config.CheckboxColumn(
                     #     "MP Pend.",
                     #     help="Materia Prima pendiente. Desactivar cuando llegue el material.",
                     #     default=False,
