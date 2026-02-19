@@ -533,6 +533,24 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     
     pendientes_por_ot = defaultdict(set); [pendientes_por_ot[t["OT_id"]].add(t["Proceso"]) for _, t in tasks.iterrows()]
     
+    # Pre-compute skipped process set for fast lookup in verificar_disponibilidad
+    # This allows downstream processes (e.g. Descartonado) to bypass skipped dependencies
+    def _clean_for_skip(s):
+        if not s: return ""
+        s = str(s).lower().strip()
+        trans = str.maketrans("áéíóúüñ", "aeiouun")
+        s = s.translate(trans)
+        if "flexo" in s: return "impresion flexo"
+        if "offset" in s: return "impresion offset"
+        if "troquel" in s: return "troquelado"
+        return s
+        
+    skipped_set = set()
+    if not tasks.empty:
+        mask_saltado = tasks["Maquina"] == "SALTADO"
+        for _, row in tasks[mask_saltado].iterrows():
+            skipped_set.add((row["OT_id"], _clean_for_skip(row["Proceso"])))
+    
     # IMPORTANTE: No reiniciamos 'completado' ni 'fin_proceso' ni 'ultimo_en_maquina' 
     # porque ya vienen con datos de la fase "Imagen de Planta"
     # completado = defaultdict(set); fin_proceso = defaultdict(dict) <-- ELIMINADO REINICIO
@@ -676,6 +694,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         prev_procs_names = []
         for p_clean in flujo_clean[:idx]:
             if p_clean in pendientes_clean:
+                # If this process is skipped (SALTADO), treat as instantly completed
+                if (ot, p_clean) in skipped_set:
+                    continue
+                
                 completados_clean = {clean(c) for c in completado[ot]}
                 
                 if p_clean not in completados_clean:
