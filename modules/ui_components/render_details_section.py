@@ -246,8 +246,10 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 
                 return [bg_color] * len(row)
 
-            # Apply styler
+            # Apply styler and general formatting
             styled_df = df_editor.style.apply(highlight_due_date, axis=1)
+            if "CantidadPliegos" in df_editor.columns:
+                styled_df = styled_df.format({"CantidadPliegos": "{:.0f}"})
 
             # --- RENDER EDITOR ---
             edited_df = st.data_editor(
