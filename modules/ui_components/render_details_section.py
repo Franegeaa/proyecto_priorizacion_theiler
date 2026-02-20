@@ -213,9 +213,45 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
+            # --- COLORING LOGIC BY DUE DATE ---
+            from datetime import date
+            def highlight_due_date(row):
+                # We need to return an array of styles with the same length as the row
+                bg_color = ""
+                
+                try:
+                    due_date = pd.to_datetime(row["DueDate"])
+                    if pd.notna(due_date):
+                        today = date.today()
+                        # Calculate start of current week (Monday) and end of current week (Sunday)
+                        start_of_this_week = today - pd.Timedelta(days=today.weekday())
+                        end_of_this_week = start_of_this_week + pd.Timedelta(days=6)
+                        
+                        start_of_next_week = end_of_this_week + pd.Timedelta(days=1)
+                        end_of_next_week = start_of_next_week + pd.Timedelta(days=6)
+                        
+                        due_date_date = due_date.date()
+                        
+                        if due_date_date < start_of_this_week:
+                            # Past Due -> Red
+                            bg_color = "background-color: rgba(255, 50, 50, 0.6);"
+                        elif start_of_this_week <= due_date_date <= end_of_this_week:
+                            # This week -> Orange
+                            bg_color = "background-color: rgba(255, 140, 0, 0.8); color: black;"
+                        elif start_of_next_week <= due_date_date <= end_of_next_week:
+                            # Next week -> Yellow
+                            bg_color = "background-color: rgba(255, 220, 0, 0.8); color: black;"
+                except Exception:
+                    pass
+                
+                return [bg_color] * len(row)
+
+            # Apply styler
+            styled_df = df_editor.style.apply(highlight_due_date, axis=1)
+
             # --- RENDER EDITOR ---
             edited_df = st.data_editor(
-                df_editor,
+                styled_df,
                 column_config={
                     "Urgente": st.column_config.CheckboxColumn(
                         "Urgente",
