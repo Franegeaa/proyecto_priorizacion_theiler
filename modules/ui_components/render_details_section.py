@@ -234,13 +234,13 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         
                         if due_date_date < start_of_this_week:
                             # Past Due -> Red
-                            bg_color = "background-color: rgba(255, 50, 50, 0.6);"
+                            bg_color = "background-color: rgba(255, 50, 50, 0.6); font-weight: bold;"
                         elif start_of_this_week <= due_date_date <= end_of_this_week:
                             # This week -> Orange
-                            bg_color = "background-color: rgba(255, 140, 0, 0.8); color: black;"
+                            bg_color = "background-color: rgba(255, 140, 0, 0.8); color: black; font-weight: bold;"
                         elif start_of_next_week <= due_date_date <= end_of_next_week:
                             # Next week -> Yellow
-                            bg_color = "background-color: rgba(255, 220, 0, 0.8); color: black;"
+                            bg_color = "background-color: rgba(255, 220, 0, 0.8); color: black; font-weight: bold;"
                 except Exception:
                     pass
                 
