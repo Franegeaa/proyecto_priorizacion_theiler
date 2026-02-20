@@ -207,14 +207,6 @@ def _cola_troquelada(q):
 
     if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
     q["ManualPriority"] = q["ManualPriority"].fillna(9999).astype(int)
-    
-    # DEBUG: Print priority distribution
-    if (q["ManualPriority"] < 9999).any():
-        print(f"\n=== TROQUELADA QUEUE DEBUG ===")
-        print(f"Tasks with Manual Priority:")
-        prio_tasks = q[q["ManualPriority"] < 9999][["OT_id", "Maquina", "ManualPriority", "CodigoTroquel"]]
-        print(prio_tasks.to_string())
-        print(f"==============================\n")
 
     q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
     grupos = []

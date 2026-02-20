@@ -249,7 +249,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             if maq_locked not in maquinas and maq_locked not in ["TERCERIZADO", "SALTADO", "POOL_DESCARTONADO"]:
                  continue
 
-            mask = (tasks["OT_id"].astype(str) == str(ot)) & (tasks["Proceso"].astype(str) == str(proc))
+            mask = (tasks["OT_id"].astype(str) == str(ot)) & (tasks["Proceso"].astype(str) == str(proc)) & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
             
             if mask.any():
                 tasks.loc[mask, "Maquina"] = maq_locked
@@ -298,7 +298,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 mask_proc = pd.Series([True] * len(tasks), index=tasks.index) 
 
             # Apply
-            mask_final = mask_ots & mask_proc
+            mask_final = mask_ots & mask_proc & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
             
             if mask_final.any():
                 tasks.loc[mask_final, "Maquina"] = maq_target
@@ -314,9 +314,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
 
-    # DEBUG DOWNTIMES
-    print(f"DEBUG: Maquinas activas Troquelado: {manuales + ([auto_name] if auto_name else [])}")
-    print(f"DEBUG: Downtimes en CFG: {len(cfg.get('downtimes', []))}")
     for dt in cfg.get("downtimes", []):
         print(f"  - {dt}")
 
@@ -341,7 +338,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             for m in cap.keys()
         }
 
-        mask_troq = tasks["Proceso"].eq("Troquelado")
+        mask_troq = tasks["Proceso"].eq("Troquelado") & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
         
         # EXCLUDE Manual Assignments logic
         if "ManualAssignment" in tasks.columns:
@@ -487,7 +484,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # Todas las tareas van a un "buzón" común llamado "POOL_DESCARTONADO".
         # Las máquinas tomarán tareas de ahí a medida que se liberen.
         
-        mask_desc = tasks["Proceso"].eq("Descartonado")
+        mask_desc = tasks["Proceso"].eq("Descartonado") & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
         
         # EXCLUDE Manual Assignments logic
         if "ManualAssignment" in tasks.columns:
@@ -785,10 +782,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # Mezclar máquinas
         maquinas_shuffled = list(maquinas)
 
-        # DEBUG SIMULATION ORDER
         sim_order = sorted(maquinas_shuffled, key=_prioridad_dinamica)
-        for m in sim_order: # Log ALL machines
-           dt, _, _ = _prioridad_dinamica(m)
 
         for maquina in sim_order:
             # --- VIRTUAL MACHINE EXECUTION (Infinite Capacity) ---
