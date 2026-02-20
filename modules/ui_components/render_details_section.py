@@ -172,6 +172,58 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             # Merge back into df_full
             df_full = df_full.merge(ot_completion, on="OT_id", how="left")
             
+            # --- INJECT IDLE ROWS (TIEMPO OCIOSO) ---
+            idle_rows = []
+            
+            # Exclude virtual machines from idle calculations
+            real_tasks = df_full[~df_full["Maquina"].isin(["SALTADO", "TERCERIZADO", "POOL_DESCARTONADO"])].copy()
+            
+            for maquina, group in real_tasks.groupby("Maquina"):
+                # Sort Chronologically
+                group = group.sort_values(by="Inicio")
+                
+                prev_fin = None
+                for _, row in group.iterrows():
+                    curr_inicio = row["Inicio"]
+                    if pd.notna(curr_inicio) and pd.notna(prev_fin):
+                        # Convert both to datetime to be safe
+                        inicio_dt = pd.to_datetime(curr_inicio)
+                        fin_dt = pd.to_datetime(prev_fin)
+                        
+                        if inicio_dt > fin_dt:
+                            # Calculate duration in hours
+                            gap_h = (inicio_dt - fin_dt).total_seconds() / 3600.0
+                            
+                            idle_rows.append({
+                                "Maquina": maquina,
+                                "Proceso": "Inactivo",
+                                "OT_id": "---",
+                                "Cliente-articulo": "=== TIEMPO OCIOSO ===",
+                                "Cliente": "N/A",
+                                "Inicio": fin_dt,
+                                "Fin": inicio_dt,
+                                "Duracion_h": gap_h,
+                                "IsSkipped": False, # Required for filter logic
+                                "Eliminar OT": False,
+                                "IsOutsourced": False,
+                                "MateriaPrimaPlanta": False,
+                                "Urgente": False,
+                                "ManualPriority": 9999
+                            })
+                    
+                    # Update prev_fin
+                    if pd.notna(row["Fin"]):
+                        # If a task finishes later, update. 
+                        # We use max in case of overlapping or parallel tasks (unlikely but safe)
+                        if prev_fin is None or pd.to_datetime(row["Fin"]) > pd.to_datetime(prev_fin):
+                            prev_fin = row["Fin"]
+                            
+            if idle_rows:
+                df_idle = pd.DataFrame(idle_rows)
+                df_full = pd.concat([df_full, df_idle], ignore_index=True)
+                # Re-sort everything including the new rows
+                df_full.sort_values(by=["Maquina", "Inicio"], inplace=True)
+            
             # --- FILTERING LOGIC ---
             col_f1, col_f2, col_f3 = st.columns([1, 2, 2])
             
@@ -213,11 +265,16 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
-            # --- COLORING LOGIC BY DUE DATE ---
+            # --- COLORING LOGIC BY DUE DATE & IDLE ---
             from datetime import date
             def highlight_due_date(row):
                 # We need to return an array of styles with the same length as the row
                 bg_color = ""
+                
+                # Check for idle row first
+                if str(row.get("Proceso")) == "Inactivo":
+                    bg_color = "background-color: rgba(135, 206, 250, 0.5); font-style: italic; color: black;"
+                    return [bg_color] * len(row)
                 
                 try:
                     due_date = pd.to_datetime(row["DueDate"])
@@ -321,7 +378,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     if "mp_overrides" not in overrides:
                         overrides["mp_overrides"] = {}
 
-                    rows_prio = edited_df[edited_df["Prioridad Manual"] != 9999]
+                    rows_prio = edited_df[(edited_df["Prioridad Manual"] != 9999) & (edited_df["OT_id"] != "---")]
                     for idx, row in rows_prio.iterrows():
                         ot = str(row["OT_id"])
                         maq = str(row["Maquina"])
@@ -336,7 +393,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                             has_changes = True
 
                     # Remove 9999s explicitly
-                    rows_reset = edited_df[edited_df["Prioridad Manual"] == 9999]
+                    rows_reset = edited_df[(edited_df["Prioridad Manual"] == 9999) & (edited_df["OT_id"] != "---")]
                     for idx, row in rows_reset.iterrows():
                          ot = str(row["OT_id"])
                          maq = str(row["Maquina"])
@@ -347,6 +404,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     
                     for idx, row in edited_df.iterrows():
                         ot = str(row["OT_id"])
+                        if ot == "---":
+                            continue # Ignore dummy rows (Inactivo)
+                            
                         proc = str(row["Proceso"])
                         key_op = (ot, proc)
                         
