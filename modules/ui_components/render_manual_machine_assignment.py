@@ -185,11 +185,25 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                             compatible_machines.append(maq)
                             
                     # 3. Render Assignment UI
+                    all_process_machines = compatible_machines + [m for m, r in rejected_machines]
                                 
-                    if compatible_machines:
-                        st.success(f"✅ {len(compatible_machines)} máquinas compatibles encontradas.")
+                    if all_process_machines:
+                        st.write("---")
                         
-                        target_maq = st.selectbox("Seleccionar Máquina Destino:", compatible_machines)
+                        target_maq = st.selectbox(
+                            "Seleccionar Máquina Destino:", 
+                            options=all_process_machines,
+                            index=0 if compatible_machines else 0, # Muestra primero la que toque en la lista (mejor armar orden)
+                            format_func=lambda x: f"⭐ {x} (Recomendada)" if x in compatible_machines else f"⚠️ {x} (No recomendada)"
+                        )
+                        
+                        # Find warning if any
+                        reason_for_target = next((r for m, r in rejected_machines if m == target_maq), None)
+                        if reason_for_target:
+                            st.warning(f"⚠️ **Advertencia:** {reason_for_target}")
+                            st.info("Aún así, el sistema te permitirá forzar la asignación si así lo deseas y la máquina tomará la tarea.")
+                        else:
+                            st.success("✅ **Máquina 100% compatible y recomendada.**")
                         
                         # Check if already assigned
                         current_assign = None
@@ -199,7 +213,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                                 break
                         
                         if current_assign:
-                            st.warning(f"⚠️ Esta OT ya está asignada manualmente a: **{current_assign}**")
+                            st.info(f"📌 Esta OT ya está asignada manualmente a: **{current_assign}**")
                             if st.button(f"Mover a {target_maq}"):
                                 # Remove from old
                                 st.session_state.manual_assignments[current_assign].remove(ot_id)
@@ -212,20 +226,15 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                                 st.session_state.manual_assignments[target_maq].append(ot_id)
                                 st.rerun()
                         else:
-                            if st.button(f"Asignar a {target_maq}"):
+                            texto_btn = f"Forzar Asignación a {target_maq}" if reason_for_target else f"Asignar a {target_maq}"
+                            if st.button(texto_btn):
                                 if target_maq not in st.session_state.manual_assignments:
                                     st.session_state.manual_assignments[target_maq] = []
                                 st.session_state.manual_assignments[target_maq].append(ot_id)
                                 st.success(f"Asignada correctamente a {target_maq}")
                                 st.rerun()
                     else:
-                        st.error("❌ No se encontraron máquinas compatibles para esta tarea.")
-
-                    # SHOW REJECTED MACHINES ALWAYS
-                    if rejected_machines:
-                        with st.expander(f"Ver {len(rejected_machines)} máquinas no compatibles y razones", expanded=not compatible_machines):
-                            for m, r in rejected_machines:
-                                st.write(f"- **{m}**: {r}")
+                        st.error("❌ No hay máquinas configuradas o activas para este proceso en la lista de permitidas.")
             else:
                 st.info("No hay tareas pendientes de Troquelado/Descartonado.")
         else:
