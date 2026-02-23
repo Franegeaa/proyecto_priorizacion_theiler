@@ -170,6 +170,11 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                                 from modules.schedulers.machines import obtener_descripcion_rango
                                 rango_desc = obtener_descripcion_rango(maq)
                                 reason = f"Medidas {anc}x{lar} fuera de rango. ({rango_desc})"
+                            else:
+                                is_manual = any(k in maq_lower for k in ["troq", "manual"]) and not any(k in maq_lower for k in ["iberica", "duyan", "autom"])
+                                cant = float(task_row.get("CantidadPliegos", 0) or 0)
+                                if is_manual and cant > 2500:
+                                    reason = f"Cantidad de pliegos muy alta ({int(cant)}) para ser procesada en una máquina manual."
                         
                         # If passed logic checks, check hard constraints like MatPrima if needed?
                         # User said "parametros limitantes", usually refers to physical size.
