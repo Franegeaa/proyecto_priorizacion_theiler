@@ -33,6 +33,30 @@ from modules.utils.tiempos_y_setup import (
 # Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
 PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
 
+def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
+    """
+    Returns True if the machine has a scheduled downtime starting within max_days from current_dt.
+    """
+    if "downtimes" not in cfg:
+        return False
+        
+    for dt in cfg["downtimes"]:
+        m_name = dt.get("maquina") or dt.get("Maquina")
+        if not m_name or str(m_name).strip().lower() != str(maquina).strip().lower():
+            continue
+            
+        start_dt = dt.get("start")
+        if start_dt:
+            time_until_start = start_dt - current_dt
+            if timedelta(days=0) <= time_until_start <= timedelta(days=max_days):
+                return True
+            
+            end_dt = dt.get("end")
+            if end_dt and start_dt <= current_dt <= end_dt:
+                return True
+                
+    return False
+
 # =======================================================
 # Programador principal (Versión Combinada)
 # =======================================================
@@ -361,11 +385,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 min_anc = g["PliAnc"].min()
                 min_lar = g["PliLar"].min()
                 bocas = float(g["Bocas"].max()) # Tomamos el maximo de bocas del grupo
+                es_urgente = g["Urgente"].apply(lambda x: es_si(x)).any()
 
-                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas))
+                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente))
             grupos.sort() 
 
-            for _, troq_key, idxs, total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas in grupos:
+            for _, troq_key, idxs, total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente in grupos:
                 candidatas = []
                 
                 # 1. Validar candidatos por TAMAÑO primero
@@ -455,8 +480,15 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     f = agenda_m[m]["fecha"]
                     h = agenda_m[m]["hora"]
                     l = load_h[m]
-                    # print(f"  DEBUG COMPARE {m}: {f} {h} (Load: {l})")
-                    return (f, h, l)
+                    
+                    penalty_days = 0
+                    if es_urgente:
+                        current_dt = datetime.combine(f, h)
+                        if has_imminent_downtime(m, current_dt, cfg):
+                            penalty_days = 30 # Penalización gigante para evitar esta máquina
+                            
+                    f_penalized = f + timedelta(days=penalty_days)
+                    return (f_penalized, h, l)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
                 # print(f"DEBUG CHOICE for group {troq_key} (Size {len(idxs)}): {m_sel}")
@@ -1093,6 +1125,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             best_has_successor = False # Flag for priority
                             best_is_urgent = False
                             current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                            maq_has_imminent_downtime = has_imminent_downtime(maquina, current_agenda_dt, cfg)
 
                             for i, t_cand in enumerate(colas["POOL_DESCARTONADO"]):
                                 # Validar MP
@@ -1129,7 +1162,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     # 3. If both same, prefer original order (DueDate).
                                     
                                     current_prio = int(t_cand.get("ManualPriority", 9999))
-                                    is_urgent = str(t_cand.get("Urgente", "")).lower() == "si"
+                                    is_urgent = es_si(t_cand.get("Urgente"))
+                                    
+                                    if is_urgent and maq_has_imminent_downtime:
+                                         current_prio += 5000
+                                         is_urgent = False
                                     
                                     if best_pool_idx == -1:
                                         best_pool_idx = i
