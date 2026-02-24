@@ -415,10 +415,24 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                             if key_op not in overrides["outsourced_processes"]:
                                 overrides["outsourced_processes"].add(key_op)
                                 has_changes = True
+                                
+                            # NUEVO: Si tercerizamos Troquelado, el Descartonado de la misma OT se terceriza también.
+                            if proc.strip().lower() == "troquelado":
+                                key_desc = (ot, "Descartonado")
+                                if key_desc not in overrides["outsourced_processes"]:
+                                    overrides["outsourced_processes"].add(key_desc)
+                                    has_changes = True
                         else:
                             if key_op in overrides["outsourced_processes"]:
                                 overrides["outsourced_processes"].remove(key_op)
                                 has_changes = True
+                                
+                            # Si se des-terceriza Troquelado, también quitamos Descartonado (opcional, pero consistente)
+                            if proc.strip().lower() == "troquelado":
+                                key_desc = (ot, "Descartonado")
+                                if key_desc in overrides["outsourced_processes"]:
+                                    overrides["outsourced_processes"].remove(key_desc)
+                                    has_changes = True
                                 
                         # Skipped
                         if row["Saltar"]:

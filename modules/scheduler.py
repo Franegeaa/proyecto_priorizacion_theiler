@@ -832,8 +832,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Determine Duration
                         duration_virt = 0.0
                         if maquina == "TERCERIZADO":
-                             # Use estimated duration
-                             duration_virt = float(t_virt.get("Duracion_h", 0.0) or 0.0)
+                             # Usamos 72 hs por defecto para procesos tercerizados
+                             duration_virt = 72.0
+                             if t_virt.get("Proceso", "").strip().lower() == "descartonado":
+                                 duration_virt = 0.0 # El descartonado va incluido en las 72hs del troquelado
                         
                         end_virt = start_virt + timedelta(hours=duration_virt)
                         
