@@ -11,7 +11,7 @@ def _clave_prioridad_maquina(proceso: str, orden: pd.Series):
     pli_lar = orden.get("PliLar")
     if proceso.lower().startswith("impres"): return (marca, colores, pli_anc, pli_lar)
     if proceso == "Troquelado": return (troquel,)
-    if proceso == "Ventana": return (material, pli_anc, pli_lar)
+    if proceso == "Ventana": return (troquel,)
     return tuple()
 
 def _cola_impresora_flexo(q): 

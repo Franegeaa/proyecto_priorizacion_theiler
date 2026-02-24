@@ -12,9 +12,27 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
 
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 
-            opciones = ["(Todas)"] + sorted(schedule["OT_id"].unique().tolist())
-            elegido = st.selectbox("Elegí OT:", opciones)
-            df_show = schedule if elegido == "(Todas)" else schedule[schedule["OT_id"] == elegido]
+            # Obtener nombres de las OTs para el desplegable
+            ot_mapping = schedule.drop_duplicates(subset=["OT_id"])[["OT_id", "Cliente-articulo"]]
+            opciones_format = []
+            for _, row in ot_mapping.iterrows():
+                ot_id = row["OT_id"]
+                nombre = row["Cliente-articulo"]
+                nombre_str = str(nombre).strip() if pd.notna(nombre) else ""
+                if not nombre_str:
+                    nombre_str = "Sin Nombre"
+                opciones_format.append(f"{ot_id} | {nombre_str}")
+                
+            opciones = ["(Todas)"] + sorted(opciones_format)
+            elegido_str = st.selectbox("Elegí OT:", opciones)
+            
+            if elegido_str == "(Todas)":
+                elegido = "(Todas)"
+                df_show = schedule
+            else:
+                elegido = elegido_str.split(" | ")[0]
+                df_show = schedule[schedule["OT_id"] == elegido]
+                
             df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
             
             # --- Sanitize for Streamlit/Arrow ---
@@ -305,8 +323,23 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
 
             # Apply styler and general formatting
             styled_df = df_editor.style.apply(highlight_due_date, axis=1)
+            
+            format_dict = {}
             if "CantidadPliegos" in df_editor.columns:
-                styled_df = styled_df.format({"CantidadPliegos": "{:.0f}"})
+                format_dict["CantidadPliegos"] = "{:.0f}"
+            if "PliAnc" in df_editor.columns:
+                # Convert to numeric if not already, to prevent formatting errors on strings
+                df_editor["PliAnc"] = pd.to_numeric(df_editor["PliAnc"], errors="coerce")
+                format_dict["PliAnc"] = "{:.2f}"
+            if "PliLar" in df_editor.columns:
+                df_editor["PliLar"] = pd.to_numeric(df_editor["PliLar"], errors="coerce")
+                format_dict["PliLar"] = "{:.2f}"
+            if "Duracion_h" in df_editor.columns:
+                df_editor["Duracion_h"] = pd.to_numeric(df_editor["Duracion_h"], errors="coerce")
+                format_dict["Duracion_h"] = "{:.2f}"
+                
+            if format_dict:
+                styled_df = styled_df.format(format_dict, na_rep="")
 
             # --- RENDER EDITOR ---
             edited_df = st.data_editor(
@@ -354,9 +387,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     "Proceso": None,
                     "Colores": st.column_config.TextColumn(disabled=True),
                     "CodigoTroquel": st.column_config.TextColumn(disabled=True),
-                    "PliAnc": st.column_config.TextColumn("Ancho", disabled=True),
-                    "PliLar": st.column_config.TextColumn("Largo", disabled=True),
-                    "Duracion_h": st.column_config.NumberColumn("Duración (hs)", disabled=True),
+                    "PliAnc": st.column_config.NumberColumn("Ancho", disabled=True, format="%.2f"),
+                    "PliLar": st.column_config.NumberColumn("Largo", disabled=True, format="%.2f"),
+                    "Duracion_h": st.column_config.NumberColumn("Duración (hs)", disabled=True, format="%.2f"),
                     "DueDate": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True), 
                 },
                 use_container_width=True,

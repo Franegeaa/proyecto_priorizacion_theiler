@@ -86,17 +86,24 @@ def usa_setup_menor(prev, curr, proceso):
             return True
 
     # ---------------------------------------------------------
-    # 3. PEGADO (Tipo + Material)
+    # 3. PEGADO (Tipo + Material) O VENTANA (Troquel)
     # ---------------------------------------------------------
-    if "peg" in proceso_lower:
-        tipo_prev = str(prev.get("PegadoTipo", "")).strip().lower()
-        tipo_curr = str(curr.get("PegadoTipo", "")).strip().lower()
-        
-        mat_prev = str(prev.get("MateriaPrima", "")).strip().lower()
-        mat_curr = str(curr.get("MateriaPrima", "")).strip().lower()
+    if "peg" in proceso_lower or "ventana" in proceso_lower:
+        if "ventana" in proceso_lower:
+            # Ventana agrupa exclusivamente por código de troquel
+            t_prev = str(prev.get("CodigoTroquel", "")).strip().lower()
+            t_curr = str(curr.get("CodigoTroquel", "")).strip().lower()
+            if t_prev and t_curr and t_prev == t_curr:
+                return True
+        else:
+            tipo_prev = str(prev.get("PegadoTipo", "")).strip().lower()
+            tipo_curr = str(curr.get("PegadoTipo", "")).strip().lower()
+            
+            mat_prev = str(prev.get("MateriaPrima", "")).strip().lower()
+            mat_curr = str(curr.get("MateriaPrima", "")).strip().lower()
 
-        if (tipo_prev == tipo_curr) and (mat_prev == mat_curr) and tipo_prev:
-            return True
+            if (tipo_prev == tipo_curr) and (mat_prev == mat_curr) and tipo_prev:
+                return True
 
 
     # ---------------------------------------------------------
