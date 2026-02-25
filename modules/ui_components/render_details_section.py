@@ -416,12 +416,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         ot = str(row["OT_id"])
                         maq = str(row["Maquina"])
                         
-                        # Normalize machine name to handle aliases (Manual 1 -> Troq Nº 2 Ema, etc)
-                        from modules.utils.config_loader import normalize_machine_name
-                        maq_normalized = normalize_machine_name(maq)
-                        
-                        if maq_normalized not in ["TERCERIZADO", "SALTADO"]:
-                            key = (ot, maq_normalized)
+                        if maq not in ["TERCERIZADO", "SALTADO"]:
+                            key = (ot, maq)
                             overrides["manual_priorities"][key] = int(row["Prioridad Manual"])
                             has_changes = True
 
@@ -433,6 +429,13 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                          key = (ot, maq)
                          if key in overrides["manual_priorities"]:
                              del overrides["manual_priorities"][key]
+                             has_changes = True
+                             
+                         # Also try to delete normalized just in case there's old corrupted data
+                         from modules.utils.config_loader import normalize_machine_name
+                         norm_key = (ot, normalize_machine_name(maq))
+                         if norm_key in overrides["manual_priorities"]:
+                             del overrides["manual_priorities"][norm_key]
                              has_changes = True
                     
                     for idx, row in edited_df.iterrows():

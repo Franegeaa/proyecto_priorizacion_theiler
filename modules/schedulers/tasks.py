@@ -114,6 +114,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 if prio_ot == str_ot:
                     # Check if this machine handles this process
                     maq_row = cfg["maquinas"][cfg["maquinas"]["Maquina"] == prio_maq]
+                    # En la BD la maquina se guarda con su nombre exacto, ej: 'Troq Nº 1 Gus'
                     if not maq_row.empty:
                         maq_proceso = maq_row["Proceso"].iloc[0]
                         if str_proc.lower() in maq_proceso.lower() or maq_proceso.lower() in str_proc.lower():
@@ -123,8 +124,10 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             # Use priority machine if found, otherwise auto-assign
             if maquina_from_priority:
                 maquina = maquina_from_priority
+                has_manual_prio_machine = True
             else:
                 maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
+                has_manual_prio_machine = False
             
             # --- Check Outsourced/Skipped/Priority ---
             str_maq = str(maquina)
@@ -228,7 +231,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "ManualPriority": manual_prio,
                 "IsOutsourced": is_outsourced,
                 "IsSkipped": is_skipped,
-                "ManualAssignment": (lock_key in locked_assignments), # Force stickiness if locked
+                "ManualAssignment": (lock_key in locked_assignments) or has_manual_prio_machine, # Force stickiness if locked or explicitly prioritized
                 "HistoryLocked": (lock_key in locked_assignments) # For UI/Debugging
             })  
 
