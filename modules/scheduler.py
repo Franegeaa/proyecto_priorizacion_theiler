@@ -1243,6 +1243,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             for m_target in targets_robo:
                                 if not colas.get(m_target): continue
                                 for i, t_cand in enumerate(colas[m_target]):
+                                    if t_cand.get("ManualAssignment"): continue
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
 
                                     cant = float(t_cand.get("CantidadPliegos", 0) or 0)
@@ -1266,6 +1267,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             # B: Robar a Auto
                             if auto_name and colas.get(auto_name):
                                 for i, t_cand in enumerate(colas[auto_name]):
+                                    if t_cand.get("ManualAssignment"): continue
                                     if t_cand["Proceso"].strip() != "Troquelado": continue
                                     
                                     # REGLA: Manual solo roba si cantidad <= 3000
@@ -1291,6 +1293,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 for vecina in vecinas:
                                     if not colas.get(vecina): continue
                                     for i, t_cand in enumerate(colas[vecina]):
+                                        if t_cand.get("ManualAssignment"): continue
                                         if t_cand["Proceso"].strip() != "Troquelado": continue
                                         
                                         # Validar medidas para ESTA manual
@@ -1334,6 +1337,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 for m_manual in manuales:
                                     if not colas.get(m_manual): continue
                                     for i, t_cand in enumerate(colas[m_manual]):
+                                        if t_cand.get("ManualAssignment"): continue
                                         if t_cand["Proceso"].strip() != "Troquelado": continue
                                     
                                         anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
@@ -1355,6 +1359,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             for vecina in vecinas_desc:
                                 if not colas.get(vecina): continue
                                 for i, t_cand in enumerate(colas[vecina]):
+                                    if t_cand.get("ManualAssignment"): continue
                                     if "descartonad" not in t_cand["Proceso"].lower(): continue
                                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")

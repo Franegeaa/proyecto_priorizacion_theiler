@@ -411,13 +411,38 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     if "mp_overrides" not in overrides:
                         overrides["mp_overrides"] = {}
 
+                    from modules.utils.config_loader import normalize_machine_name
+                    
+                    # Create a normalized mapping to avoid ° vs º lookup failures
+                    maq_to_proc_norm = {}
+                    for m, p in zip(cfg["maquinas"]["Maquina"], cfg["maquinas"]["Proceso"]):
+                        maq_to_proc_norm[normalize_machine_name(m)] = p
+                    
                     rows_prio = edited_df[(edited_df["Prioridad Manual"] != 9999) & (edited_df["OT_id"] != "---")]
                     for idx, row in rows_prio.iterrows():
                         ot = str(row["OT_id"])
                         maq = str(row["Maquina"])
                         
-                        if maq not in ["TERCERIZADO", "SALTADO"]:
-                            key = (ot, maq)
+                        maq_normalized = normalize_machine_name(maq)
+                        
+                        if maq_normalized not in ["TERCERIZADO", "SALTADO"]:
+                            # First, remove any existing priorities for this OT that correspond to the SAME process type
+                            # This prevents stale priorities from competing with the new one
+                            current_proc = maq_to_proc_norm.get(maq_normalized, "")
+                            if current_proc:
+                                stale_keys = []
+                                for (p_ot, p_maq) in list(overrides["manual_priorities"].keys()):
+                                    if p_ot == ot and normalize_machine_name(p_maq) != maq_normalized:
+                                        # Check if the other machine does the same process
+                                        other_proc = maq_to_proc_norm.get(normalize_machine_name(p_maq), "")
+                                        if other_proc == current_proc or (current_proc in other_proc and len(current_proc)>3):
+                                            stale_keys.append((p_ot, p_maq))
+                                for sk in stale_keys:
+                                    del overrides["manual_priorities"][sk]
+                                    has_changes = True
+
+                            # Set the new priority
+                            key = (ot, maq_normalized)
                             overrides["manual_priorities"][key] = int(row["Prioridad Manual"])
                             has_changes = True
 
@@ -426,16 +451,19 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     for idx, row in rows_reset.iterrows():
                          ot = str(row["OT_id"])
                          maq = str(row["Maquina"])
-                         key = (ot, maq)
+                         
+                         from modules.utils.config_loader import normalize_machine_name
+                         maq_normalized = normalize_machine_name(maq)
+                         
+                         key = (ot, maq_normalized)
                          if key in overrides["manual_priorities"]:
                              del overrides["manual_priorities"][key]
                              has_changes = True
                              
-                         # Also try to delete normalized just in case there's old corrupted data
-                         from modules.utils.config_loader import normalize_machine_name
-                         norm_key = (ot, normalize_machine_name(maq))
-                         if norm_key in overrides["manual_priorities"]:
-                             del overrides["manual_priorities"][norm_key]
+                         # Also try to delete original exact string just in case there's old corrupted data
+                         exact_key = (ot, maq)
+                         if exact_key in overrides["manual_priorities"]:
+                             del overrides["manual_priorities"][exact_key]
                              has_changes = True
                     
                     for idx, row in edited_df.iterrows():

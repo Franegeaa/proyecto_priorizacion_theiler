@@ -110,16 +110,19 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             
             # Look for any priority entry for this OT
             maquina_from_priority = None
+            from modules.utils.config_loader import normalize_machine_name
             for (prio_ot, prio_maq), prio_val in priorities.items():
                 if prio_ot == str_ot:
-                    # Check if this machine handles this process
-                    maq_row = cfg["maquinas"][cfg["maquinas"]["Maquina"] == prio_maq]
-                    # En la BD la maquina se guarda con su nombre exacto, ej: 'Troq Nº 1 Gus'
-                    if not maq_row.empty:
-                        maq_proceso = maq_row["Proceso"].iloc[0]
-                        if str_proc.lower() in maq_proceso.lower() or maq_proceso.lower() in str_proc.lower():
-                            maquina_from_priority = prio_maq
-                            break
+                    # Check if this machine handles this process (prio_maq is normalized to avoid º vs ° issues)
+                    for _, row_m in cfg["maquinas"].iterrows():
+                        m_raw = row_m["Maquina"]
+                        if normalize_machine_name(m_raw) == normalize_machine_name(prio_maq):
+                            maq_proceso = row_m["Proceso"]
+                            if str_proc.lower() in maq_proceso.lower() or maq_proceso.lower() in str_proc.lower():
+                                maquina_from_priority = m_raw
+                                break
+                    if maquina_from_priority:
+                        break
             
             # Use priority machine if found, otherwise auto-assign
             if maquina_from_priority:
@@ -171,19 +174,9 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             
             if lock_key in locked_assignments:
                 locked_machine = locked_assignments[lock_key]
-                # Force assignment
-                maquina = locked_machine
-                # Mark as Manual Assignment so it sticks
-                # We need to make sure we don't accidentally prioritize it over dependencies,
-                # but we DO want to stick to the machine.
-                # Setting ManualAssignment in the returned dict is simpler, 
-                # but here we set local variables first.
-                
-                # Note: We should probably flag it so we know it was a History Lock
-                # But reusing 'ManualAssignment' logic (later in scheduler.py) handles the sticking.
-                # However, _expandir_tareas doesn't set "ManualAssignment" column directly, 
-                # that happens in scheduler.py. 
-                # WE NEED TO ADD "ManualAssignment" field to the task dict below.
+                # Force assignment only if not explicitly prioritized manually
+                if not has_manual_prio_machine:
+                    maquina = locked_machine
                 pass 
 
 
