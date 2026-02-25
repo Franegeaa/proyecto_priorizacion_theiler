@@ -13,3 +13,4 @@ from .render_capacity_analysis import render_capacity_analysis
 from .render_save_section import render_save_section
 from .render_delayed_orders_section import render_delayed_orders_section
 from .render_daily_details_section import render_daily_details_section
+from .render_metrics_section import render_metrics_section

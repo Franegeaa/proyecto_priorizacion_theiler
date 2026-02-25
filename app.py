@@ -20,7 +20,8 @@ from modules.ui_components import (
     render_manual_machine_assignment,
     render_capacity_analysis,
     render_save_section,
-    render_delayed_orders_section
+    render_delayed_orders_section,
+    render_metrics_section
 )
 
 from modules.utils.visualizations import render_gantt_chart
@@ -195,16 +196,8 @@ if archivo is not None:
     
     # Updates cfg in place (and saves to disk) 
 
-    # 9. Metrics
-    col1, col2, col3, col4 = st.columns(4)
-    total_ots = resumen_ot["OT_id"].nunique() if not resumen_ot.empty else 0
-    atrasadas = int(resumen_ot["EnRiesgo"].sum()) if not resumen_ot.empty else 0
-    horas_extra_total = float(carga_md["HorasExtra"].sum()) if not carga_md.empty else 0.0
-
-    col1.metric("Órdenes planificadas", total_ots)
-    col2.metric("Órdenes atrasadas", atrasadas)
-    col3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
-    col4.metric("Jornada (h/día)", f"{horas_por_dia(cfg):.1f}")
+    # 9. Metrics Dashboard
+    render_metrics_section(schedule, resumen_ot, carga_md, cfg)
     
     # 10. Capacity Analysis
     render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md)
