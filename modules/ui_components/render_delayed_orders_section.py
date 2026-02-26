@@ -38,6 +38,45 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
         "DueDate": "Fecha Prometida"
     })
     
+    # --- CALCULAR PROCESOS QUE MÁS TARDAN PARA CADA ORDEN ATRASADA ---
+    longest_procs = []
+    longest_waits = []
+    
+    for ot_id in display_df["OT_id"]:
+        tasks = schedule[schedule["OT_id"] == ot_id].copy()
+        if tasks.empty:
+            longest_procs.append("N/A")
+            longest_waits.append("N/A")
+            continue
+            
+        # 1. Proceso más largo (por duración de ejecución)
+        max_dur_idx = tasks["Duracion_h"].idxmax()
+        worst_proc_dur = tasks.loc[max_dur_idx, "Proceso"]
+        worst_dur = tasks.loc[max_dur_idx, "Duracion_h"]
+        longest_procs.append(f"{worst_proc_dur} ({worst_dur:.1f}h)")
+        
+        # 2. Proceso con mayor espera previa
+        tasks = tasks.sort_values("Inicio")
+        prev_end = None
+        max_wait = 0.0
+        worst_proc_wait = "N/A"
+        
+        for i, row in tasks.iterrows():
+            if prev_end:
+                wait_h = calculate_business_hours(prev_end, row["Inicio"], cfg, machine_name=row["Maquina"])
+                if wait_h > max_wait:
+                    max_wait = wait_h
+                    worst_proc_wait = row["Proceso"]
+            prev_end = row["Fin"]
+            
+        if max_wait > 0.1:
+            longest_waits.append(f"{worst_proc_wait} ({max_wait:.1f}h)")
+        else:
+            longest_waits.append("-")
+            
+    display_df["Proceso Más Largo"] = longest_procs
+    display_df["Mayor Espera Previa"] = longest_waits
+    
     # Sort by amount of delay (descending)
     display_df = display_df.sort_values("Días de Atraso", ascending=False)
     
@@ -49,6 +88,8 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
             "Fecha Prometida": st.column_config.DatetimeColumn(format="D/M HH:mm"),
             "Fecha Estimada Entrega": st.column_config.DatetimeColumn(format="D/M HH:mm"),
             "Días de Atraso": st.column_config.NumberColumn(format="%.1f d"),
+            "Proceso Más Largo": st.column_config.TextColumn("Proceso Más Largo"),
+            "Mayor Espera Previa": st.column_config.TextColumn("Mayor Espera Previa"),
         },
         use_container_width=True,
         hide_index=True,
