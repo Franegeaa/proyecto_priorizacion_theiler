@@ -20,7 +20,8 @@ from modules.ui_components import (
     render_manual_machine_assignment,
     render_capacity_analysis,
     render_save_section,
-    render_delayed_orders_section
+    render_delayed_orders_section,
+    render_daily_schedule_view
 )
 
 from modules.utils.visualizations import render_gantt_chart
@@ -192,6 +193,9 @@ if archivo is not None:
 
     # 12. Daily Details Section
     render_daily_details_section(schedule)
+    
+    # 12.5. Daily Schedule View (Calendar format)
+    render_daily_schedule_view(schedule, cfg)
     
     # Updates cfg in place (and saves to disk) 
 
