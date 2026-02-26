@@ -196,7 +196,7 @@ if archivo is not None:
     
     # 12.5. Daily Schedule View (Calendar format)
     # with st.expander("🗓️ Ver Calendario de Tareas", expanded=False):
-    #     render_daily_schedule_view(schedule, cfg)
+    render_daily_schedule_view(schedule, cfg)
     
     # Updates cfg in place (and saves to disk) 
 
