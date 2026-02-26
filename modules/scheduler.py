@@ -79,6 +79,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     tasks = _expandir_tareas(df_ordenes, cfg)
 
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    
+    # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE ---
+    # Toda orden que sea de "Cartonaje" se elimina completamente del plan
+    if "Cliente" in tasks.columns:
+        tasks = tasks[~tasks["Cliente"].astype(str).str.lower().str.contains("cartonaje", na=False)]
+        
+    if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # 1.0b GESTIONAR PROCESOS SALTADOS (IsSkipped)
     # NO eliminamos las tareas, simplemente las asignamos a una máquina virtual "SALTADO"
@@ -987,6 +994,17 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     es_setup = False
                     if ultima_tarea:
                          es_setup = usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", ""))
+                         
+                    # --- RESTRICCIÓN DE SALTO POR SETUP (TROQUELADO) ---
+                    # Si es una máquina de preparación (ej: Troquelado) y la tarea no es urgente/prioritaria,
+                    # no permitimos que un "es_setup = True" haga saltar la tarea desde muy atrás en la cola
+                    # porque rompe el orden lógico de los grupos (ej: mete una orden de 1000 en el medio de un hueco).
+                    if es_setup and is_prep_machine:
+                        prio_man_setup = int(t_cand.get("ManualPriority", 9999))
+                        if prio_man_setup >= 9000 and i > 5:
+                            # Si está a más de 5 posiciones de distancia, ignoramos la ventaja del setup
+                            # para que respete su turno/grupo original.
+                            es_setup = False
 
                     if "barniz" in maquina.lower() and i < 5:
                          log_debug(f"Cand[{i}]: {t_cand.get('Cliente')} (Due: {t_cand.get('DueDate')}) - Avail: {available_at} - SetupMenor: {es_setup}")
@@ -998,6 +1016,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         if is_prep_machine:
                             score = get_downstream_presence_score(t_cand, colas, None, maquina, last_tasks_map=ultimo_en_maquina)
                             
+                            if es_setup:
+                                 score += 10 # Bonus by setup for tie-breaking ready tasks
+                                 
                             # Decision Rule: Strictly better score wins
                             if score > best_group_score:
                                 best_group_score = score
