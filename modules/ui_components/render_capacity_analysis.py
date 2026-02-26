@@ -173,7 +173,14 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
             df_disp = pd.DataFrame(data_bottleneck)
             
             if not df_disp.empty:
-                df_chart = df_disp.sort_values("Horas Necesarias", ascending=False)
+                # Ordenar máquinas por proceso estándar
+                orden_procesos = {p: i for i, p in enumerate(cfg.get("orden_std", []))}
+                maq_to_proc = dict(zip(cfg["maquinas"]["Maquina"], cfg["maquinas"]["Proceso"]))
+                
+                df_disp["OrdenMaquina"] = df_disp["Maquina"].map(
+                    lambda m: orden_procesos.get(maq_to_proc.get(m, ""), 999)
+                )
+                df_chart = df_disp.sort_values(["OrdenMaquina", "Maquina"])
                 
                 # Transformar a formato largo
                 df_long = df_chart.melt(id_vars=["Maquina", "Balance", "Fecha Critica", "Dias Habiles", "Capacidad Total"], 
@@ -191,6 +198,7 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                     color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#636EFA"},
                     hover_data=["Balance", "Capacidad Total", "Dias Habiles", "Fecha Critica"]
                 )
+                fig_carga.update_xaxes(categoryorder='array', categoryarray=df_chart['Maquina'].tolist())
                 fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
                 fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
                 st.plotly_chart(fig_carga, use_container_width=True)
@@ -372,7 +380,15 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
             df_temp = pd.DataFrame(data_temporal)
             
             if not df_temp.empty:
-                df_temp = df_temp.sort_values("Horas Necesarias", ascending=False)
+                # Ordenar máquinas por proceso estándar
+                orden_procesos = {p: i for i, p in enumerate(cfg.get("orden_std", []))}
+                maq_to_proc = dict(zip(cfg["maquinas"]["Maquina"], cfg["maquinas"]["Proceso"]))
+                
+                df_temp["OrdenMaquina"] = df_temp["Maquina"].map(
+                    lambda m: orden_procesos.get(maq_to_proc.get(m, ""), 999)
+                )
+                df_temp = df_temp.sort_values(["OrdenMaquina", "Maquina"])
+                
                 df_long_t = df_temp.melt(id_vars=["Maquina", "Balance", "Dias Habiles"], 
                                         value_vars=["Horas Necesarias", "Horas Disponibles"], 
                                         var_name="Tipo", value_name="Horas")
@@ -388,6 +404,7 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                     color_discrete_map={"Horas Necesarias": "#EF553B", "Horas Disponibles": "#00CC96"},
                     hover_data=["Balance", "Dias Habiles"]
                 )
+                fig_temp.update_xaxes(categoryorder='array', categoryarray=df_temp['Maquina'].tolist())
                 fig_temp.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
                 fig_temp.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
                 st.plotly_chart(fig_temp, use_container_width=True)
