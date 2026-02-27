@@ -383,26 +383,18 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             
             grupos = [] 
             for troq_key, g in troq_df.groupby("_troq_key", dropna=False):
-                # Sub-agrupar por tamaño para no arrastrar órdenes chicas a una automática
-                # si comparten troquel con una grande.
-                # Regla: > 2500 van juntas, <= 2500 van juntas.
-                g_grandes = g[g["CantidadPliegos"] > 2500]
-                g_chicas = g[g["CantidadPliegos"] <= 2500]
+                due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
+                total_pliegos = float(g["CantidadPliegos"].sum())
                 
-                for sub_g in [g_grandes, g_chicas]:
-                    if sub_g.empty: continue
-                    due_min = pd.to_datetime(sub_g["DueDate"], errors="coerce").min() or pd.Timestamp.max
-                    total_pliegos = float(sub_g["CantidadPliegos"].sum())
-                    
-                    # Datos para validación de medidas
-                    max_anc = sub_g["PliAnc"].max()
-                    max_lar = sub_g["PliLar"].max()
-                    min_anc = sub_g["PliAnc"].min()
-                    min_lar = sub_g["PliLar"].min()
-                    bocas = float(sub_g["Bocas"].max()) # Tomamos el maximo de bocas del grupo
-                    es_urgente = sub_g["Urgente"].apply(lambda x: es_si(x)).any()
-    
-                    grupos.append((due_min, troq_key, sub_g.index.tolist(), total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente))
+                # Datos para validación de medidas
+                max_anc = g["PliAnc"].max()
+                max_lar = g["PliLar"].max()
+                min_anc = g["PliAnc"].min()
+                min_lar = g["PliLar"].min()
+                bocas = float(g["Bocas"].max()) # Tomamos el maximo de bocas del grupo
+                es_urgente = g["Urgente"].apply(lambda x: es_si(x)).any()
+
+                grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente))
             grupos.sort() 
 
             for _, troq_key, idxs, total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente in grupos:
@@ -931,20 +923,15 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 # For others, we assume FIFO (break on first) or simple Logic.
                 
                 # VARS FOR GROUPING PRIORITY
-                is_grouping_machine = "guillotin" in maquina.lower() or "bobina" in maquina.lower() or "corte" in maquina.lower() or "troquel" in maquina.lower() or "duyan" in maquina.lower() or "iberica" in maquina.lower() or "manual" in maquina.lower()
+                is_prep_machine = "guillotin" in maquina.lower() or "bobina" in maquina.lower() or "corte" in maquina.lower()
                 best_group_score = -1
                 best_group_idx = -1
                 
-                scan_limit = 50 if is_grouping_machine else 999999
-                failed_groups = set()
+                scan_limit = 50 if is_prep_machine else 999999
                 
                 for i, t_cand in enumerate(colas[maquina]):
-                    if is_grouping_machine and i >= scan_limit: 
-                        break # Stop scanning to avoid perf hit
-
-                    troq_cand = str(t_cand.get("CodigoTroquel", "")).strip().lower()
-                    if is_grouping_machine and troq_cand and (troq_cand in failed_groups):
-                        continue
+                    if is_prep_machine and i >= scan_limit: 
+                        break # Stop scanning for prep machines to avoid perf hit
 
                     mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
                     mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
@@ -964,22 +951,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     
                     if not runnable: 
                         # --- SOLUCION NATIVOS / BLOQUEO POR GRUPO ---
-                        # If this is a grouping machine and the current task is not runnable,
-                        # and it's not the "anchor" (first in group, which is largest CantidadPliegos),
-                        # then we should not allow smaller tasks from the same group to gap-fill.
-                        if is_grouping_machine and troq_cand and i > 0:
-                            # Check if the first task in the queue (the anchor) is from the same group
-                            anchor_task = colas[maquina][0]
-                            anchor_troq_key = str(anchor_task.get("CodigoTroquel", "")).strip().lower()
-                            if anchor_troq_key == troq_cand:
-                                # If the anchor is not runnable, then no other task from this group should run.
-                                # This effectively blocks gap-filling for smaller tasks in the same group
-                                # if the anchor (largest quantity) isn't ready.
-                                failed_groups.add(troq_cand) # Mark the group as failed for this cycle
-                                continue # Skip this task and any other from the same group
-                        
                         if ultima_tarea and usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", "")):
-                            if not is_grouping_machine: 
+                            if not is_prep_machine: 
                                 idx_cand = -1
                                 mejor_candidato_futuro = None
                                 mejor_candidato_setup = None
@@ -1026,7 +999,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     # Si es una máquina de preparación (ej: Troquelado) y la tarea no es urgente/prioritaria,
                     # no permitimos que un "es_setup = True" haga saltar la tarea desde muy atrás en la cola
                     # porque rompe el orden lógico de los grupos (ej: mete una orden de 1000 en el medio de un hueco).
-                    if es_setup and is_grouping_machine:
+                    if es_setup and is_prep_machine:
                         prio_man_setup = int(t_cand.get("ManualPriority", 9999))
                         if prio_man_setup >= 9000 and i > 5:
                             # Si está a más de 5 posiciones de distancia, ignoramos la ventaja del setup
@@ -1039,12 +1012,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     # Si está lista YA (o antes), la tomamos...
                     is_ready_now = not available_at or available_at <= current_agenda_dt
                     
-                    if not is_ready_now or not runnable:
-                        if is_grouping_machine and troq_cand:
-                            failed_groups.add(troq_cand)
-                            
                     if is_ready_now:
-                        if is_grouping_machine:
+                        if is_prep_machine:
                             score = get_downstream_presence_score(t_cand, colas, None, maquina, last_tasks_map=ultimo_en_maquina)
                             
                             if es_setup:
@@ -1087,7 +1056,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 # END SEARCH LOOP
                 
                 # For Prep Machines, apply the Best Group Selection
-                if is_grouping_machine and best_group_idx != -1:
+                if is_prep_machine and best_group_idx != -1:
                     idx_cand = best_group_idx
 
                 
@@ -1385,24 +1354,24 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         #                 tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
                             
                             # Z.2: Robar a Manuales
-                            # if not tarea_encontrada:
-                            #     for m_manual in manuales:
-                            #         if not colas.get(m_manual): continue
-                            #         for i, t_cand in enumerate(colas[m_manual]):
-                            #             if t_cand.get("ManualAssignment"): continue
-                            #             if t_cand["Proceso"].strip() != "Troquelado": continue
+                            if not tarea_encontrada:
+                                for m_manual in manuales:
+                                    if not colas.get(m_manual): continue
+                                    for i, t_cand in enumerate(colas[m_manual]):
+                                        if t_cand.get("ManualAssignment"): continue
+                                        if t_cand["Proceso"].strip() != "Troquelado": continue
                                     
-                            #             anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                            #             if not validar_medidas_troquel(maquina, anc, lar): continue
+                                        anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                        if not validar_medidas_troquel(maquina, anc, lar): continue
 
-                            #             mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                            #             mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                            #             if not mp_ok: continue
+                                        mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                        if not mp_ok: continue
                                         
-                            #             runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                            #             if runnable and (not available_at or available_at <= current_agenda_dt):
-                            #                 tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
-                            #         if tarea_encontrada: break
+                                        runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                        if runnable and (not available_at or available_at <= current_agenda_dt):
+                                            tarea_encontrada = t_cand; fuente_maquina = m_manual; idx_robado = i; break
+                                    if tarea_encontrada: break
 
                         # D: Robo entre Descartonadoras
                         # Tampoco roban si son las restringidas
