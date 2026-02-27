@@ -71,7 +71,8 @@ def validar_medidas_troquel(maquina, anc, lar):
     if "autom" in m or "duyan" in m:
         # Min 38x38 (Ambos lados deben ser >= 38)
         # Como es minimo, ambos lados deben superar 38, asi que da igual la rotación si min(pliego) >= 38
-        return pliego_min >= 38
+        mq_min, mq_max = 36, 40
+        return pliego_min >= mq_min and pliego_max >= mq_max
     
     # Manuales: Maximos definidos (Ancho y Largo)
     
@@ -130,7 +131,7 @@ def obtener_descripcion_rango(maquina):
     m = str(maquina).lower().strip()
     
     if "autom" in m or "duyan" in m:
-         return "Min: 38x38 cm"
+         return "Min: 36x40 cm"
     
     if "manual 1" in m or "manual1" in m or "ema" in m:
         return "Max: 80x105 cm"

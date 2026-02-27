@@ -88,22 +88,25 @@ def normalize_machine_name(machine_name):
     """
     Normaliza nombres de máquina para que aliases apunten al nombre canónico.
     Útil para prioridades manuales donde el usuario puede usar diferentes nombres.
+    También unificamos "°" (grado) y "º" (ordinal) que suelen confundirse.
     """
     if not machine_name:
         return machine_name
+        
+    machine_name_std = machine_name.replace("°", "º")
     
     # Try exact match first
-    if machine_name in ALIAS_MAP:
-        return ALIAS_MAP[machine_name]
+    if machine_name_std in ALIAS_MAP:
+        return ALIAS_MAP[machine_name_std]
     
     # Try case-insensitive match
-    machine_lower = machine_name.lower().strip()
+    machine_lower = machine_name_std.lower().strip()
     for alias, canonical in ALIAS_MAP.items():
         if alias.lower().strip() == machine_lower:
             return canonical
     
     # Return original if no match
-    return machine_name
+    return machine_name_std
 
 def horas_por_dia(cfg):
     j = cfg["jornada"]
