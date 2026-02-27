@@ -95,9 +95,8 @@ def render_overtime_section(maquinas_activas, fecha_inicio_plan, persistence=Non
                             )
                             st.caption(f"{dia_label}")
                             
-                            # Update state if changed
-                            if new_horas != val:
-                                st.session_state.overtime_config[maq][fecha_obj] = new_horas
+                            # Always update state (fixes bug where default 2.0 was never written)
+                            st.session_state.overtime_config[maq][fecha_obj] = new_horas
 
                             
                             # Cleanup: If hours became 0 but user keeps day selected? 
@@ -119,6 +118,44 @@ def render_overtime_section(maquinas_activas, fecha_inicio_plan, persistence=Non
         if st.button("💾 Guardar Horas Extras"):
             save_changes()
             st.success("Configuración de horas extras guardada.")
+            st.rerun()
+
+        # --- Mostrar configuración guardada en la BD ---
+        saved_config = st.session_state.overtime_config
+        has_saved = any(
+            d_dict and any(h > 0 for h in d_dict.values())
+            for d_dict in saved_config.values()
+        )
+        
+        if has_saved:
+            st.markdown("##### 📋 Configuración Actual (cargada de BD)")
+            
+            # Build display rows
+            rows_display = []
+            for maq_name, dates_dict in sorted(saved_config.items()):
+                for d_obj, hours in sorted(dates_dict.items()):
+                    if hours > 0:
+                        d_str = d_obj.strftime("%A %d/%m") if hasattr(d_obj, "strftime") else str(d_obj)
+                        rows_display.append({
+                            "Máquina": maq_name,
+                            "Día": d_str,
+                            "Horas Extra": hours
+                        })
+            
+            if rows_display:
+                import pandas as pd
+                st.dataframe(
+                    pd.DataFrame(rows_display),
+                    hide_index=True,
+                    use_container_width=True
+                )
+            
+            if st.button("🗑️ Limpiar TODAS las horas extras guardadas", type="secondary"):
+                st.session_state.overtime_config = {}
+                if persistence and persistence.connected:
+                    persistence.save_overtime({})
+                st.success("Se eliminaron todas las horas extras.")
+                st.rerun()
 
 
     # Filter out empty entries for return
