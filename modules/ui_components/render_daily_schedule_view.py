@@ -60,7 +60,9 @@ def render_daily_schedule_view(schedule, cfg):
                         "ot": str(row['OT_id']),
                         "maquina": str(row['Maquina']),
                         "cliente": str(row['Cliente']),
-                        "producto": str(row.get('Cliente-articulo', ''))
+                        "producto": str(row.get('Cliente-articulo', '')),
+                        "inicio": row['Inicio'] if pd.notna(row['Inicio']) else None,
+                        "fin": row['Fin'] if pd.notna(row['Fin']) else None
                     })
             current_d += timedelta(days=1)
             
@@ -135,14 +137,25 @@ def render_daily_schedule_view(schedule, cfg):
             border-radius: 4px;
             line-height: 1.1;
             word-wrap: break-word;
+            display: flex;
+            align-items: stretch;
+            flex-wrap: wrap;
+            gap: 4px;
+        }}
+        .task-info {{
+            flex: 1;
+            min-width: 0;
         }}
         .task-ot {{
-            font-weight: bold;
-            color: #1976d2;
+            font-size: 0.75em;
+            color: rgba(128, 128, 128, 0.85);
             display: block;
-            margin-bottom: 1px;
-            padding-bottom: 1px;
-            font-size: 0.9em;
+            padding: 2px 0 0 0;
+            width: 100%;
+            border-top: 1px solid rgba(128, 128, 128, 0.15);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
         .task-maq {{
             font-size: 0.95em;
@@ -150,14 +163,42 @@ def render_daily_schedule_view(schedule, cfg):
             padding-bottom: 1px;
         }}
         .task-prod {{
-            font-size: 0.85em;
-            color: rgba(128, 128, 128, 0.95);
+            font-weight: bold;
+            color: #1976d2;
             display: block;
             margin-bottom: 1px;
-            padding-bottom: 1px;
+            padding-bottom: 4px;
+            font-size: 0.9em;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }}
+        .task-dates-panel {{
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-left: 1px solid rgba(128, 128, 128, 0.25);
+            padding-left: 5px;
+            min-width: 65px;
+            text-align: center;
+        }}
+        .task-date-label {{
+            font-size: 0.7em;
+            text-transform: uppercase;
+            color: rgba(128, 128, 128, 0.6);
+            letter-spacing: 0.3px;
+        }}
+        .task-date-value {{
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #1976d2;
+            line-height: 1.2;
+        }}
+        .task-date-arrow {{
+            font-size: 0.8em;
+            color: rgba(128, 128, 128, 0.5);
+            margin: 1px 0;
         }}
         .task-cli {{
             font-style: italic;
@@ -229,17 +270,28 @@ def render_daily_schedule_view(schedule, cfg):
                     seen.add(t_key)
                     unique_tasks.append(t)
             
-            # Ordenar las tareas del día por máquina alfabéticamente
-            unique_tasks.sort(key=lambda x: x['maquina'])
+            # Ordenar las tareas del día por máquina y luego por fecha de inicio de procesamiento
+            unique_tasks.sort(key=lambda x: (x['maquina'], x['inicio'] or pd.Timestamp.max))
             
             for t in unique_tasks:
                 cli_name = t["cliente"]
                 prod_name = t["producto"]
+                inicio_str = t["inicio"].strftime("%d/%m %H:%M") if t["inicio"] else "-"
+                fin_str = t["fin"].strftime("%d/%m %H:%M") if t["fin"] else "-"
                 
                 html_content += f"""<div class="task-item" title="{prod_name} - {cli_name}">
-<span class="task-ot">OT: {t["ot"]}</span>
+<div class="task-info">
 <span class="task-prod">{prod_name}</span>
-<span class="task-maq">{t["maquina"]}</span><br/>
+<span class="task-maq">{t["maquina"]}</span>
+</div>
+<div class="task-dates-panel">
+<span class="task-date-label">Inicio</span>
+<span class="task-date-value">{inicio_str}</span>
+<span class="task-date-arrow">▼</span>
+<span class="task-date-label">Fin</span>
+<span class="task-date-value">{fin_str}</span>
+</div>
+<span class="task-ot">OT: {t["ot"]}</span>
 </div>"""
                 
         html_content += '</div>'
