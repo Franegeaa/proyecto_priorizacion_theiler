@@ -56,13 +56,19 @@ def render_daily_schedule_view(schedule, cfg):
                 # Solo agregamos la tarea a ese día si la máquina efectivamente está programada para trabajar 
                 # (es decir, es día hábil para esa máquina y no feriado)
                 if es_dia_habil(current_d, cfg, maquina=row["Maquina"]):
+                    # Detectar si este dia tiene horas extra para esta maquina
+                    horas_extras_cfg = cfg.get("horas_extras", {})
+                    extras_maq = horas_extras_cfg.get(row["Maquina"], {})
+                    is_extra = extras_maq.get(current_d, 0) > 0
+                    
                     tasks_per_day[current_d].append({
                         "ot": str(row['OT_id']),
                         "maquina": str(row['Maquina']),
                         "cliente": str(row['Cliente']),
                         "producto": str(row.get('Cliente-articulo', '')),
                         "inicio": row['Inicio'] if pd.notna(row['Inicio']) else None,
-                        "fin": row['Fin'] if pd.notna(row['Fin']) else None
+                        "fin": row['Fin'] if pd.notna(row['Fin']) else None,
+                        "is_extra": is_extra
                     })
             current_d += timedelta(days=1)
             
@@ -141,6 +147,19 @@ def render_daily_schedule_view(schedule, cfg):
             align-items: stretch;
             flex-wrap: wrap;
             gap: 4px;
+        }}
+        .task-item-extra {{
+            background-color: rgba(211, 47, 47, 0.1);
+            border-left: 3px solid #d32f2f;
+        }}
+        .task-item-extra .task-prod {{
+            color: #d32f2f;
+        }}
+        .task-item-extra .task-ot {{
+            color: rgba(211, 47, 47, 0.7);
+        }}
+        .task-item-extra .task-date-value {{
+            color: #d32f2f;
         }}
         .task-info {{
             flex: 1;
@@ -279,7 +298,9 @@ def render_daily_schedule_view(schedule, cfg):
                 inicio_str = t["inicio"].strftime("%d/%m %H:%M") if t["inicio"] else "-"
                 fin_str = t["fin"].strftime("%d/%m %H:%M") if t["fin"] else "-"
                 
-                html_content += f"""<div class="task-item" title="{prod_name} - {cli_name}">
+                extra_class = " task-item-extra" if t.get("is_extra") else ""
+                
+                html_content += f"""<div class="task-item{extra_class}" title="{prod_name} - {cli_name}">
 <div class="task-info">
 <span class="task-prod">{prod_name}</span>
 <span class="task-maq">{t["maquina"]}</span>
