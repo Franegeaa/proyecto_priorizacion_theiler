@@ -514,14 +514,22 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                              overrides["urgency_overrides"][key_op] = current_urgency
                              has_changes = True
 
-                        # MP Pendiente override — propagar a TODOS los procesos de la OT
+                        # MP Pendiente override — solo guardar cuando se DESTILDA (False)
+                        # Si está tildado (True), NO guardamos nada: el valor viene del Excel.
                         current_mp = bool(row["MP Pendiente"])
-                        if overrides["mp_overrides"].get(key_op) != current_mp:
-                             # Buscar todos los procesos de esta OT y aplicar el mismo valor
-                             all_procs_for_ot = edited_df[edited_df["OT_id"] == ot]["Proceso"].unique()
+                        all_procs_for_ot = edited_df[edited_df["OT_id"] == ot]["Proceso"].unique()
+                        if not current_mp:
+                             # Usuario destildó → guardar False para TODOS los procesos de la OT
                              for p in all_procs_for_ot:
-                                 overrides["mp_overrides"][(ot, str(p))] = current_mp
-                             has_changes = True
+                                 if overrides["mp_overrides"].get((ot, str(p))) != False:
+                                     overrides["mp_overrides"][(ot, str(p))] = False
+                                     has_changes = True
+                        else:
+                             # Usuario tildó (o ya estaba tildado) → REMOVER override para que use el Excel
+                             for p in all_procs_for_ot:
+                                 if (ot, str(p)) in overrides["mp_overrides"]:
+                                     del overrides["mp_overrides"][(ot, str(p))]
+                                     has_changes = True
                                 
                         # Delete OT (Blacklist)
                         if row["Eliminar OT"]:

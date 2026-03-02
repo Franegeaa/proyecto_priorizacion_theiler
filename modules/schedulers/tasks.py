@@ -188,8 +188,8 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # Impresión: usa poses
                 pliegos = cant_prod / poses if poses > 0 else cant_prod
 
-            elif "troquel" in proceso.lower():
-                # TROQUELADO: SIEMPRE dividir cantidad por bocas
+            elif "troquel" in proceso.lower() or "cortadora bobina" in proceso.lower():
+                # TROQUELADO y CORTADORA BOBINA: SIEMPRE dividir cantidad por bocas
                 pliegos = cant_prod / bocas if bocas > 0 else cant_prod
             else:
                 # Procesos restantes
