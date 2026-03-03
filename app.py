@@ -62,12 +62,12 @@ with st.sidebar:
     cfg["locked_assignments"] = {}
     
     if pm.connected:
-        # 1. LOAD LOCKED ASSIGNMENTS (History)
+        # 1. LOAD LOCKED ASSIGNMENTS (History) — SIEMPRE, independiente del tick
+        locks = pm.get_locked_assignments()
+        cfg["locked_assignments"] = locks
+
+        # 2. LOAD MANUAL OVERRIDES & OTHER CONFIG (solo si usar_historial)
         if usar_historial:
-            locks = pm.get_locked_assignments()
-            cfg["locked_assignments"] = locks
-            # if locks:
-            #     st.toast(f"🔒 Se cargaron {len(locks)} asignaciones fijas del historial.", icon="🛡️")
         
             # 2. LOAD MANUAL OVERRIDES (Config params)
             # Remove caching check to force sync with checkbox state
