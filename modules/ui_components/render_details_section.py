@@ -249,9 +249,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 show_skipped = st.toggle("Mostrar Saltados", value=False)
             
             with col_f2:
-                # Get unique processes from the full dataset (before other filters to avoid disappearing options?)
-                # Or after? Usually user wants to see what's available. 
-                # Let's use unique values from df_full (which is sorted but not filtered yet)
                 unique_procs = sorted(df_full["Proceso"].astype(str).unique().tolist())
                 filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)")
                 
@@ -259,6 +256,18 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 unique_maqs = sorted(df_full["Maquina"].astype(str).unique().tolist())
                 filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)")
             
+            # --- DATE FILTER ---
+            col_d1, col_d2 = st.columns(2)
+            # Calculate min/max dates from data
+            fechas_inicio = pd.to_datetime(df_full["Inicio"], errors="coerce").dropna()
+            fecha_min = fechas_inicio.min().date() if not fechas_inicio.empty else date.today()
+            fecha_max = fechas_inicio.max().date() if not fechas_inicio.empty else date.today()
+            
+            with col_d1:
+                filtro_fecha_desde = st.date_input("Inicio desde:", value=fecha_min, min_value=fecha_min, max_value=fecha_max, key="filtro_fecha_desde")
+            with col_d2:
+                filtro_fecha_hasta = st.date_input("Inicio hasta:", value=fecha_max, min_value=fecha_min, max_value=fecha_max, key="filtro_fecha_hasta")
+
             # Apply Filters
             if not show_skipped:
                 df_full = df_full[~df_full["IsSkipped"].astype(bool)]
@@ -268,6 +277,12 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 
             if filtro_maq:
                 df_full = df_full[df_full["Maquina"].astype(str).isin(filtro_maq)]
+            
+            # Apply date filter
+            if filtro_fecha_desde and filtro_fecha_hasta:
+                df_full["_inicio_date"] = pd.to_datetime(df_full["Inicio"], errors="coerce").dt.date
+                df_full = df_full[(df_full["_inicio_date"] >= filtro_fecha_desde) & (df_full["_inicio_date"] <= filtro_fecha_hasta)]
+                df_full.drop(columns=["_inicio_date"], inplace=True)
             
             # Rename for display
             df_editor = df_full.rename(columns={
