@@ -8,6 +8,23 @@ from modules.ui_components.render_save_section import render_save_section
 def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
+    st.markdown("""
+    <style>
+    [data-testid="stDataEditor"] td,
+    [data-testid="stDataEditor"] th,
+    [data-testid="stDataEditor"] .gdg-cell,
+    [data-testid="stDataEditor"] div,
+    [data-testid="stDataEditor"] span {
+        font-size: 11px !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stDataFrame"] td,
+    [data-testid="stDataFrame"] th {
+        font-size: 11px !important;
+        font-weight: 600 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True)
 
     if modo == "Orden de Trabajo (OT)":
@@ -294,7 +311,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             })
             
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Urgente", "MP Pendiente", "Tercerizar", "Saltar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -337,7 +354,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 return [bg_color] * len(row)
 
             # Apply styler and general formatting
-            styled_df = df_editor.style.apply(highlight_due_date, axis=1)
+            styled_df = df_editor.style.apply(highlight_due_date, axis=1).set_properties(**{'font-size': '11px', 'font-weight': '600'})
             
             format_dict = {}
             if "CantidadPliegos" in df_editor.columns:
