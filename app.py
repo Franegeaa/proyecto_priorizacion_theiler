@@ -176,7 +176,7 @@ if archivo is not None:
 
     cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
 
-    @st.cache_data(show_spinner="🧠 Calculando planificación...")
+    # @st.cache_data(show_spinner="🧠 Calculando planificación...")
     def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 

@@ -33,6 +33,9 @@ from modules.utils.tiempos_y_setup import (
 # Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
 PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
 
+# DEBUG: OT específica para rastrear
+DEBUG_OT = "E7498-3013102"
+
 def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
     """
     Returns True if the machine has a scheduled downtime starting within max_days from current_dt.
@@ -79,6 +82,15 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     tasks = _expandir_tareas(df_ordenes, cfg)
 
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # --- RASTREO OT ESPECÍFICA ---
+    if DEBUG_OT:
+        dbg_mask = tasks["OT_id"] == DEBUG_OT
+        if dbg_mask.any():
+            for _, r in tasks[dbg_mask].iterrows():
+                print(f"\n🔍 [TRACE {DEBUG_OT}] Expandida: Proceso={r['Proceso']} Maquina={r['Maquina']} IsOutsourced={r.get('IsOutsourced')} IsSkipped={r.get('IsSkipped')} ManualAssignment={r.get('ManualAssignment')} MP={r.get('MateriaPrimaPlanta')}")
+        else:
+            print(f"\n🔍 [TRACE {DEBUG_OT}] ⚠️ NO ENCONTRADA en tasks después de _expandir_tareas")
     
     # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE ---
     # Toda orden que sea de "Cartonaje" se elimina completamente del plan
@@ -553,6 +565,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                           ascending=[True, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
+    # --- RASTREO OT ESPECÍFICA: mostrar en qué cola quedó ---
+    if DEBUG_OT:
+        for m_name, q_items in colas.items():
+            for qi, item in enumerate(q_items):
+                if item.get("OT_id") == DEBUG_OT:
+                    print(f"🔍 [TRACE {DEBUG_OT}] En cola de '{m_name}' posición [{qi}] (Proceso={item.get('Proceso')} Troquel={item.get('CodigoTroquel')})")
+    
+
     # Crear la cola del POOL si existe
     if "POOL_DESCARTONADO" in tasks["Maquina"].values:
         q_pool = tasks[tasks["Maquina"] == "POOL_DESCARTONADO"].copy()
@@ -744,11 +764,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 completados_clean = {clean(c) for c in completado[ot]}
                 
                 if p_clean not in completados_clean:
-
                     return (False, None)
                 else: 
-
-                    
                      # Si está completado, necesitamos su nombre Raw para buscar fecha fin.
                      # Buscamos en completado[ot] cual matchea.
                      raw_match = next((c for c in completado[ot] if clean(c) == p_clean), None)
@@ -800,12 +817,22 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     arrival_date = datetime.combine(fecha_troquel.date(), time(7,0))
         
         # Fusionar restricciones: la fecha efectiva es el MAX(dependencia, llegada_insumo)
-        if last_end and arrival_date:
-            return (True, max(last_end, arrival_date))
-        elif arrival_date:
-            return (True, arrival_date)
         
-        return (True, last_end)
+        final_runnable = True
+        final_avail = None
+        
+        if last_end and arrival_date:
+            final_avail = max(last_end, arrival_date)
+        elif arrival_date:
+            final_avail = arrival_date
+        else:
+            final_avail = last_end
+            
+        is_debug_ot = DEBUG_OT and str(t.get("OT_id", "")).startswith(DEBUG_OT)
+        if is_debug_ot:
+            print(f"    🔍 [VERIF {DEBUG_OT}] proc='{proc_actual_clean}' | last_end={last_end} | arrival={arrival_date} → avail={final_avail}")
+            
+        return (final_runnable, final_avail)
 
     def _prioridad_dinamica(m):
         # ORDEN DE SIMULACION:
@@ -918,6 +945,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
                 
                 ultima_tarea = ultimo_en_maquina.get(maquina)
+                is_troq_machine = "troq" in maquina.lower() or "duyan" in maquina.lower() or "manual" in maquina.lower()
+                
                 if "barniz" in maquina.lower():
                     log_debug(f"--- Ciclo Nueva Tarea @ {current_agenda_dt} ---")
                     if ultima_tarea:
@@ -952,12 +981,17 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     if prio_man_check < 9000:
                         mp_ok = True
                     
-                    if not mp_ok: continue
+                    if not mp_ok:
+                        if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
+                            print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ⛔ BLOQUEADA por MP (MateriaPrimaPlanta={t_cand.get('MateriaPrimaPlanta')})")
+                        continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                     
                     if not runnable: 
                         # Tarea no ejecutable: saltear y seguir buscando alternativas
+                        if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
+                            print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ❌ NO EJECUTABLE (dep pendiente)")
                         continue
                     
                     # --- SUPER OVERRIDE: MANUAL PRIORITY ---
@@ -984,13 +1018,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                              elif available_at < mejor_candidato_futuro[1]:
                                  mejor_candidato_futuro = (i, available_at)
                              
-                             # If we found a Manual Priority Runnable task but it's future,
-                             # we should probably NOT pick a setup filler that delays us?
-                             # For now, let standard logic handle future wait, but don't look further.
-                             # Actually if P1 is waiting, we shouldn't run P9999 just because it has setup.
-                             # So we break loop here too?
-                             # If we break here, we wait for P1.
-                             break
+                             # ERROR CRÍTICO CORREGIDO:
+                             # Si hacíamos 'break' acá, la máquina esperaba inactiva días enteros.
+                             # Usando 'continue', permitimos "Gap Filling": la máquina busca
+                             # OTRAS tareas de la cola que ya estén listas para ejecutarse
+                             # mientras espera que esta prioritaria se libere de procesos previos.
+                             continue
                     
                     es_setup = False
                     if ultima_tarea:
@@ -1028,12 +1061,16 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             # If score is very high, maybe break? For now, scan full window.
                         else:
                             # STANDARD FIFO Logic (Gap Filling)
+                            if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
+                                print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ✅ LISTA AHORA → SELECCIONADA")
                             idx_cand = i
                             mejor_candidato_futuro = None
                             break
                     
                     else:
                         # Si no está lista ya, pero es runnable, la guardamos como opción futura
+                        if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
+                            print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ⏳ FUTURA (disponible: {available_at})")
                         if mejor_candidato_futuro is None:
                             mejor_candidato_futuro = (i, available_at)
                         else:
