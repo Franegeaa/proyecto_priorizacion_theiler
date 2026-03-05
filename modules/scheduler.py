@@ -587,6 +587,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         for _, row in tasks[mask_saltado].iterrows():
             skipped_set.add((row["OT_id"], _clean_for_skip(row["Proceso"])))
     
+    # Pre-compute: OTs que tienen procesos tercerizados
+    # Para no bloquear troqueladoras esperando dependencias tercerizadas (72h)
+    ots_with_tercerizado = set()
+    if not tasks.empty:
+        mask_terc = tasks["Maquina"] == "TERCERIZADO"
+        ots_with_tercerizado = set(tasks.loc[mask_terc, "OT_id"].unique())
+    
     # IMPORTANTE: No reiniciamos 'completado' ni 'fin_proceso' ni 'ultimo_en_maquina' 
     # porque ya vienen con datos de la fase "Imagen de Planta"
     # completado = defaultdict(set); fin_proceso = defaultdict(dict) <-- ELIMINADO REINICIO
@@ -950,13 +957,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                     
                     if not runnable: 
-                        # --- SOLUCION NATIVOS / BLOQUEO POR GRUPO ---
-                        if ultima_tarea and usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", "")):
-                            if not is_prep_machine: 
-                                idx_cand = -1
-                                mejor_candidato_futuro = None
-                                mejor_candidato_setup = None
-                                break
+                        # Tarea no ejecutable: saltear y seguir buscando alternativas
                         continue
                     
                     # --- SUPER OVERRIDE: MANUAL PRIORITY ---
