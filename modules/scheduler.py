@@ -220,7 +220,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 # Guardamos resultado
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                         "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta"]} | 
+                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} | 
                                  {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
                                   "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
                 
@@ -883,7 +883,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Register Result
                         filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta"]} | 
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} | 
                                         {"Setup_min": 0.0, "Proceso_h": duration_virt,
                                         "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
                                         "Motivo": "Outsourced/Skipped", "Maquina": maquina})
@@ -1526,7 +1526,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1562,7 +1562,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 

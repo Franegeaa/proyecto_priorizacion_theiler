@@ -219,6 +219,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "_PEN_ImpresionFlexo": row.get("_PEN_ImpresionFlexo"),
                 "_PEN_ImpresionOffset": row.get("_PEN_ImpresionOffset"),
                 "ProcesoDpd": row.get("ProcesoDpd", ""), # ProcesoDpd para reordenamiento dinámico
+                "PrioriImp": row.get("PrioriImp", ""), # Prioridad desde Excel
                 
                 # Manual Override Params
                 "ManualPriority": manual_prio,

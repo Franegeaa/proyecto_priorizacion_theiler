@@ -25,6 +25,7 @@ from modules.ui_components import (
 )
 
 from modules.utils.visualizations import render_gantt_chart
+from modules.printing_suggestions import render_printing_suggestions
 
 st.set_page_config(page_title="Priorización de Órdenes", layout="wide")
 st.title("📦 Planificador de Producción – Theiler Packaging")
@@ -217,6 +218,9 @@ if archivo is not None:
     # 5. UI: Overtime
     cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan, persistence=pm)
     
+    # 10.5 Printing Suggestions
+    render_printing_suggestions(schedule, df, fecha_inicio_plan)
+
     # 13. Delayed Orders Section
     render_delayed_orders_section(resumen_ot, schedule, cfg)
 

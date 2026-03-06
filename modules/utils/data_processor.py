@@ -63,6 +63,9 @@ def process_uploaded_dataframe(df):
     if "FechaLlegadaTroquel" in df.columns:
         df["FechaLlegadaTroquel"] = df["FechaLlegadaTroquel"].apply(parse_spanish_date)
 
+    if "FechaImDdp" in df.columns:
+        df["FechaImDdp"] = df["FechaImDdp"].apply(parse_spanish_date)
+
     # --- FLAGS SOLO PENDIENTES ---
     def to_bool_series(names):
         for c in names:

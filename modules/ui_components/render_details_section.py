@@ -305,13 +305,30 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             df_editor = df_full.rename(columns={
                 "IsOutsourced": "Tercerizar",
                 "IsSkipped": "Saltar",
-                "ManualPriority": "Prioridad Manual",
+                "ManualPriority": "Prioridad",
                 "Urgente": "Urgente",
                 "MateriaPrimaPlanta": "MP Pendiente"
             })
             
+            # Pre-fill 'Prioridad' with Excel priority if it wasn't manually overridden yet
+            if "PrioriImp" in df_editor.columns:
+                 # Ensure proper numeric typing to avoid errors with object comparisons
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioriImp"] = pd.to_numeric(df_editor["PrioriImp"], errors="coerce").fillna(9999)
+                 
+                 # Si la prioridad manual es 9999 (el default sin override), miramos si hay en el Excel
+                 mask_no_override = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val = df_editor["PrioriImp"] != 9999
+                 mask_excel_valid = df_editor["PrioriImp"].notna()
+                 mask_es_impresion = df_editor["Proceso"].astype(str).str.lower().str.contains("impresi", na=False)
+                 
+                 final_mask = mask_no_override & mask_excel_has_val & mask_excel_valid & mask_es_impresion
+                 df_editor.loc[final_mask, "Prioridad"] = df_editor.loc[final_mask, "PrioriImp"]
+                 
+                 # We don't need to display the explicit Excel column anymore if we merged it
+                 
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad Manual", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
 
@@ -387,9 +404,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         help="Materia Prima pendiente. Desactivar cuando llegue el material.",
                         default=False,
                     ),
-                    "Prioridad Manual": st.column_config.NumberColumn(
+                    "Prioridad": st.column_config.NumberColumn(
                         "Prioridad",
-                        help="1 = Máxima prioridad. Dejá 9999 para auto.",
+                        help="Prioridad. Si venía del Excel se muestra aquí. Cambiala para sobreescribirla o dejala en 9999 para modo automático.",
                         min_value=1,
                         max_value=9999,
                         step=1,
@@ -450,7 +467,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     for m, p in zip(cfg["maquinas"]["Maquina"], cfg["maquinas"]["Proceso"]):
                         maq_to_proc_norm[normalize_machine_name(m)] = p
                     
-                    rows_prio = edited_df[(edited_df["Prioridad Manual"] != 9999) & (edited_df["OT_id"] != "---")]
+                    rows_prio = edited_df[(pd.to_numeric(edited_df["Prioridad"], errors="coerce").fillna(9999) != 9999) & (edited_df["OT_id"] != "---")]
                     for idx, row in rows_prio.iterrows():
                         ot = str(row["OT_id"])
                         maq = str(row["Maquina"])
@@ -475,11 +492,11 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
 
                             # Set the new priority
                             key = (ot, maq_normalized)
-                            overrides["manual_priorities"][key] = int(row["Prioridad Manual"])
+                            overrides["manual_priorities"][key] = int(row["Prioridad"])
                             has_changes = True
 
                     # Remove 9999s explicitly
-                    rows_reset = edited_df[(edited_df["Prioridad Manual"] == 9999) & (edited_df["OT_id"] != "---")]
+                    rows_reset = edited_df[(pd.to_numeric(edited_df["Prioridad"], errors="coerce").fillna(9999) == 9999) & (edited_df["OT_id"] != "---")]
                     for idx, row in rows_reset.iterrows():
                          ot = str(row["OT_id"])
                          maq = str(row["Maquina"])
