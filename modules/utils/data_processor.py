@@ -114,4 +114,8 @@ def process_uploaded_dataframe(df):
     # --- URGENCIA (Check multiple possible headers) ---
     df["Urgente"] = to_bool_series(["Urgencia", "UrgePed", "Urgente", "EsUrgente"])
     
+    # --- BOOLEANS EXTRA ---
+    df["PeliculaArt"] = to_bool_series(["PeliculaArt", "Pelicula"])
+    df["TroquelArt"] = to_bool_series(["TroquelArt", "TroquelNuevo"])
+    
     return df

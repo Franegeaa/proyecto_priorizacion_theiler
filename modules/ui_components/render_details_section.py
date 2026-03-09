@@ -307,7 +307,11 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 "IsSkipped": "Saltar",
                 "ManualPriority": "Prioridad",
                 "Urgente": "Urgente",
-                "MateriaPrimaPlanta": "MP Pendiente"
+                "MateriaPrimaPlanta": "MP Pendiente",
+                "PeliculaArt": "Chapa Pend",
+                "TroquelArt": "Troquel Pend",
+                "FechaLlegadaChapas": "Llegada Chapas",
+                "FechaLlegadaTroquel": "Llegada Troquel"
             })
             
             # Pre-fill 'Prioridad' with Excel priority if it wasn't manually overridden yet
@@ -328,9 +332,19 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  # We don't need to display the explicit Excel column anymore if we merged it
                  
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente","Colores", "CodigoTroquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
+            
+            # Ensure proper types for booleans and dates
+            if "Chapa Pend" in df_editor.columns:
+                 df_editor["Chapa Pend"] = df_editor["Chapa Pend"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
+            if "Troquel Pend" in df_editor.columns:
+                 df_editor["Troquel Pend"] = df_editor["Troquel Pend"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
+            if "Llegada Chapas" in df_editor.columns:
+                 df_editor["Llegada Chapas"] = pd.to_datetime(df_editor["Llegada Chapas"], errors="coerce")
+            if "Llegada Troquel" in df_editor.columns:
+                 df_editor["Llegada Troquel"] = pd.to_datetime(df_editor["Llegada Troquel"], errors="coerce")
 
             # --- PERSISTENT COLUMN SELECTION ---
             if "details_column_order" not in st.session_state:
@@ -425,6 +439,26 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         help="Materia Prima pendiente. Desactivar cuando llegue el material.",
                         default=False,
                     ),
+                    "Chapa Pend": st.column_config.CheckboxColumn(
+                        "Chapa Pend",
+                        help="Chapa pendiente (PeliculaArt). Desactivar cuando llegue la chapa.",
+                        default=False,
+                    ),
+                    "Llegada Chapas": st.column_config.DateColumn(
+                        "Llegada Chapas",
+                        help="Fecha de llegada de chapas. Editable.",
+                        format="DD/MM/YYYY",
+                    ),
+                    "Troquel Pend": st.column_config.CheckboxColumn(
+                        "Troquel Pend",
+                        help="Troquel pendiente (TroquelArt). Desactivar cuando llegue el troquel.",
+                        default=False,
+                    ),
+                    "Llegada Troquel": st.column_config.DateColumn(
+                        "Llegada Troquel",
+                        help="Fecha de llegada de troquel. Editable.",
+                        format="DD/MM/YYYY",
+                    ),
                     "Prioridad": st.column_config.NumberColumn(
                         "Prioridad",
                         help="Prioridad. Si venía del Excel se muestra aquí. Cambiala para sobreescribirla o dejala en 9999 para modo automático.",
@@ -481,6 +515,14 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         overrides["urgency_overrides"] = {}
                     if "mp_overrides" not in overrides:
                         overrides["mp_overrides"] = {}
+                    if "pelicula_overrides" not in overrides:
+                        overrides["pelicula_overrides"] = {}
+                    if "troquel_overrides" not in overrides:
+                        overrides["troquel_overrides"] = {}
+                    if "fecha_chapas_overrides" not in overrides:
+                        overrides["fecha_chapas_overrides"] = {}
+                    if "fecha_troquel_overrides" not in overrides:
+                        overrides["fecha_troquel_overrides"] = {}
 
                     from modules.utils.config_loader import normalize_machine_name
                     
@@ -602,6 +644,60 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                                      del overrides["mp_overrides"][(ot, str(p))]
                                      has_changes = True
                                 
+                        # Chapa Pendiente override
+                        if "Chapa Pend" in row:
+                            current_chapa = bool(row["Chapa Pend"])
+                            if not current_chapa:
+                                 for p in all_procs_for_ot:
+                                     if overrides["pelicula_overrides"].get((ot, str(p))) != False:
+                                         overrides["pelicula_overrides"][(ot, str(p))] = False
+                                         has_changes = True
+                            else:
+                                 for p in all_procs_for_ot:
+                                     if (ot, str(p)) in overrides["pelicula_overrides"]:
+                                         del overrides["pelicula_overrides"][(ot, str(p))]
+                                         has_changes = True                 
+
+                        # Troquel Pendiente override
+                        if "Troquel Pend" in row:
+                            current_troq = bool(row["Troquel Pend"])
+                            if not current_troq:
+                                 for p in all_procs_for_ot:
+                                     if overrides["troquel_overrides"].get((ot, str(p))) != False:
+                                         overrides["troquel_overrides"][(ot, str(p))] = False
+                                         has_changes = True
+                            else:
+                                 for p in all_procs_for_ot:
+                                     if (ot, str(p)) in overrides["troquel_overrides"]:
+                                         del overrides["troquel_overrides"][(ot, str(p))]
+                                         has_changes = True
+
+                        # Llegada Chapas override
+                        if "Llegada Chapas" in row:
+                            dt_chapa = row["Llegada Chapas"]
+                            for p in all_procs_for_ot:
+                                if pd.notna(dt_chapa):
+                                    if overrides["fecha_chapas_overrides"].get((ot, str(p))) != dt_chapa:
+                                        overrides["fecha_chapas_overrides"][(ot, str(p))] = dt_chapa
+                                        has_changes = True
+                                else:
+                                    if (ot, str(p)) in overrides["fecha_chapas_overrides"]:
+                                        del overrides["fecha_chapas_overrides"][(ot, str(p))]
+                                        has_changes = True
+
+                        # Llegada Troquel override
+                        if "Llegada Troquel" in row:
+                            dt_troq = row["Llegada Troquel"]
+                            for p in all_procs_for_ot:
+                                if pd.notna(dt_troq):
+                                    if overrides["fecha_troquel_overrides"].get((ot, str(p))) != dt_troq:
+                                        overrides["fecha_troquel_overrides"][(ot, str(p))] = dt_troq
+                                        has_changes = True
+                                else:
+                                    if (ot, str(p)) in overrides["fecha_troquel_overrides"]:
+                                        del overrides["fecha_troquel_overrides"][(ot, str(p))]
+                                        has_changes = True
+                                        
                         # Delete OT (Blacklist)
                         if row["Eliminar OT"]:
                             overrides["blacklist_ots"].add(ot)

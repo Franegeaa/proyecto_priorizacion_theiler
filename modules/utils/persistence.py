@@ -184,6 +184,33 @@ class PersistenceManager:
             for (ot, proc), val in mp_raw.items():
                 key_str = f"{ot}|{proc}"
                 mp_clean[key_str] = val
+                
+            # 7. Pelicula Overrides
+            pelicula_raw = overrides.get("pelicula_overrides", {})
+            pelicula_clean = {f"{ot}|{proc}": val for (ot, proc), val in pelicula_raw.items()}
+
+            # 8. Troquel Overrides
+            troquel_raw = overrides.get("troquel_overrides", {})
+            troquel_clean = {f"{ot}|{proc}": val for (ot, proc), val in troquel_raw.items()}
+
+            # 9. Fechas Overrides
+            fecha_chapas_raw = overrides.get("fecha_chapas_overrides", {})
+            fecha_chapas_clean = {}
+            for (ot, proc), val in fecha_chapas_raw.items():
+                key_str = f"{ot}|{proc}"
+                if pd.notna(val) and val:
+                    fecha_chapas_clean[key_str] = val.isoformat() if hasattr(val, 'isoformat') else str(val)
+                else:
+                    fecha_chapas_clean[key_str] = None
+
+            fecha_troquel_raw = overrides.get("fecha_troquel_overrides", {})
+            fecha_troquel_clean = {}
+            for (ot, proc), val in fecha_troquel_raw.items():
+                key_str = f"{ot}|{proc}"
+                if pd.notna(val) and val:
+                    fecha_troquel_clean[key_str] = val.isoformat() if hasattr(val, 'isoformat') else str(val)
+                else:
+                    fecha_troquel_clean[key_str] = None
 
             # Prepare for DB
             data_map = {
@@ -193,7 +220,11 @@ class PersistenceManager:
                 "skipped_processes": json.dumps(skipped_clean),
                 "manual_assignments": json.dumps(overrides.get("manual_assignments", {})),
                 "urgency_overrides": json.dumps(urgency_clean),
-                "mp_overrides": json.dumps(mp_clean)
+                "mp_overrides": json.dumps(mp_clean),
+                "pelicula_overrides": json.dumps(pelicula_clean),
+                "troquel_overrides": json.dumps(troquel_clean),
+                "fecha_chapas_overrides": json.dumps(fecha_chapas_clean),
+                "fecha_troquel_overrides": json.dumps(fecha_troquel_clean)
             }
 
             # Debug Log
@@ -231,7 +262,11 @@ class PersistenceManager:
                 "outsourced_processes": set(),
                 "skipped_processes": set(),
                 "urgency_overrides": {},
-                "mp_overrides": {}
+                "mp_overrides": {},
+                "pelicula_overrides": {},
+                "troquel_overrides": {},
+                "fecha_chapas_overrides": {},
+                "fecha_troquel_overrides": {}
             }
 
         try:
@@ -289,6 +324,37 @@ class PersistenceManager:
                 if "|" in k:
                     parts = k.split("|", 1)
                     res_mp[(parts[0], parts[1])] = v
+                    
+            # 8. Pelicula
+            res_pelicula = {}
+            pelicula_dict = json.loads(raw_data.get("pelicula_overrides", "{}"))
+            for k, v in pelicula_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_pelicula[(parts[0], parts[1])] = v
+                    
+            # 9. Troquel
+            res_troquel = {}
+            troquel_dict = json.loads(raw_data.get("troquel_overrides", "{}"))
+            for k, v in troquel_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_troquel[(parts[0], parts[1])] = v
+                    
+            # 10. Fechas
+            res_fecha_chapas = {}
+            fecha_chapas_dict = json.loads(raw_data.get("fecha_chapas_overrides", "{}"))
+            for k, v in fecha_chapas_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_fecha_chapas[(parts[0], parts[1])] = pd.to_datetime(v) if v else pd.NaT
+                    
+            res_fecha_troquel = {}
+            fecha_troquel_dict = json.loads(raw_data.get("fecha_troquel_overrides", "{}"))
+            for k, v in fecha_troquel_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_fecha_troquel[(parts[0], parts[1])] = pd.to_datetime(v) if v else pd.NaT
             
             return {
                 "blacklist_ots": res_blacklist,
@@ -297,7 +363,11 @@ class PersistenceManager:
                 "skipped_processes": res_skipped,
                 "manual_assignments": res_assignments,
                 "urgency_overrides": res_urgency,
-                "mp_overrides": res_mp
+                "mp_overrides": res_mp,
+                "pelicula_overrides": res_pelicula,
+                "troquel_overrides": res_troquel,
+                "fecha_chapas_overrides": res_fecha_chapas,
+                "fecha_troquel_overrides": res_fecha_troquel
             }
 
         except Exception as e:
@@ -306,7 +376,13 @@ class PersistenceManager:
                 "blacklist_ots": set(),
                 "manual_priorities": {},
                 "outsourced_processes": set(),
-                "skipped_processes": set()
+                "skipped_processes": set(),
+                "urgency_overrides": {},
+                "mp_overrides": {},
+                "pelicula_overrides": {},
+                "troquel_overrides": {},
+                "fecha_chapas_overrides": {},
+                "fecha_troquel_overrides": {}
             }
 
     def get_locked_assignments(self, lookahead_days=0):

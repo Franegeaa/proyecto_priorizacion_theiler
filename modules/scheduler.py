@@ -219,8 +219,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 # Guardamos resultado
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                        "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} | 
+                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} | 
                                  {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
                                   "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
                 
@@ -258,6 +257,31 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 mask = (tasks["OT_id"].astype(str) == str(ot_mp)) & (tasks["Proceso"].astype(str) == str(proc_mp))
                 if mask.any():
                     tasks.loc[mask, "MateriaPrimaPlanta"] = mp_val
+
+        # 1c. Apply Chapa/Troquel Overrides
+        if "pelicula_overrides" in cfg["manual_overrides"]:
+            for (ot_id, proc), val in cfg["manual_overrides"]["pelicula_overrides"].items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_id)) & (tasks["Proceso"].astype(str) == str(proc))
+                if mask.any():
+                    tasks.loc[mask, "PeliculaArt"] = val
+                    
+        if "troquel_overrides" in cfg["manual_overrides"]:
+            for (ot_id, proc), val in cfg["manual_overrides"]["troquel_overrides"].items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_id)) & (tasks["Proceso"].astype(str) == str(proc))
+                if mask.any():
+                    tasks.loc[mask, "TroquelArt"] = val
+                    
+        if "fecha_chapas_overrides" in cfg["manual_overrides"]:
+            for (ot_id, proc), val in cfg["manual_overrides"]["fecha_chapas_overrides"].items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_id)) & (tasks["Proceso"].astype(str) == str(proc))
+                if mask.any():
+                    tasks.loc[mask, "FechaLlegadaChapas"] = val
+                    
+        if "fecha_troquel_overrides" in cfg["manual_overrides"]:
+            for (ot_id, proc), val in cfg["manual_overrides"]["fecha_troquel_overrides"].items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_id)) & (tasks["Proceso"].astype(str) == str(proc))
+                if mask.any():
+                    tasks.loc[mask, "FechaLlegadaTroquel"] = val
 
         # 2. Apply Blacklist
         if "blacklist_ots" in cfg["manual_overrides"]:
@@ -883,7 +907,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Register Result
                         filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} | 
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} |
                                         {"Setup_min": 0.0, "Proceso_h": duration_virt,
                                         "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
                                         "Motivo": "Outsourced/Skipped", "Maquina": maquina})
@@ -1526,7 +1550,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1562,7 +1586,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
