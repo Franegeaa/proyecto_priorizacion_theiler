@@ -328,9 +328,30 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  # We don't need to display the explicit Excel column anymore if we merged it
                  
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente","Colores", "CodigoTroquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
+
+            # --- PERSISTENT COLUMN SELECTION ---
+            if "details_column_order" not in st.session_state:
+                st.session_state.details_column_order = cols_final
+            
+            # Ensure saved columns still exist in the current dataframe to prevent Streamlit errors
+            valid_saved_cols = [c for c in st.session_state.details_column_order if c in cols_final]
+            
+            with st.expander("⚙️ Configurar Columnas Visibles", expanded=False):
+                # The multiselect order determines the DataFrame column order.
+                selected_cols = st.multiselect(
+                    "Agrega, quita o reordena columnas borrándolas y volviéndolas a agregar:",
+                    options=cols_final,
+                    default=valid_saved_cols,
+                    key="details_col_multiselect_widget"
+                )
+                
+                # Update saved order, only if changed to avoid unnecessary reruns
+                if st.session_state.details_column_order != selected_cols:
+                    st.session_state.details_column_order = selected_cols
+                    st.rerun()
 
             # --- COLORING LOGIC BY DUE DATE & IDLE ---
             from datetime import date
@@ -441,6 +462,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     "Duracion_h": st.column_config.NumberColumn("Duración (hs)", disabled=True, format="%.2f"),
                     "DueDate": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True), 
                 },
+                column_order=st.session_state.details_column_order,
                 use_container_width=True,
                 height=600,
                 hide_index=True,

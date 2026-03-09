@@ -193,11 +193,12 @@ if archivo is not None:
     render_save_section(pm)
 
     # 12. Daily Details Section
-    render_daily_details_section(schedule)
+    with st.expander("📋 Ver Detalle de Tareas", expanded=False):
+        render_daily_details_section(schedule)
     
     # 12.5. Daily Schedule View (Calendar format)
-    # with st.expander("🗓️ Ver Calendario de Tareas", expanded=False):
-    render_daily_schedule_view(schedule, cfg)
+    with st.expander("🗓️ Ver Calendario de Tareas", expanded=False):
+        render_daily_schedule_view(schedule, cfg)
     
     # Updates cfg in place (and saves to disk) 
 
