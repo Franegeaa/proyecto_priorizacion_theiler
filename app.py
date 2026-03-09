@@ -175,8 +175,6 @@ if archivo is not None:
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
 
-    cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
-
     # @st.cache_data(show_spinner="🧠 Calculando planificación...")
     def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
@@ -185,6 +183,8 @@ if archivo is not None:
     st.session_state.last_schedule = schedule
 
     render_gantt_chart(schedule, cfg)
+
+    cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
 
     # 11. Details Section
     render_details_section(schedule, detalle_maquina, df, cfg)
