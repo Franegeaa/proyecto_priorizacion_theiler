@@ -160,11 +160,17 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # 2. 'elegir_maquina' (Normalized, from Config)
                 # 3. 'locked_assignments' (Potentially UN-NORMALIZED if from old history)
                 
-                from modules.utils.config_loader import normalize_machine_name
-                str_maq_norm = normalize_machine_name(str_maq)
                 
-                key_prio = (str_ot, str_maq_norm)
+                key_prio = (str_ot, str_maq)
                 manual_prio = priorities.get(key_prio, 9999)
+                
+                # Fallback if case mismatch or normalization mismatch:
+                if manual_prio == 9999:
+                    str_maq_norm = normalize_machine_name(str_maq)
+                    for (p_ot, p_maq), p_val in priorities.items():
+                        if str(p_ot) == str_ot and normalize_machine_name(p_maq) == str_maq_norm:
+                            manual_prio = p_val
+                            break
 
             # --- PERSISTENCE LOCKING LOGIC ---
             # If this task was scheduled for "Today" in the previous run, FORCE it.

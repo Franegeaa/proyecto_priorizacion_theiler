@@ -34,7 +34,7 @@ from modules.utils.tiempos_y_setup import (
 PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
 
 # DEBUG: OT específica para rastrear
-DEBUG_OT = "E7498-3013102"
+DEBUG_OT = None
 
 def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
     """
@@ -788,10 +788,46 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 completados_clean = {clean(c) for c in completado[ot]}
                 
                 if p_clean not in completados_clean:
-                    return (False, None)
+                    # --- MEJORA: En lugar de bloquear la tarea completamente,
+                    # estimamos cuándo terminará el proceso previo.
+                    # Esto permite que la tarea entre como "candidata futura"
+                    # y se respete su prioridad manual al programar huecos.
+                    
+                    # Intentar estimar cuándo terminará el proceso previo
+                    # buscando la tarea correspondiente en alguna cola
+                    estimated_end = None
+                    for m_name, cola_items in colas.items():
+                        for item in cola_items:
+                            if item.get("OT_id") == ot and clean(item.get("Proceso", "")) == p_clean:
+                                # Encontramos la tarea upstream en una cola
+                                # Estimar su duración + el tiempo actual de esa máquina
+                                try:
+                                    from modules.utils.tiempos_y_setup import tiempo_operacion_h
+                                    m_dt = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"])
+                                    orden_fake = df_ordenes.loc[item["idx"]].copy() if "idx" in item else None
+                                    if orden_fake is not None:
+                                        _, dur_h = tiempo_operacion_h(orden_fake, str(item.get("Proceso", "")), m_name, cfg)
+                                        estimated_end = m_dt + timedelta(hours=dur_h)
+                                    else:
+                                        # Fallback: estimar 4 horas
+                                        estimated_end = m_dt + timedelta(hours=4)
+                                except Exception:
+                                    estimated_end = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"]) + timedelta(hours=4)
+                                break
+                        if estimated_end:
+                            break
+                    
+                    if estimated_end:
+                        # El proceso previo EXISTE en una cola → será programado
+                        # Retornar como "ejecutable en el futuro" en vez de bloqueado
+                        is_debug_ot = DEBUG_OT and str(t.get("OT_id", "")).startswith(DEBUG_OT)
+                        if is_debug_ot:
+                            print(f"    🔍 [VERIF {DEBUG_OT}] proc_previo='{p_clean}' no completado pero EN COLA → estimado: {estimated_end}")
+                        return (True, estimated_end)
+                    else:
+                        return (False, None) # Proceso previo no está en ninguna cola → realmente bloqueado
                 else: 
                      # Si está completado, necesitamos su nombre Raw para buscar fecha fin.
-                     # Buscamos en completado[ot] cual matchea.
                      raw_match = next((c for c in completado[ot] if clean(c) == p_clean), None)
                      if raw_match:
                         prev_procs_names.append(raw_match)
@@ -989,6 +1025,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 scan_limit = 50 if is_prep_machine else 999999
                 
+                # URGENT DEADLINE PARA GAP FILLING
+                urgent_deadline_dt = None
+                
                 for i, t_cand in enumerate(colas[maquina]):
                     if is_prep_machine and i >= scan_limit: 
                         break # Stop scanning for prep machines to avoid perf hit
@@ -1042,6 +1081,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                              elif available_at < mejor_candidato_futuro[1]:
                                  mejor_candidato_futuro = (i, available_at)
                              
+                             # Fijar límite de tiempo para gap-filling (Urgent Deadline)
+                             if urgent_deadline_dt is None or available_at < urgent_deadline_dt:
+                                 urgent_deadline_dt = available_at
+                             
                              # ERROR CRÍTICO CORREGIDO:
                              # Si hacíamos 'break' acá, la máquina esperaba inactiva días enteros.
                              # Usando 'continue', permitimos "Gap Filling": la máquina busca
@@ -1071,6 +1114,33 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     is_ready_now = not available_at or available_at <= current_agenda_dt
                     
                     if is_ready_now:
+                        # --- NUEVA RESTRICCIÓN DE GAP FILLING ---
+                        # Si hay una tarea prioritaria esperando en el futuro, no permitimos
+                        # meter una tarea "gap filler" que dure demasiado y bloquee la prioridad.
+                        fits_gap = True
+                        if urgent_deadline_dt is not None:
+                            try:
+                                t_gap_pliegos = float(t_cand.get("CantidadPliegos", 0))
+                                orden_fake = df_ordenes.loc[t_cand["idx"]].copy() if "idx" in t_cand else df_ordenes.iloc[0].copy()
+                                orden_fake["CantidadPliegos"] = t_gap_pliegos
+                                _, proc_h_gap = tiempo_operacion_h(orden_fake, str(t_cand.get("Proceso", "")), maquina, cfg)
+                                
+                                # Tiempo disponible hasta que llegue la prioritaria
+                                time_to_urgent = (urgent_deadline_dt - current_agenda_dt).total_seconds() / 3600.0
+                                
+                                # Tolerancia de 2 horas sobre el hueco (el gap puede pisar un poco el inicio ideal)
+                                if (proc_h_gap > time_to_urgent + 2.0) and (not is_prep_machine or time_to_urgent < 24.0):
+                                     fits_gap = False
+                                     # Notar que is_prep_machine (guillotina) permite rebasar si el gap es muy grande (>24h)
+                                     # para no frenar la planta si igual la prioritaria tarda días.
+                            except Exception:
+                                fits_gap = True
+                                
+                        if not fits_gap:
+                            if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
+                                print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ❌ RECHAZADA (Dura {round(proc_h_gap, 2)}h > Hueco {round(time_to_urgent, 2)}h)")
+                            continue
+                        
                         if is_prep_machine:
                             score = get_downstream_presence_score(t_cand, colas, None, maquina, last_tasks_map=ultimo_en_maquina)
                             
