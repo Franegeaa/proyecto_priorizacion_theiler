@@ -802,6 +802,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 # Encontramos la tarea upstream en una cola
                                 # Estimar su duración + el tiempo actual de esa máquina
                                 try:
+                                    if m_name not in agenda:
+                                        continue # skip if machine not initialized
+
                                     from modules.utils.tiempos_y_setup import tiempo_operacion_h
                                     m_dt = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"])
                                     orden_fake = df_ordenes.loc[item["idx"]].copy() if "idx" in item else None
@@ -812,7 +815,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                         # Fallback: estimar 4 horas
                                         estimated_end = m_dt + timedelta(hours=4)
                                 except Exception:
-                                    estimated_end = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"]) + timedelta(hours=4)
+                                    if m_name in agenda:
+                                        estimated_end = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"]) + timedelta(hours=4)
+                                    else:
+                                        estimated_end = None # Cannot estimate if machine unknown
                                 break
                         if estimated_end:
                             break
@@ -1028,6 +1034,29 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 # URGENT DEADLINE PARA GAP FILLING
                 urgent_deadline_dt = None
                 
+                # --- PRE-SCAN: Detectar tareas con prioridad Excel esperando dependencias ---
+                # Si hay alguna tarea con PrioriImp válida que no está lista aún,
+                # establecemos urgent_deadline_dt para impedir que gap-fillers sin prioridad la adelanten.
+                for t_prescan in colas[maquina]:
+                    try:
+                        prescan_prio_excel = float(t_prescan.get("PrioriImp", 9999))
+                        if pd.isna(prescan_prio_excel): prescan_prio_excel = 9999
+                    except (ValueError, TypeError):
+                        prescan_prio_excel = 9999
+                    prescan_prio_man = int(t_prescan.get("ManualPriority", 9999))
+                    
+                    if prescan_prio_excel < 9999 or prescan_prio_man < 9000:
+                        prescan_runnable, prescan_avail = verificar_disponibilidad(t_prescan, maquina)
+                        if prescan_runnable:
+                            if prescan_avail and prescan_avail > current_agenda_dt:
+                                # Tarea priorizada que estará lista en el futuro
+                                if urgent_deadline_dt is None or prescan_avail < urgent_deadline_dt:
+                                    urgent_deadline_dt = prescan_avail
+                            else:
+                                # Tarea priorizada lista AHORA → el SUPER OVERRIDE la tomará
+                                # Seguimos buscando por si hay OTRA priorizada más adelante esperando
+                                continue
+                
                 for i, t_cand in enumerate(colas[maquina]):
                     if is_prep_machine and i >= scan_limit: 
                         break # Stop scanning for prep machines to avoid perf hit
@@ -1057,41 +1086,41 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ❌ NO EJECUTABLE (dep pendiente)")
                         continue
                     
-                    # --- SUPER OVERRIDE: MANUAL PRIORITY ---
+                    # --- SUPER OVERRIDE: MANUAL PRIORITY / EXCEL PRIORITY ---
                     prio_man = int(t_cand.get("ManualPriority", 9999))
-                    # Si tiene prioridad alta (ej < 9000), es sagrada.
-                    # Asumimos que la lista ya esta ordenada por ManualPriority.
-                    # Si la primera tarea ejecutable tiene prioridad manual, LA TOMAMOS YA.
-                    # Sin setups, sin grupos, sin nada.
-                    if prio_man < 9000:
+                    # Verificar también la prioridad del Excel (PrioriImp)
+                    try:
+                        prio_excel = float(t_cand.get("PrioriImp", 9999))
+                        if pd.isna(prio_excel): prio_excel = 9999
+                    except (ValueError, TypeError):
+                        prio_excel = 9999
+                    
+                    # Si tiene prioridad alta (manual < 9000 o Excel < 9999), es sagrada.
+                    tiene_prioridad = prio_man < 9000 or prio_excel < 9999
+                    if tiene_prioridad:
                         # Check start constraints
                         is_ready_now = not available_at or available_at <= current_agenda_dt
                         if is_ready_now:
-                             idx_cand = i
-                             mejor_candidato_futuro = None
-                             mejor_candidato_setup = None # Disable setup gap filling
-                             
-                             # Forced break - no optimizations allowed for manual override
-                             break 
+                            idx_cand = i
+                            mejor_candidato_futuro = None
+                            mejor_candidato_setup = None # Disable setup gap filling
+                            break
                         else:
-                             # If not ready IS runnable, keep it as future candidate.
-                             # BUT we should NOT verify setups for others if this one is waiting with P1.
-                             if mejor_candidato_futuro is None:
-                                 mejor_candidato_futuro = (i, available_at)
-                             elif available_at < mejor_candidato_futuro[1]:
-                                 mejor_candidato_futuro = (i, available_at)
-                             
-                             # Fijar límite de tiempo para gap-filling (Urgent Deadline)
-                             if urgent_deadline_dt is None or available_at < urgent_deadline_dt:
-                                 urgent_deadline_dt = available_at
-                             
-                             # ERROR CRÍTICO CORREGIDO:
-                             # Si hacíamos 'break' acá, la máquina esperaba inactiva días enteros.
-                             # Usando 'continue', permitimos "Gap Filling": la máquina busca
-                             # OTRAS tareas de la cola que ya estén listas para ejecutarse
-                             # mientras espera que esta prioritaria se libere de procesos previos.
-                             continue
-                    
+                            # If not ready IS runnable, keep it as future candidate.
+                            if mejor_candidato_futuro is None:
+                                mejor_candidato_futuro = (i, available_at)
+                            elif available_at < mejor_candidato_futuro[1]:
+                                mejor_candidato_futuro = (i, available_at)
+                            
+                            # Fijar límite de tiempo para gap-filling (Urgent Deadline)
+                            if urgent_deadline_dt is None or available_at < urgent_deadline_dt:
+                                urgent_deadline_dt = available_at
+                            
+                            # --- MEJORA RAJATABLA ---
+                            # Si la tarea con prioridad no está lista aún, dejamos de buscar alternativas (break)
+                            # para que la máquina la espere inactivamente.
+                            break
+
                     es_setup = False
                     if ultima_tarea:
                          es_setup = usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", ""))
@@ -1119,22 +1148,26 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # meter una tarea "gap filler" que dure demasiado y bloquee la prioridad.
                         fits_gap = True
                         if urgent_deadline_dt is not None:
-                            try:
-                                t_gap_pliegos = float(t_cand.get("CantidadPliegos", 0))
-                                orden_fake = df_ordenes.loc[t_cand["idx"]].copy() if "idx" in t_cand else df_ordenes.iloc[0].copy()
-                                orden_fake["CantidadPliegos"] = t_gap_pliegos
-                                _, proc_h_gap = tiempo_operacion_h(orden_fake, str(t_cand.get("Proceso", "")), maquina, cfg)
-                                
-                                # Tiempo disponible hasta que llegue la prioritaria
-                                time_to_urgent = (urgent_deadline_dt - current_agenda_dt).total_seconds() / 3600.0
-                                
-                                # Tolerancia de 2 horas sobre el hueco (el gap puede pisar un poco el inicio ideal)
-                                if (proc_h_gap > time_to_urgent + 2.0) and (not is_prep_machine or time_to_urgent < 24.0):
-                                     fits_gap = False
-                                     # Notar que is_prep_machine (guillotina) permite rebasar si el gap es muy grande (>24h)
-                                     # para no frenar la planta si igual la prioritaria tarda días.
-                            except Exception:
-                                fits_gap = True
+                            # --- REGLA ESTRICTA: tareas SIN prioridad no pueden rellenar huecos ---
+                            # Si hay una tarea priorizada esperando, solo otras tareas con prioridad
+                            # pueden llenar el hueco. Tareas sin prioridad se saltan.
+                            if not tiene_prioridad:
+                                fits_gap = False
+                            else:
+                                try:
+                                    t_gap_pliegos = float(t_cand.get("CantidadPliegos", 0))
+                                    orden_fake = df_ordenes.loc[t_cand["idx"]].copy() if "idx" in t_cand else df_ordenes.iloc[0].copy()
+                                    orden_fake["CantidadPliegos"] = t_gap_pliegos
+                                    _, proc_h_gap = tiempo_operacion_h(orden_fake, str(t_cand.get("Proceso", "")), maquina, cfg)
+                                    
+                                    # Tiempo disponible hasta que llegue la prioritaria
+                                    time_to_urgent = (urgent_deadline_dt - current_agenda_dt).total_seconds() / 3600.0
+                                    
+                                    # Tolerancia de 2 horas sobre el hueco
+                                    if (proc_h_gap > time_to_urgent + 2.0) and (not is_prep_machine or time_to_urgent < 24.0):
+                                         fits_gap = False
+                                except Exception:
+                                    fits_gap = True
                                 
                         if not fits_gap:
                             if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):

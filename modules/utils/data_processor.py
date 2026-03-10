@@ -5,6 +5,13 @@ def parse_spanish_date(date_str):
     if pd.isna(date_str) or str(date_str).strip() == "":
         return pd.NaT
     
+    # Si ya es un objeto de fecha/tiempo, retornarlo directamente (evitar re-parseo)
+    if isinstance(date_str, (pd.Timestamp, pd.DatetimeIndex)):
+        return date_str
+    import datetime
+    if isinstance(date_str, (datetime.datetime, datetime.date)):
+        return pd.to_datetime(date_str)
+
     s = str(date_str).lower().strip()
     # Mapa de meses abreviados español
     meses = {
