@@ -1116,14 +1116,21 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             if urgent_deadline_dt is None or available_at < urgent_deadline_dt:
                                 urgent_deadline_dt = available_at
                             
-                            # --- MEJORA RAJATABLA ---
-                            # Si la tarea con prioridad no está lista aún, dejamos de buscar alternativas (break)
-                            # para que la máquina la espere inactivamente.
-                            break
+                            # --- MEJORA RAJATABLA (SOLO IMPRESIÓN) ---
+                            # Si es una máquina de impresión (Heidelberg, Flexo, etc.)
+                            # y la tarea con prioridad no está lista aún, dejamos de buscar 
+                            # alternativas (break) para que la máquina la espere inactivamente.
+                            # Para el RESTO de las máquinas (Troquelado, etc.), permitimos
+                            # el "Gap Filling" (continue) para no dejar la máquina parada.
+                            es_impresion = any(kw in maquina.lower() for kw in ["heidelberg", "flexo", "offset", "impresion", "impresora"])
+                            if es_impresion:
+                                break
+                            else:
+                                continue
 
                     es_setup = False
                     if ultima_tarea:
-                         es_setup = usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", ""))
+                        es_setup = usa_setup_menor(ultima_tarea, t_cand, t_cand.get("Proceso", ""))
                          
                     # --- RESTRICCIÓN DE SALTO POR SETUP (TROQUELADO) ---
                     # Si es una máquina de preparación (ej: Troquelado) y la tarea no es urgente/prioritaria,
