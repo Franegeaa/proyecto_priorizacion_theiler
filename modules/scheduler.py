@@ -582,6 +582,21 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         elif ("offset" in m_lower) or ("heidelberg" in m_lower): colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
+        elif "guillotina" in m_lower:
+            # Guillotina Propaga Prioridad de Impresión
+            if "FechaImDdp" in q.columns:
+                q["_fecha_imp"] = pd.to_datetime(q["FechaImDdp"], errors="coerce").fillna(pd.Timestamp.max)
+            else:
+                q["_fecha_imp"] = pd.Timestamp.max
+            
+            if "PrioriImp" in q.columns:
+                q["_priori_imp_num"] = pd.to_numeric(q["PrioriImp"], errors="coerce").fillna(9999)
+            else:
+                q["_priori_imp_num"] = 9999
+                
+            q.sort_values(by=["ManualPriority", "_fecha_imp", "_priori_imp_num", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                          ascending=[True, True, True, False, True, True, False], inplace=True)
+            colas[m] = deque(q.to_dict("records"))
         else: 
             # Orden por defecto: ManualPriority -> Agrupados -> New Urgent -> Soft Locked -> Urgente -> DueDate -> Orden Proceso -> Cantidad
             # Standard sorting
@@ -793,45 +808,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     # Esto permite que la tarea entre como "candidata futura"
                     # y se respete su prioridad manual al programar huecos.
                     
-                    # Intentar estimar cuándo terminará el proceso previo
-                    # buscando la tarea correspondiente en alguna cola
-                    estimated_end = None
-                    for m_name, cola_items in colas.items():
-                        for item in cola_items:
-                            if item.get("OT_id") == ot and clean(item.get("Proceso", "")) == p_clean:
-                                # Encontramos la tarea upstream en una cola
-                                # Estimar su duración + el tiempo actual de esa máquina
-                                try:
-                                    if m_name not in agenda:
-                                        continue # skip if machine not initialized
-
-                                    from modules.utils.tiempos_y_setup import tiempo_operacion_h
-                                    m_dt = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"])
-                                    orden_fake = df_ordenes.loc[item["idx"]].copy() if "idx" in item else None
-                                    if orden_fake is not None:
-                                        _, dur_h = tiempo_operacion_h(orden_fake, str(item.get("Proceso", "")), m_name, cfg)
-                                        estimated_end = m_dt + timedelta(hours=dur_h)
-                                    else:
-                                        # Fallback: estimar 4 horas
-                                        estimated_end = m_dt + timedelta(hours=4)
-                                except Exception:
-                                    if m_name in agenda:
-                                        estimated_end = datetime.combine(agenda[m_name]["fecha"], agenda[m_name]["hora"]) + timedelta(hours=4)
-                                    else:
-                                        estimated_end = None # Cannot estimate if machine unknown
-                                break
-                        if estimated_end:
-                            break
-                    
-                    if estimated_end:
-                        # El proceso previo EXISTE en una cola → será programado
-                        # Retornar como "ejecutable en el futuro" en vez de bloqueado
-                        is_debug_ot = DEBUG_OT and str(t.get("OT_id", "")).startswith(DEBUG_OT)
-                        if is_debug_ot:
-                            print(f"    🔍 [VERIF {DEBUG_OT}] proc_previo='{p_clean}' no completado pero EN COLA → estimado: {estimated_end}")
-                        return (True, estimated_end)
-                    else:
-                        return (False, None) # Proceso previo no está en ninguna cola → realmente bloqueado
+                    return (False, None) # Proceso previo no completado -> bloqueado
                 else: 
                      # Si está completado, necesitamos su nombre Raw para buscar fecha fin.
                      raw_match = next((c for c in completado[ot] if clean(c) == p_clean), None)

@@ -149,7 +149,7 @@ def _cola_troquelada(q):
     for troq, g in q.groupby("_troq_key", dropna=False):
         min_prio = g["ManualPriority"].min()
         due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
-        es_urgente = g["Urgente"].any()
+        es_urgente = g.get("Urgente", pd.Series([False]*len(g))).any()
         g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
                                  ascending=[True, False, True, False])
         grupos.append((min_prio, not es_urgente, due_min, troq, g_sorted.to_dict("records")))
@@ -162,7 +162,7 @@ def _cola_cortadora_bobina(q):
     1. Materia Prima
     2. Medida (Ancho y Largo)
     3. Gramaje (Grs./Nº)
-    Dentro del grupo ordena por Urgente y DueDate.
+    Dentro del grupo ordena por Prioridades de Excel, Urgente y DueDate.
     """
     if q.empty: return deque()
     q = q.copy()
@@ -171,44 +171,39 @@ def _cola_cortadora_bobina(q):
     if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
     q["ManualPriority"] = q["ManualPriority"].fillna(9999).astype(int)
 
+    # Propagar prioridad de impresión
+    if "FechaImDdp" in q.columns:
+        q["_fecha_imp"] = pd.to_datetime(q["FechaImDdp"], errors="coerce").fillna(pd.Timestamp.max)
+    else:
+        q["_fecha_imp"] = pd.Timestamp.max
+    
+    if "PrioriImp" in q.columns:
+        q["_priori_imp_num"] = pd.to_numeric(q["PrioriImp"], errors="coerce").fillna(9999)
+    else:
+        q["_priori_imp_num"] = 9999
+
     # Normalización de claves
     q["_mp_key"] = q.get("MateriaPrima", "").fillna("").astype(str).str.strip().str.lower()
-    
-    # Para medida, combinamos Ancho y Largo en un string o tupla para agrupar
-    # Asumimos que PliAnc y PliLar vienen como float o int
-    q["_medida_key"] = q.apply(lambda x: f"{float(x.get('PliAnc',0) or 0):.2f}x{float(x.get('PliLar',0) or 0):.2f}", axis=1)
-    
-    # Gramaje
-    q["_gramaje_key"] = q.get("Gramaje", 0).fillna(0).astype(float)
+    q["_pli_key"] = q.get("PliAnc", 0).astype(str) + "x" + q.get("PliLar", 0).astype(str)
+    q["_gram_key"] = q.get("Gramaje", 0).astype(str)
 
-    q["DueDate"] = pd.to_datetime(q["DueDate"], dayfirst=True, errors="coerce")
-    
-    # Ensure Sort Cols
-    
-
-    
     grupos = []
-    
-    # Agrupamos jerárquicamente
-    # GroupBy respeta el orden de las columnas dadas en la lista, creando un MultiIndex
-    for (mp, medida, gramaje), g in q.groupby(["_mp_key", "_medida_key", "_gramaje_key"], dropna=False):
-        
-        # Metadatos del grupo
+    for (mp, medida, gramaje), g in q.groupby(["_mp_key", "_pli_key", "_gram_key"], dropna=False):
         min_prio = g["ManualPriority"].min()
-        due_min = g["DueDate"].min() or pd.Timestamp.max
-        es_urgente = g["Urgente"].any()
-
+        fecha_imp_min = g["_fecha_imp"].min()
+        priori_imp_min = g["_priori_imp_num"].min()
+        due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
+        es_urgente = g.get("Urgente", pd.Series([False]*len(g))).any()
         
-        # Orden interno del grupo (Para respetar FIFO/Urgencia dentro del mismo setup)
-        g_sorted = g.sort_values(["ManualPriority", "Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[True, False, True, False])
+        g_sorted = g.sort_values(["ManualPriority", "_fecha_imp", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[True, True, True, False, True, False])
         
         # Guardamos el grupo. 
-        grupos.append((min_prio, not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
+        grupos.append((min_prio, fecha_imp_min, priori_imp_min, not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
         
     grupos.sort()
     
-    return deque([item for _, _, _, _, _, _, recs in grupos for item in recs])
+    return deque([item for *_, recs in grupos for item in recs])
 
 def get_downstream_presence_score(task, colas, maquinas_info, maquina_actual, last_tasks_map=None):
     """
