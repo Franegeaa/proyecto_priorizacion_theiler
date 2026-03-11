@@ -42,7 +42,7 @@ def render_daily_details_section(schedule):
             for col in df_show_day.select_dtypes(include=['object']).columns:
                 df_show_day[col] = df_show_day[col].fillna("").astype(str)
 
-            st.dataframe(df_show_day, use_container_width=True)
+            st.dataframe(df_show_day, width='stretch')
             
             buf = dataframe_to_excel_bytes(df_show_day, sheet_name=f"Dia {d_seleccionado}")
             st.download_button(

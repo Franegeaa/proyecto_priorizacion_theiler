@@ -91,7 +91,7 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
             "Proceso Más Largo": st.column_config.TextColumn("Proceso Más Largo"),
             "Mayor Espera Previa": st.column_config.TextColumn("Mayor Espera Previa"),
         },
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row"
@@ -170,7 +170,7 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
                     ),
                     "Duración (h)": st.column_config.NumberColumn(format="%.1f h")
                 },
-                use_container_width=True,
+                width='stretch',
                 hide_index=True
             )
             

@@ -1,7 +1,15 @@
 import pandas as pd
+import numpy as np
 from modules.utils.config_loader import es_si 
 from .machines import elegir_maquina
 from .priorities import _clave_prioridad_maquina
+
+# Mapeo de ID de troqueladora del Excel a nombre de máquina interno
+TROQUELADORA_ID_MAP = {
+    7: "Troq Nº 2 Ema",
+    5: "Troq Nº 1 Gus",
+    105: "Duyan",
+}
 
 
 def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_constraints=False):
@@ -129,8 +137,29 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 maquina = maquina_from_priority
                 has_manual_prio_machine = True
             else:
-                maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
-                has_manual_prio_machine = False
+                # --- ASIGNACIÓN POR TROQUELADORA DEL EXCEL (TroqueladoraDdp) ---
+                # Solo forzar máquina del Excel si tiene FECHA y PRIORIDAD asignadas
+                if "troquel" in proceso.lower():
+                    troq_id = row.get("TroqueladoraDdp")
+                    fecha_tro = row.get("FechaTroDdp")
+                    priori_tro = row.get("PrioriTr")
+                    tiene_plan_completo = (pd.notna(troq_id) and pd.notna(fecha_tro) and pd.notna(priori_tro))
+                    
+                    if tiene_plan_completo:
+                        troq_id_int = int(float(troq_id))
+                        if troq_id_int in TROQUELADORA_ID_MAP:
+                            maquina = TROQUELADORA_ID_MAP[troq_id_int]
+                            has_manual_prio_machine = True  # Excel plan overrides locked_assignments
+                        else:
+                            maquina = elegir_maquina(proceso, row, cfg, None)
+                            has_manual_prio_machine = False
+                    else:
+                        maquina = elegir_maquina(proceso, row, cfg, None)
+                        has_manual_prio_machine = False
+                else:
+                    maquina = elegir_maquina(proceso, row, cfg, None)
+                    has_manual_prio_machine = False
+
             
             # --- Check Outsourced/Skipped/Priority ---
             str_maq = str(maquina)
@@ -225,8 +254,11 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "_PEN_ImpresionFlexo": row.get("_PEN_ImpresionFlexo"),
                 "_PEN_ImpresionOffset": row.get("_PEN_ImpresionOffset"),
                 "ProcesoDpd": row.get("ProcesoDpd", ""), # ProcesoDpd para reordenamiento dinámico
-                "PrioriImp": row.get("PrioriImp", ""), # Prioridad desde Excel
-                "FechaImDdp": row.get("FechaImDdp"),    # Fecha asociada a la prioridad Excel
+                "PrioriImp": row.get("PrioriImp", ""), # Prioridad desde Excel (Impresión)
+                "FechaImDdp": row.get("FechaImDdp"),    # Fecha asociada a la prioridad Excel (Impresión)
+                "PrioriTr": row.get("PrioriTr", ""),     # Prioridad desde Excel (Troquelado)
+                "FechaTroDdp": row.get("FechaTroDdp"),   # Fecha asociada a la prioridad Excel (Troquelado)
+                "TroqueladoraDdp": row.get("TroqueladoraDdp"),  # ID de troqueladora del Excel
                 
                 # Manual Override Params
                 "ManualPriority": manual_prio,

@@ -147,7 +147,7 @@ def render_overtime_section(maquinas_activas, fecha_inicio_plan, persistence=Non
                 st.dataframe(
                     pd.DataFrame(rows_display),
                     hide_index=True,
-                    use_container_width=True
+                    width='stretch'
                 )
             
             if st.button("🗑️ Limpiar TODAS las horas extras guardadas", type="secondary"):

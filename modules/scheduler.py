@@ -34,7 +34,6 @@ from modules.utils.tiempos_y_setup import (
 PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
 
 # DEBUG: OT específica para rastrear
-DEBUG_OT = None
 
 def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
     """
@@ -83,15 +82,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    # --- RASTREO OT ESPECÍFICA ---
-    if DEBUG_OT:
-        dbg_mask = tasks["OT_id"] == DEBUG_OT
-        if dbg_mask.any():
-            for _, r in tasks[dbg_mask].iterrows():
-                print(f"\n🔍 [TRACE {DEBUG_OT}] Expandida: Proceso={r['Proceso']} Maquina={r['Maquina']} IsOutsourced={r.get('IsOutsourced')} IsSkipped={r.get('IsSkipped')} ManualAssignment={r.get('ManualAssignment')} MP={r.get('MateriaPrimaPlanta')}")
-        else:
-            print(f"\n🔍 [TRACE {DEBUG_OT}] ⚠️ NO ENCONTRADA en tasks después de _expandir_tareas")
-    
     # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE ---
     # Toda orden que sea de "Cartonaje" se elimina completamente del plan
     if "Cliente" in tasks.columns:
@@ -219,7 +209,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 # Guardamos resultado
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} | 
+                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} | 
                                  {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
                                   "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
                 
@@ -578,12 +568,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         m_lower = m.lower()
         
         if q.empty: colas[m] = deque()
-        elif ("troquel" in m_lower) or ("duyan" in m_lower) or ("manual" in m_lower): colas[m] = _cola_troquelada(q)
+        elif ("troquel" in m_lower) or ("troq" in m_lower) or ("duyan" in m_lower) or ("manual" in m_lower): colas[m] = _cola_troquelada(q)
         elif ("offset" in m_lower) or ("heidelberg" in m_lower): colas[m] = _cola_impresora_offset(q)
         elif ("flexo" in m_lower) or ("impres" in m_lower): colas[m] = _cola_impresora_flexo(q)
         elif "bobina" in m_lower: colas[m] = _cola_cortadora_bobina(q)
         elif "guillotina" in m_lower:
-            # Guillotina Propaga Prioridad de Impresión
+            # Guillotina Propaga Prioridad de Impresión Y Troquelado
+            # Toma la MEJOR prioridad entre ambas (la más prioritaria gana)
             if "FechaImDdp" in q.columns:
                 q["_fecha_imp"] = pd.to_datetime(q["FechaImDdp"], errors="coerce").fillna(pd.Timestamp.max)
             else:
@@ -593,10 +584,26 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 q["_priori_imp_num"] = pd.to_numeric(q["PrioriImp"], errors="coerce").fillna(9999)
             else:
                 q["_priori_imp_num"] = 9999
+
+            if "FechaTroDdp" in q.columns:
+                q["_fecha_tro"] = pd.to_datetime(q["FechaTroDdp"], errors="coerce").fillna(pd.Timestamp.max)
+            else:
+                q["_fecha_tro"] = pd.Timestamp.max
+            
+            if "PrioriTr" in q.columns:
+                q["_priori_tro_num"] = pd.to_numeric(q["PrioriTr"], errors="coerce").fillna(9999)
+            else:
+                q["_priori_tro_num"] = 9999
+
+            # Elegir la MEJOR prioridad entre impresión y troquelado:
+            # La fecha más temprana y la prioridad más baja ganan
+            q["_mejor_fecha"] = q[["_fecha_imp", "_fecha_tro"]].min(axis=1)
+            q["_mejor_priori"] = q[["_priori_imp_num", "_priori_tro_num"]].min(axis=1)
                 
-            q.sort_values(by=["ManualPriority", "_fecha_imp", "_priori_imp_num", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+            q.sort_values(by=["ManualPriority", "_mejor_fecha", "_mejor_priori", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
                           ascending=[True, True, True, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
+
         else: 
             # Orden por defecto: ManualPriority -> Agrupados -> New Urgent -> Soft Locked -> Urgente -> DueDate -> Orden Proceso -> Cantidad
             # Standard sorting
@@ -605,11 +612,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             colas[m] = deque(q.to_dict("records"))
 
     # --- RASTREO OT ESPECÍFICA: mostrar en qué cola quedó ---
-    if DEBUG_OT:
-        for m_name, q_items in colas.items():
-            for qi, item in enumerate(q_items):
-                if item.get("OT_id") == DEBUG_OT:
-                    print(f"🔍 [TRACE {DEBUG_OT}] En cola de '{m_name}' posición [{qi}] (Proceso={item.get('Proceso')} Troquel={item.get('CodigoTroquel')})")
     
 
     # Crear la cola del POOL si existe
@@ -871,9 +873,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         else:
             final_avail = last_end
             
-        is_debug_ot = DEBUG_OT and str(t.get("OT_id", "")).startswith(DEBUG_OT)
-        if is_debug_ot:
-            print(f"    🔍 [VERIF {DEBUG_OT}] proc='{proc_actual_clean}' | last_end={last_end} | arrival={arrival_date} → avail={final_avail}")
             
         return (final_runnable, final_avail)
 
@@ -926,7 +925,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Register Result
                         filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
                                         {"Setup_min": 0.0, "Proceso_h": duration_virt,
                                         "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
                                         "Motivo": "Outsourced/Skipped", "Maquina": maquina})
@@ -1012,17 +1011,24 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 urgent_deadline_dt = None
                 
                 # --- PRE-SCAN: Detectar tareas con prioridad Excel esperando dependencias ---
-                # Si hay alguna tarea con PrioriImp válida que no está lista aún,
+                # Si hay alguna tarea con PrioriImp o PrioriTr válida que no está lista aún,
                 # establecemos urgent_deadline_dt para impedir que gap-fillers sin prioridad la adelanten.
                 for t_prescan in colas[maquina]:
                     try:
-                        prescan_prio_excel = float(t_prescan.get("PrioriImp", 9999))
-                        if pd.isna(prescan_prio_excel): prescan_prio_excel = 9999
+                        prescan_prio_excel_imp = float(t_prescan.get("PrioriImp", 9999))
+                        if pd.isna(prescan_prio_excel_imp): prescan_prio_excel_imp = 9999
                     except (ValueError, TypeError):
-                        prescan_prio_excel = 9999
+                        prescan_prio_excel_imp = 9999
+
+                    try:
+                        prescan_prio_excel_tro = float(t_prescan.get("PrioriTr", 9999))
+                        if pd.isna(prescan_prio_excel_tro): prescan_prio_excel_tro = 9999
+                    except (ValueError, TypeError):
+                        prescan_prio_excel_tro = 9999
+
                     prescan_prio_man = int(t_prescan.get("ManualPriority", 9999))
                     
-                    if prescan_prio_excel < 9999 or prescan_prio_man < 9000:
+                    if prescan_prio_excel_imp < 9999 or prescan_prio_excel_tro < 9999 or prescan_prio_man < 9000:
                         prescan_runnable, prescan_avail = verificar_disponibilidad(t_prescan, maquina)
                         if prescan_runnable:
                             if prescan_avail and prescan_avail > current_agenda_dt:
@@ -1051,29 +1057,34 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         mp_ok = True
                     
                     if not mp_ok:
-                        if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
-                            print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ⛔ BLOQUEADA por MP (MateriaPrimaPlanta={t_cand.get('MateriaPrimaPlanta')})")
                         continue
 
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                     
                     if not runnable: 
                         # Tarea no ejecutable: saltear y seguir buscando alternativas
-                        if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
-                            print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ❌ NO EJECUTABLE (dep pendiente)")
                         continue
                     
                     # --- SUPER OVERRIDE: MANUAL PRIORITY / EXCEL PRIORITY ---
                     prio_man = int(t_cand.get("ManualPriority", 9999))
-                    # Verificar también la prioridad del Excel (PrioriImp)
-                    try:
-                        prio_excel = float(t_cand.get("PrioriImp", 9999))
-                        if pd.isna(prio_excel): prio_excel = 9999
-                    except (ValueError, TypeError):
-                        prio_excel = 9999
                     
-                    # Si tiene prioridad alta (manual < 9000 o Excel < 9999), es sagrada.
-                    tiene_prioridad = prio_man < 9000 or prio_excel < 9999
+                    # Verificar la prioridad de Impresión (PrioriImp)
+                    try:
+                        prio_excel_imp = float(t_cand.get("PrioriImp", 9999))
+                        if pd.isna(prio_excel_imp): prio_excel_imp = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_imp = 9999
+
+                    # Verificar la prioridad de Troquelado (PrioriTr)
+                    try:
+                        prio_excel_tro = float(t_cand.get("PrioriTr", 9999))
+                        if pd.isna(prio_excel_tro): prio_excel_tro = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_tro = 9999
+                    
+                    # Si tiene prioridad alta (manual < 9000, Impresión < 9999 o Troquel < 9999), es sagrada.
+                    tiene_prioridad = prio_man < 9000 or prio_excel_imp < 9999 or prio_excel_tro < 9999
+                    
                     if tiene_prioridad:
                         # Check start constraints
                         is_ready_now = not available_at or available_at <= current_agenda_dt
@@ -1154,8 +1165,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     fits_gap = True
                                 
                         if not fits_gap:
-                            if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
-                                print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ❌ RECHAZADA (Dura {round(proc_h_gap, 2)}h > Hueco {round(time_to_urgent, 2)}h)")
                             continue
                         
                         if is_prep_machine:
@@ -1172,16 +1181,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             # If score is very high, maybe break? For now, scan full window.
                         else:
                             # STANDARD FIFO Logic (Gap Filling)
-                            if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
-                                print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ✅ LISTA AHORA → SELECCIONADA")
                             idx_cand = i
                             mejor_candidato_futuro = None
                             break
                     
                     else:
                         # Si no está lista ya, pero es runnable, la guardamos como opción futura
-                        if DEBUG_OT and str(t_cand.get("OT_id", "")).startswith(DEBUG_OT):
-                            print(f"  🔍 [{i}] TRACE {DEBUG_OT} en {maquina} @ {current_agenda_dt} → ⏳ FUTURA (disponible: {available_at})")
                         if mejor_candidato_futuro is None:
                             mejor_candidato_futuro = (i, available_at)
                         else:
@@ -1637,7 +1642,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1673,7 +1678,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1687,6 +1692,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         if tarea_robada:
                             break # Salir del while de tareas_agendadas para reevaluar la cola
+
+            if tasks_scheduled_count > 0:
+                break # Yield GLOBAL para todas las máquinas (resincronizar relojes)
 
     # =================================================================
     # 6. SALIDAS 

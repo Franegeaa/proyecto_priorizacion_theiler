@@ -60,7 +60,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 df_show[col] = df_show[col].fillna("").astype(str)
             # ------------------------------------
 
-            st.dataframe(df_show, use_container_width=True)
+            st.dataframe(df_show, width='stretch')
             
             # --- Custom Download Button ---
             buf = dataframe_to_excel_bytes(df_show, sheet_name="Detalle OT")
@@ -124,7 +124,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 df_maquina_display[col] = df_maquina_display[col].fillna("").astype(str)
             # ------------------------------------
 
-            st.dataframe(df_maquina_display, use_container_width=True)
+            st.dataframe(df_maquina_display, width='stretch')
             
             # --- Custom Download Button ---
             buf = dataframe_to_excel_bytes(df_maquina_display, sheet_name=f"Detalle {maquina_sel[:25]}")
@@ -328,9 +328,21 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  
                  final_mask = mask_no_override & mask_excel_has_val & mask_excel_valid & mask_es_impresion
                  df_editor.loc[final_mask, "Prioridad"] = df_editor.loc[final_mask, "PrioriImp"]
+            
+            # Pre-fill 'Prioridad' con PrioriTr para Troquelado
+            if "PrioriTr" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioriTr"] = pd.to_numeric(df_editor["PrioriTr"], errors="coerce").fillna(9999)
                  
-                 # We don't need to display the explicit Excel column anymore if we merged it
+                 mask_no_override_tr = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_tr = df_editor["PrioriTr"] != 9999
+                 mask_excel_valid_tr = df_editor["PrioriTr"].notna()
+                 mask_es_troquelado = df_editor["Proceso"].astype(str).str.lower().str.contains("troquel", na=False)
                  
+                 final_mask_tr = mask_no_override_tr & mask_excel_has_val_tr & mask_excel_valid_tr & mask_es_troquelado
+                 df_editor.loc[final_mask_tr, "Prioridad"] = df_editor.loc[final_mask_tr, "PrioriTr"]
+                 
+
             # Select columns to show/edit
             cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
@@ -497,7 +509,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     "DueDate": st.column_config.DatetimeColumn(format="D/M HH:mm", disabled=True), 
                 },
                 column_order=st.session_state.details_column_order,
-                use_container_width=True,
+                width='stretch',
                 height=600,
                 hide_index=True,
                 key="editor_plan_completo"

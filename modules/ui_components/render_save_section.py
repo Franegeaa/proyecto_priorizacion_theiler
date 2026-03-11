@@ -7,7 +7,7 @@ def _confirm_save_dialog(pm):
     
     col_yes, col_no = st.columns(2)
     with col_yes:
-        if st.button("✅ Ya descargué, guardar", use_container_width=True, key="confirm_save_yes"):
+        if st.button("✅ Ya descargué, guardar", width='stretch', key="confirm_save_yes"):
             if "last_schedule" in st.session_state and not st.session_state.last_schedule.empty:
                 if pm.connected:
                     pm.save_schedule(st.session_state.last_schedule)
@@ -20,7 +20,7 @@ def _confirm_save_dialog(pm):
             else:
                 st.warning("⚠️ No hay una planificación generada para guardar.")
     with col_no:
-        if st.button("❌ Cancelar", use_container_width=True, key="confirm_save_no"):
+        if st.button("❌ Cancelar", width='stretch', key="confirm_save_no"):
             st.rerun()
 
 

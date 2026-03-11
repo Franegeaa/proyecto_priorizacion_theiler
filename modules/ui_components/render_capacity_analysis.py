@@ -201,7 +201,7 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                 fig_carga.update_xaxes(categoryorder='array', categoryarray=df_chart['Maquina'].tolist())
                 fig_carga.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
                 fig_carga.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-                st.plotly_chart(fig_carga, use_container_width=True)
+                st.plotly_chart(fig_carga, width='stretch')
                 
                 # Alerta de Riesgo Global
                 maquinas_riesgo = df_chart[df_chart["Balance"] < -0.1]
@@ -407,7 +407,7 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                 fig_temp.update_xaxes(categoryorder='array', categoryarray=df_temp['Maquina'].tolist())
                 fig_temp.update_traces(texttemplate='%{text:.1f} h', textposition='outside')
                 fig_temp.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-                st.plotly_chart(fig_temp, use_container_width=True)
+                st.plotly_chart(fig_temp, width='stretch')
             else:
                 st.warning("No hay datos de carga ni capacidad para el periodo seleccionado.")
 
