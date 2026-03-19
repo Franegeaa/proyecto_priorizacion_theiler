@@ -97,10 +97,10 @@ def _cola_impresora_universal(q):
             fecha_imp_min = g["_fecha_imp"].min()
             priori_imp_min = g["_priori_imp_num"].min()
             
-            g_sorted = g.sort_values(["ManualPriority", "_fecha_imp", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[True, True, True, False, True, False])
-            # Tupla: (ManualPrio, FechaExcel, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
-            grupos_todos.append((min_prio, fecha_imp_min, priori_imp_min, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            g_sorted = g.sort_values(["ManualPriority", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[True, True, False, True, False])
+            # Tupla: (ManualPrio, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
+            grupos_todos.append((min_prio, priori_imp_min, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
         # 3.2 PANTONE -> Agrupar por CLIENTE + COLOR
         for keys, g in q_pantone.groupby(["_cliente_key", "_color_key"], dropna=False):
@@ -110,10 +110,10 @@ def _cola_impresora_universal(q):
             fecha_imp_min = g["_fecha_imp"].min()
             priori_imp_min = g["_priori_imp_num"].min()
 
-            g_sorted = g.sort_values(["ManualPriority", "_fecha_imp", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[True, True, True, False, True, False])
-            # Tupla: (ManualPrio, FechaExcel, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
-            grupos_todos.append((min_prio, fecha_imp_min, priori_imp_min, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            g_sorted = g.sort_values(["ManualPriority", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[True, True, False, True, False])
+            # Tupla: (ManualPrio, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
+            grupos_todos.append((min_prio, priori_imp_min, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
     # 4. GRUPO BARNIZADO (Prioridad 1)
     # ------------------------------------------------------------
@@ -126,10 +126,10 @@ def _cola_impresora_universal(q):
             fecha_imp_min = g["_fecha_imp"].min()
             priori_imp_min = g["_priori_imp_num"].min()
 
-            g_sorted = g.sort_values(["ManualPriority", "_fecha_imp", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
-                                     ascending=[True, True, True, False, True, False])
-            # Tupla: (ManualPrio, FechaExcel, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
-            grupos_todos.append((min_prio, fecha_imp_min, priori_imp_min, not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
+            g_sorted = g.sort_values(["ManualPriority", "_priori_imp_num", "Urgente", "DueDate", "CantidadPliegos"], 
+                                     ascending=[True, True, False, True, False])
+            # Tupla: (ManualPrio, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
+            grupos_todos.append((min_prio, priori_imp_min, not es_urgente, due_min, 1, cliente, "barniz", g_sorted.to_dict("records")))
 
     # 5. ORDENAMIENTO FINAL
     # ------------------------------------------------------------
@@ -165,10 +165,10 @@ def _cola_troquelada(q):
         due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
         es_urgente = g.get("Urgente", pd.Series([False]*len(g))).any()
         
-        g_sorted = g.sort_values(["ManualPriority", "_fecha_tro", "_priori_tro_num", "Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[True, True, True, False, True, False])
+        g_sorted = g.sort_values(["ManualPriority", "_priori_tro_num", "Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[True, True, False, True, False])
         
-        grupos.append((min_prio, fecha_tro_min, priori_tro_min, not es_urgente, due_min, troq, g_sorted.to_dict("records")))
+        grupos.append((min_prio, priori_tro_min, not es_urgente, due_min, troq, g_sorted.to_dict("records")))
     
     grupos.sort()
     return deque([item for *_, recs in grupos for item in recs])
@@ -227,11 +227,11 @@ def _cola_cortadora_bobina(q):
         due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
         es_urgente = g.get("Urgente", pd.Series([False]*len(g))).any()
         
-        g_sorted = g.sort_values(["ManualPriority", "_mejor_fecha", "_mejor_priori", "Urgente", "DueDate", "CantidadPliegos"], 
-                                 ascending=[True, True, True, False, True, False])
+        g_sorted = g.sort_values(["ManualPriority", "_mejor_priori", "Urgente", "DueDate", "CantidadPliegos"], 
+                                 ascending=[True, True, False, True, False])
         
         # Guardamos el grupo. 
-        grupos.append((min_prio, fecha_mejor_min, priori_mejor_min, not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
+        grupos.append((min_prio, priori_mejor_min, not es_urgente, due_min, mp, medida, gramaje, g_sorted.to_dict("records")))
 
         
     grupos.sort()

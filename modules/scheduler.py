@@ -600,8 +600,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             q["_mejor_fecha"] = q[["_fecha_imp", "_fecha_tro"]].min(axis=1)
             q["_mejor_priori"] = q[["_priori_imp_num", "_priori_tro_num"]].min(axis=1)
                 
-            q.sort_values(by=["ManualPriority", "_mejor_fecha", "_mejor_priori", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
-                          ascending=[True, True, True, False, True, True, False], inplace=True)
+            q.sort_values(by=["ManualPriority", "_mejor_priori", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                          ascending=[True, True, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
         else: 
