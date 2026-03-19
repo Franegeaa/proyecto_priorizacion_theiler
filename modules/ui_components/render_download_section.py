@@ -6,7 +6,7 @@ from modules.utils.exporters import (
     generar_csv_ot_str
 )
 
-def render_download_section(schedule, resumen_ot, carga_md):
+def render_download_section(schedule, resumen_ot, carga_md, key_suffix=""):
     """Renders the unified download section."""
     st.subheader("📋 Exportar")
 
@@ -32,7 +32,7 @@ def render_download_section(schedule, resumen_ot, carga_md):
             data=buf_excel,
             file_name="Plan_Produccion_Theiler.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="btn_excel_maq"
+            key=f"btn_excel_maq_{key_suffix}"
         )
         
         # st.download_button(
@@ -52,6 +52,6 @@ def render_download_section(schedule, resumen_ot, carga_md):
             data=buf_ot,
             file_name="Plan_Produccion_Por_OT.xls",
             mime="application/vnd.ms-excel",
-            key="btn_excel_ot"
+            key=f"btn_excel_ot_{key_suffix}"
         )
   

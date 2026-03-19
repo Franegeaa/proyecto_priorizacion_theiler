@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from modules.schedulers.machines import validar_medidas_troquel
 
-def render_manual_machine_assignment(cfg, df, maquinas_activas):
+def render_manual_machine_assignment(cfg, df, maquinas_activas, key_suffix=""):
     """
     Renders UI for manual assignment of OTs to specific machines:
     - Troqueladora Manual 3
@@ -27,7 +27,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                 break
     
     active_targets = sorted(list(set(active_targets)))
-
+ 
     if not active_targets:
         return {}
         
@@ -37,7 +37,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
     if "manual_assignments" not in st.session_state:
         st.session_state.manual_assignments = {}
 
-    mode = st.radio("Modo de Asignación:", ["Por Tarea (Búsqueda inteligente)", "Por Máquina (Lista)"], horizontal=True)
+    mode = st.radio("Modo de Asignación:", ["Por Tarea (Búsqueda inteligente)", "Por Máquina (Lista)"], horizontal=True, key=f"assign_mode_{key_suffix}")
 
     if mode == "Por Máquina (Lista)":
         with st.expander("Configurar Asignaciones Manuales", expanded=True):
@@ -73,7 +73,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
 
                         elif "descartonad" in maq.lower():
                             if "_PEN_Descartonado" in df.columns:
-                                mask_relevant = mask_relevant & df["_PEN_Descartonado"]
+                                 mask_relevant = mask_relevant & df["_PEN_Descartonado"]
                             
                             if "MateriaPrimaPlanta" in df.columns:
                                  is_missing = df["MateriaPrimaPlanta"].astype(str).str.strip().str.lower().isin(["si", "true", "verdadero", "1", "x"])
@@ -89,7 +89,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                         f"Órdenes para {maq}",
                         options=candidates,
                         default=[x for x in prev_sel if x in candidates],
-                        key=f"manual_assign_{maq}"
+                        key=f"manual_assign_{maq}_{key_suffix}"
                     )
                     
                     if sel:
@@ -123,7 +123,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                 df_search["SearchLabel"] = df_search["OT_id"] + " | " + df_search["Cliente"].astype(str) + " | " + desc_col
                 search_options = sorted(df_search["SearchLabel"].unique().tolist())
                 
-                selected_label = st.selectbox("🔍 Buscar Tarea (OT | Cliente | Descripción):", [""] + search_options, index=0)
+                selected_label = st.selectbox("🔍 Buscar Tarea (OT | Cliente | Descripción):", [""] + search_options, index=0, key=f"search_ot_{key_suffix}")
                 
                 if selected_label:
                     ot_id = selected_label.split(" | ")[0]
@@ -199,7 +199,8 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                             "Seleccionar Máquina Destino:", 
                             options=all_process_machines,
                             index=0 if compatible_machines else 0, # Muestra primero la que toque en la lista (mejor armar orden)
-                            format_func=lambda x: f"⭐ {x} (Recomendada)" if x in compatible_machines else f"⚠️ {x} (No recomendada)"
+                            format_func=lambda x: f"⭐ {x} (Recomendada)" if x in compatible_machines else f"⚠️ {x} (No recomendada)",
+                            key=f"target_maq_{key_suffix}"
                         )
                         
                         # Find warning if any
@@ -219,7 +220,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                         
                         if current_assign:
                             st.info(f"📌 Esta OT ya está asignada manualmente a: **{current_assign}**")
-                            if st.button(f"Mover a {target_maq}"):
+                            if st.button(f"Mover a {target_maq}", key=f"move_btn_{key_suffix}"):
                                 # Remove from old
                                 st.session_state.manual_assignments[current_assign].remove(ot_id)
                                 if not st.session_state.manual_assignments[current_assign]:
@@ -232,7 +233,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                                 st.rerun()
                         else:
                             texto_btn = f"Forzar Asignación a {target_maq}" if reason_for_target else f"Asignar a {target_maq}"
-                            if st.button(texto_btn):
+                            if st.button(texto_btn, key=f"assign_btn_{key_suffix}"):
                                 if target_maq not in st.session_state.manual_assignments:
                                     st.session_state.manual_assignments[target_maq] = []
                                 st.session_state.manual_assignments[target_maq].append(ot_id)

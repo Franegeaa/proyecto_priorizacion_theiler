@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 import plotly.express as px
 from modules.utils.config_loader import horas_por_dia, get_horas_totales_dia
 
-def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md):
+def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md, key_suffix=""):
     """
     Renders the Capacity and Load Analysis section.
     """
@@ -21,7 +21,8 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
             "Modo de Análisis:",
             ["Detectar Cuello de Botella (Próximo Vencimiento)", "Análisis Temporal (Carga por Periodo)"],
             index=0,
-            horizontal=True
+            horizontal=True,
+            key=f"modo_analisis_{key_suffix}"
         )
 
         # ---------------------------------------------------------
@@ -232,14 +233,14 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                     ["Día", "Semana", "Rango Personalizado"], 
                     index=0,
                     horizontal=True,
-                    key="filtro_cap_radio"
+                    key=f"filtro_cap_radio_{key_suffix}"
                 )
             with col_f2:
                 tipo_cliente_cap = st.selectbox(
                     "Filtrar por Cliente:",
                     ["(Todos)", "ESTANDAR", "PERSONALIZADOS"],
                     index=0,
-                    key="filtro_cap_cliente"
+                    key=f"filtro_cap_cliente_{key_suffix}"
                 )
             
             c_start = None
@@ -250,17 +251,17 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
             max_date = last_schedule_date + pd.Timedelta(days=180)
 
             if tipo_filtro_cap == "Día":
-                f_dia = st.date_input("Seleccioná el día:", value=min_date, min_value=min_date, max_value=max_date, key="cap_dia")
+                f_dia = st.date_input("Seleccioná el día:", value=min_date, min_value=min_date, max_value=max_date, key=f"cap_dia_{key_suffix}")
                 c_start = pd.Timestamp(f_dia)
                 c_end = c_start + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
             elif tipo_filtro_cap == "Semana":
-                f_sem = st.date_input("Seleccioná un día de la semana:", value=min_date, min_value=min_date, max_value=max_date, key="cap_sem")
+                f_sem = st.date_input("Seleccioná un día de la semana:", value=min_date, min_value=min_date, max_value=max_date, key=f"cap_sem_{key_suffix}")
                 start_week = f_sem - pd.Timedelta(days=f_sem.weekday())
                 c_start = pd.Timestamp(start_week)
                 c_end = c_start + pd.Timedelta(days=7) - pd.Timedelta(seconds=1)
                 st.info(f"Mostrando semana: {c_start.date()} al {c_end.date()}")
             elif tipo_filtro_cap == "Rango Personalizado":
-                fechas = st.date_input("Seleccioná Rango de Fechas:", value=(min_date, min_date), min_value=min_date, max_value=max_date, key="cap_rango")
+                fechas = st.date_input("Seleccioná Rango de Fechas:", value=(min_date, min_date), min_value=min_date, max_value=max_date, key=f"cap_rango_{key_suffix}")
                 if isinstance(fechas, tuple) and len(fechas) == 2:
                     c_start = pd.Timestamp(fechas[0])
                     c_end = pd.Timestamp(fechas[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
@@ -268,7 +269,7 @@ def render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga
                     st.warning("Seleccioná ambas fechas del rango.")
                     st.stop()
             elif tipo_filtro_cap == "Mes":
-                f_mes = st.date_input("Seleccioná un día del mes:", value=min_date, min_value=min_date, max_value=max_date, key="cap_mes")
+                f_mes = st.date_input("Seleccioná un día del mes:", value=min_date, min_value=min_date, max_value=max_date, key=f"cap_mes_{key_suffix}")
                 c_start = pd.Timestamp(f_mes.replace(day=1))
                 next_m = (c_start + pd.Timedelta(days=32)).replace(day=1)
                 c_end = next_m - pd.Timedelta(seconds=1)

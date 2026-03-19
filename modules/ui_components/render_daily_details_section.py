@@ -3,10 +3,10 @@ import pandas as pd
 from datetime import date
 from modules.utils.exporters import dataframe_to_excel_bytes
 
-def render_daily_details_section(schedule):
+def render_daily_details_section(schedule, key_suffix=""):
     if not schedule.empty:
         st.subheader("📆 **Visualización por Día**")
-        d_seleccionado = st.date_input("Seleccioná la fecha a visualizar:", value=date.today())
+        d_seleccionado = st.date_input("Seleccioná la fecha a visualizar:", value=date.today(), key=f"daily_date_pick_{key_suffix}")
         
         sel_start = pd.to_datetime(d_seleccionado)
         sel_end = sel_start + pd.Timedelta(days=1)
@@ -22,11 +22,11 @@ def render_daily_details_section(schedule):
             
             with col_f1:
                 unique_procs = sorted(df_dia["Proceso"].astype(str).unique().tolist())
-                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)", key="daily_proc_filter")
+                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)", key=f"daily_proc_filter_{key_suffix}")
                 
             with col_f2:
                 unique_maqs = sorted(df_dia["Maquina"].astype(str).unique().tolist())
-                filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)", key="daily_maq_filter")
+                filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)", key=f"daily_maq_filter_{key_suffix}")
 
             if filtro_proc:
                 df_dia = df_dia[df_dia["Proceso"].astype(str).isin(filtro_proc)]
@@ -50,7 +50,7 @@ def render_daily_details_section(schedule):
                 data=buf,
                 file_name=f"Plan_Dia_{d_seleccionado}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_dl_day_view"
+                key=f"btn_dl_day_view_{key_suffix}"
             )
         else:
             st.warning(f"No hay tareas planificadas para el {d_seleccionado}.")

@@ -3,7 +3,7 @@ import pandas as pd
 
 from modules.utils.config_loader import calculate_business_hours
 
-def render_delayed_orders_section(resumen_ot, schedule, cfg):
+def render_delayed_orders_section(resumen_ot, schedule, cfg, key_suffix=""):
     """
     Renders a table of delayed orders (where Estimated Completion > Due Date).
     """
@@ -94,7 +94,7 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
         width='stretch',
         hide_index=True,
         on_select="rerun",
-        selection_mode="single-row"
+        key=f"delayed_orders_table_{key_suffix}"
     )
 
     # --- BOTTLENECK ANALYSIS ---
@@ -171,7 +171,8 @@ def render_delayed_orders_section(resumen_ot, schedule, cfg):
                     "Duración (h)": st.column_config.NumberColumn(format="%.1f h")
                 },
                 width='stretch',
-                hide_index=True
+                hide_index=True,
+                key=f"bottleneck_analysis_table_{key_suffix}"
             )
             
             if bn_df.loc[max_wait_idx, "Tiempo Espera (h)"] > 0.1:

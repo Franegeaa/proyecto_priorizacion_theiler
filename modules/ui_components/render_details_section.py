@@ -5,7 +5,7 @@ from modules.utils.exporters import dataframe_to_excel_bytes
 from modules.utils.app_utils import ordenar_maquinas_personalizado
 from modules.ui_components.render_save_section import render_save_section
 
-def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # Added cfg param
+def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key_suffix=""): # Added cfg param
     """Renders the interactive details section."""
     st.subheader("🔎 Detalle interactivo")
     st.markdown("""
@@ -25,7 +25,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
     }
     </style>
     """, unsafe_allow_html=True)
-    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True)
+    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True, key=f"details_mode_{key_suffix}")
 
     if modo == "Orden de Trabajo (OT)":
         if not schedule.empty: 
@@ -41,7 +41,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 opciones_format.append(f"{ot_id} | {nombre_str}")
                 
             opciones = ["(Todas)"] + sorted(opciones_format)
-            elegido_str = st.selectbox("Elegí OT:", opciones)
+            elegido_str = st.selectbox("Elegí OT:", opciones, key=f"details_ot_select_{key_suffix}")
             
             if elegido_str == "(Todas)":
                 elegido = "(Todas)"
@@ -69,7 +69,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 data=buf,
                 file_name=f"Detalle_OT_{elegido if elegido != '(Todas)' else 'Todas'}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_dl_ot_detail"
+                key=f"btn_dl_ot_detail_{key_suffix}"
             )
             # ------------------------------
         else:
@@ -78,7 +78,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
     elif modo == "Máquina":
         if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
             maquinas_disponibles = ordenar_maquinas_personalizado(detalle_maquina["Maquina"].unique().tolist())
-            maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
+            maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles, key=f"details_maq_select_{key_suffix}")
 
             df_maquina = schedule[schedule["Maquina"] == maquina_sel].copy()
 
@@ -134,7 +134,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 data=buf,
                 file_name=f"Detalle_Maquina_{safe_name}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_dl_maq_detail"
+                key=f"btn_dl_maq_detail_{key_suffix}"
             )
             # ------------------------------
         else:
@@ -263,15 +263,15 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             col_f1, col_f2, col_f3 = st.columns([1, 2, 2])
             
             with col_f1:
-                show_skipped = st.toggle("Mostrar Saltados", value=False)
+                show_skipped = st.toggle("Mostrar Saltados", value=False, key=f"toggle_skipped_{key_suffix}")
             
             with col_f2:
                 unique_procs = sorted(df_full["Proceso"].astype(str).unique().tolist())
-                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)")
+                filtro_proc = st.multiselect("Filtrar por Proceso:", options=unique_procs, placeholder="(Todos)", key=f"filter_proc_{key_suffix}")
                 
             with col_f3:
                 unique_maqs = sorted(df_full["Maquina"].astype(str).unique().tolist())
-                filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)")
+                filtro_maq = st.multiselect("Filtrar por Máquina:", options=unique_maqs, placeholder="(Todas)", key=f"filter_maq_{key_suffix}")
             
             # --- DATE FILTER ---
             col_d1, col_d2 = st.columns(2)
@@ -281,9 +281,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             fecha_max = fechas_inicio.max().date() if not fechas_inicio.empty else date.today()
             
             with col_d1:
-                filtro_fecha_desde = st.date_input("Inicio desde:", value=fecha_min, min_value=fecha_min, max_value=fecha_max, key="filtro_fecha_desde")
+                filtro_fecha_desde = st.date_input("Inicio desde:", value=fecha_min, min_value=fecha_min, max_value=fecha_max, key=f"filtro_fecha_desde_{key_suffix}")
             with col_d2:
-                filtro_fecha_hasta = st.date_input("Inicio hasta:", value=fecha_max, min_value=fecha_min, max_value=fecha_max, key="filtro_fecha_hasta")
+                filtro_fecha_hasta = st.date_input("Inicio hasta:", value=fecha_max, min_value=fecha_min, max_value=fecha_max, key=f"filtro_fecha_hasta_{key_suffix}")
 
             # Apply Filters
             if not show_skipped:
@@ -371,7 +371,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                     "Agrega, quita o reordena columnas borrándolas y volviéndolas a agregar:",
                     options=cols_final,
                     default=valid_saved_cols,
-                    key="details_col_multiselect_widget"
+                    key=f"details_col_multiselect_widget_{key_suffix}"
                 )
                 
                 # Update saved order, only if changed to avoid unnecessary reruns
@@ -512,13 +512,13 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 width='stretch',
                 height=600,
                 hide_index=True,
-                key="editor_plan_completo"
+                key=f"editor_plan_completo_{key_suffix}"
             )
 
             # --- PROCESS CHANGES BUTTON ---
             col_btn, col_info = st.columns([1, 3])
             
-            if col_btn.button("Aplicar Cambios y Recalcular"):
+            if col_btn.button("Aplicar Cambios y Recalcular", key=f"apply_btn_{key_suffix}"):
                 if cfg and "manual_overrides" in st.session_state:
                     overrides = st.session_state.manual_overrides
                     has_changes = False
@@ -729,8 +729,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 blacklist = st.session_state.manual_overrides["blacklist_ots"]
                 if blacklist:
                      with st.expander(f"♻️ Restaurar Órdenes Eliminadas ({len(blacklist)})"):
-                        to_restore = st.multiselect("Seleccionar OT para restaurar:", sorted(list(blacklist)))
-                        if st.button("Restaurar Seleccionadas"):
+                        to_restore = st.multiselect("Seleccionar OT para restaurar:", sorted(list(blacklist)), key=f"restore_select_{key_suffix}")
+                        if st.button("Restaurar Seleccionadas", key=f"restore_btn_{key_suffix}"):
                             for ot in to_restore:
                                 st.session_state.manual_overrides["blacklist_ots"].remove(ot)
                             st.rerun()

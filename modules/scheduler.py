@@ -82,9 +82,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE ---
-    # Toda orden que sea de "Cartonaje" se elimina completamente del plan
-    if "Cliente" in tasks.columns:
+    # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE (Solo para Planta 1) ---
+    # Toda orden que sea de "Cartonaje" se elimina si no es Planta 2
+    if "Cliente" in tasks.columns and cfg.get("planta") != 2:
         tasks = tasks[~tasks["Cliente"].astype(str).str.lower().str.contains("cartonaje", na=False)]
         
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -366,7 +366,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # =================================================================
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
-    manuales = [m for m in troq_cfg["Maquina"].tolist() if "troq n" in str(m).lower()]
+    manuales = [m for m in troq_cfg["Maquina"].tolist() if "troq" in str(m).lower() or "manual" in str(m).lower()]
     iberica = [m for m in troq_cfg["Maquina"].tolist() if "iberica" in str(m).lower()]
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None

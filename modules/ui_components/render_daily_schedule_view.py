@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date, timedelta
 from modules.utils.config_loader import es_dia_habil, es_feriado
 
-def render_daily_schedule_view(schedule, cfg):
+def render_daily_schedule_view(schedule, cfg, key_suffix=""):
     """
     Renders a calendar view showing tasks assigned per day.
     """
@@ -16,7 +16,7 @@ def render_daily_schedule_view(schedule, cfg):
     # Filtro de fecha para navegar
     col1, col2 = st.columns([1, 3])
     with col1:
-        start_date = st.date_input("Fecha Inicio Calendario:", value=date.today(), key="cal_start_date")
+        start_date = st.date_input("Fecha Inicio Calendario:", value=date.today(), key=f"cal_start_date_{key_suffix}")
     
     # Mostramos 2 semanas por defecto desde la fecha elegida
     end_date = start_date + timedelta(days=7)
@@ -24,7 +24,7 @@ def render_daily_schedule_view(schedule, cfg):
     with col2:
         # Filtros adicionales
         unique_maqs = sorted(schedule["Maquina"].dropna().unique().tolist())
-        selected_maqs = st.multiselect("Filtrar Máquinas:", unique_maqs, default=[], placeholder="(Todas)", key="cal_maq_filter")
+        selected_maqs = st.multiselect("Filtrar Máquinas:", unique_maqs, default=[], placeholder="(Todas)", key=f"cal_maq_filter_{key_suffix}")
         
     # Preparar el dataframe expandiendo las tareas que cruzan multiples dias
     cal_start = start_date - timedelta(days=start_date.weekday())

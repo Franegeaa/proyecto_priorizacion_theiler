@@ -179,54 +179,98 @@ if archivo is not None:
     def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 
-    schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
-    st.session_state.last_schedule = schedule
+    # --- PLANT PARTITIONING ---
+    tab1, tab2 = st.tabs(["🏭 Planta 1 (General)", "📦 Planta 2 (Cartonaje)"])
 
-    render_gantt_chart(schedule, cfg)
+    # Split Orders
+    mask_p2 = df["Cliente"].astype(str).str.upper().str.contains("CARTONAJE", na=False)
+    df_p1 = df[~mask_p2].copy()
+    df_p2 = df[mask_p2].copy()
 
-    cfg_plan["manual_assignments"] = render_manual_machine_assignment(cfg_plan, df, maquinas_activas)
+    def run_shed_ui(df_shed, shed_name, container, suffix=""):
+        if df_shed.empty:
+            container.warning(f"No hay órdenes pendientes para {shed_name}.")
+            return
 
-    # 11. Details Section
-    render_details_section(schedule, detalle_maquina, df, cfg)
+        cfg_shed = cfg_plan.copy()
+        if "Planta 2" in shed_name:
+            cfg_shed["planta"] = 2
+            # --- PLANTA 2 MACHINE CONFIGURATION ---
+            maquinas_p1 = cfg_shed["maquinas"]
+            
+            def get_m(name):
+                m = maquinas_p1[maquinas_p1["Maquina"] == name]
+                return m.iloc[0].to_dict() if not m.empty else None
 
-    # --- SAVE SECTION ---
+            p2_list = []
+            # Troqueladoras
+            for new_n, p1_n in [
+                ("Duyan 2", "Duyan"), 
+                ("Y-TroqNº2", "Troq Nº 2 Ema"), 
+                ("Z-TroqNº1", "Troq Nº 1 Gus")
+            ]:
+                m = get_m(p1_n)
+                if m:
+                    m = m.copy(); m["Maquina"] = new_n; p2_list.append(m)
+            
+            # Iberica (Shared)
+            m_ib = get_m("Iberica")
+            if m_ib: p2_list.append(m_ib)
+            
+            # Descartonadoras (2 ones, same characteristics)
+            m_desc = get_m("Descartonadora 1")
+            if m_desc:
+                for m_name in ["Descartonadora P2-1", "Descartonadora P2-2"]:
+                    m = m_desc.copy(); m["Maquina"] = m_name; p2_list.append(m)
+            
+            cfg_shed["maquinas"] = pd.DataFrame(p2_list)
+        else:
+            cfg_shed["planta"] = 1
+
+        # Filter machines for this shed if "Planta" column exists, 
+        # otherwise rely on the user having active machines selected or machine names matching.
+        # But for now, we'll use all active machines and let the scheduler handle it 
+        # based on which tasks are present.
+        
+        schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df_shed, cfg_shed, fecha_inicio_plan, hora_inicio_plan)
+        
+        with container:
+            st.subheader(f"Planificación - {shed_name}")
+            render_gantt_chart(schedule, cfg_shed, key_suffix=suffix)
+
+            # 9. Metrics
+            m1, m2, m3, m4 = st.columns(4)
+            total_ots = resumen_ot["OT_id"].nunique() if not resumen_ot.empty else 0
+            atrasadas = int(resumen_ot["EnRiesgo"].sum()) if not resumen_ot.empty else 0
+            horas_extra_total = float(carga_md["HorasExtra"].sum()) if not carga_md.empty else 0.0
+
+            m1.metric("Órdenes planificadas", total_ots)
+            m2.metric("Órdenes atrasadas", atrasadas)
+            m3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
+            m4.metric("Jornada (h/día)", f"{horas_por_dia(cfg_shed):.1f}")
+
+            # Sections
+            with st.expander("🛠️ Ver Controles de Máquina", expanded=False):
+                cfg_shed["manual_assignments"] = render_manual_machine_assignment(cfg_shed, df_shed, maquinas_activas, key_suffix=suffix)
+            
+            render_details_section(schedule, detalle_maquina, df_shed, cfg_shed, key_suffix=suffix)
+            
+            with st.expander("📋 Ver Detalle de Tareas", expanded=False):
+                render_daily_details_section(schedule, key_suffix=suffix)
+            
+            with st.expander("🗓️ Ver Calendario de Tareas", expanded=False):
+                render_daily_schedule_view(schedule, cfg_shed, key_suffix=suffix)
+
+            render_capacity_analysis(schedule, cfg_shed, fecha_inicio_plan, resumen_ot, carga_md, key_suffix=suffix)
+            render_delayed_orders_section(resumen_ot, schedule, cfg_shed, key_suffix=suffix)
+            render_download_section(schedule, resumen_ot, carga_md, key_suffix=suffix)
+
+    run_shed_ui(df_p1, "Planta 1", tab1, suffix="p1")
+    run_shed_ui(df_p2, "Planta 2", tab2, suffix="p2")
+
+    # --- GLOBAL ACTIONS (Save applies to all) ---
+    st.divider()
     render_save_section(pm)
-
-    # 12. Daily Details Section
-    with st.expander("📋 Ver Detalle de Tareas", expanded=False):
-        render_daily_details_section(schedule)
-    
-    # 12.5. Daily Schedule View (Calendar format)
-    with st.expander("🗓️ Ver Calendario de Tareas", expanded=False):
-        render_daily_schedule_view(schedule, cfg)
-    
-    # Updates cfg in place (and saves to disk) 
-
-    # 9. Metrics
-    col1, col2, col3, col4 = st.columns(4)
-    total_ots = resumen_ot["OT_id"].nunique() if not resumen_ot.empty else 0
-    atrasadas = int(resumen_ot["EnRiesgo"].sum()) if not resumen_ot.empty else 0
-    horas_extra_total = float(carga_md["HorasExtra"].sum()) if not carga_md.empty else 0.0
-
-    col1.metric("Órdenes planificadas", total_ots)
-    col2.metric("Órdenes atrasadas", atrasadas)
-    col3.metric("Horas extra (totales)", f"{horas_extra_total:.1f} h")
-    col4.metric("Jornada (h/día)", f"{horas_por_dia(cfg):.1f}")
-    
-    # 10. Capacity Analysis
-    render_capacity_analysis(schedule, cfg, fecha_inicio_plan, resumen_ot, carga_md)
-
-    # 5. UI: Overtime
-    cfg["horas_extras"] = render_overtime_section(maquinas_activas, fecha_inicio_plan, persistence=pm)
-    
-    # 10.5 Printing Suggestions
-    render_printing_suggestions(schedule, df, fecha_inicio_plan)
-
-    # 13. Delayed Orders Section
-    render_delayed_orders_section(resumen_ot, schedule, cfg)
-
-    # 14. Export Section
-    render_download_section(schedule, resumen_ot, carga_md)
 
 else:
     st.info("⬆️ Subí el archivo Excel de órdenes para comenzar.")

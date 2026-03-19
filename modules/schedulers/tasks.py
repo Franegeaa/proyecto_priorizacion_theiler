@@ -15,8 +15,8 @@ TROQUELADORA_ID_MAP = {
 def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_constraints=False):
     flujo = orden_std or [
         "Cortadora Bobina", "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
-        "OPP", "Stamping", "Plastificado", "Encapado", "Cuño","Troquelado", 
-        "Descartonado", "Ventana", "Pegado"
+        "OPP", "Stamping", "Plastificado", "Encapado", "Cuño", "Prensa", "Troquelado", 
+        "Despuntadora", "Descartonado", "Ventana", "Pegado"
     ]
     flujo = [p.strip() for p in flujo] 
     orden_idx = {p: i for i, p in enumerate(flujo)}
@@ -55,9 +55,11 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_const
     if es_si(orden.get("_PEN_Troquelado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Troquelado")
     
     # Posteriores a Troquel: Bloqueados por ambos
+    if es_si(orden.get("_PEN_Despuntadora")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Despuntadora")
     if es_si(orden.get("_PEN_Descartonado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Descartonado")
     if es_si(orden.get("_PEN_Ventana")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Ventana")
     if es_si(orden.get("_PEN_Pegado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Pegado")
+    if es_si(orden.get("_PEN_Prensa")) and not bloqueado_por_pelicula: pendientes.append("Prensa")
     
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(dict.fromkeys(pendientes))

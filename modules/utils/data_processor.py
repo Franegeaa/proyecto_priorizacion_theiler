@@ -92,6 +92,8 @@ def process_uploaded_dataframe(df):
     df["_PEN_Descartonado"] = to_bool_series(["DescartonadoSNDpd", "DescartonadoSND"])
     df["_PEN_Ventana"]      = to_bool_series(["PegadoVSNDpd", "PegadoVSND"])
     df["_PEN_Pegado"]       = to_bool_series(["PegadoSNDpd", "PegadoSND"])
+    df["_PEN_Prensa"]       = to_bool_series(["PrensaSND", "Prensa"])
+    df["_PEN_Despuntadora"] = to_bool_series(["DespuntadoraSND", "Despuntadora"])
     df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada
     df["_PEN_Pegado"]       = to_bool_series(["PegadoSNDpd", "PegadoSND"])
     df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada

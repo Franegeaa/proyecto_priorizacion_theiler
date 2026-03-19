@@ -12,7 +12,7 @@ try:
 except Exception:
     _HAS_PLOTLY = False
 
-def render_gantt_chart(schedule, cfg):
+def render_gantt_chart(schedule, cfg, key_suffix=""):
     st.subheader("📊 Seguimiento (Gantt)")
     
     if not _HAS_PLOTLY:
@@ -36,25 +36,25 @@ def render_gantt_chart(schedule, cfg):
         ["Día", "Ver todo", "Semana",  "Mes"], 
         index=0,
         horizontal=True,
-        key="filtro_fecha_radio"
+        key=f"filtro_fecha_radio_{key_suffix}"
         )
     
     range_start_dt = None 
     range_end_dt = None   
 
     if tipo_filtro == "Día":
-        fecha_dia = st.date_input("Seleccioná el día:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_dia")
+        fecha_dia = st.date_input("Seleccioná el día:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key=f"filtro_dia_{key_suffix}")
         range_start_dt = pd.to_datetime(fecha_dia) + pd.Timedelta(hours=7) 
         range_end_dt = range_start_dt + pd.Timedelta(hours=9) 
 
     elif tipo_filtro == "Semana":
-        fecha_semana = st.date_input("Seleccioná un día de la semana:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_semana")
+        fecha_semana = st.date_input("Seleccioná un día de la semana:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key=f"filtro_semana_{key_suffix}")
         start_of_week = fecha_semana - pd.Timedelta(days=fecha_semana.weekday())
         range_start_dt = pd.to_datetime(start_of_week) + pd.Timedelta(hours=7) 
         range_end_dt = range_start_dt + pd.Timedelta(days=7) + pd.Timedelta(hours=9) 
 
     elif tipo_filtro == "Mes":
-        fecha_mes = st.date_input("Seleccioná un día del mes:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key="filtro_mes")
+        fecha_mes = st.date_input("Seleccioná un día del mes:", value=min_plan_date, min_value=min_plan_date, max_value=max_plan_date, key=f"filtro_mes_{key_suffix}")
         range_start_dt = pd.to_datetime(fecha_mes.replace(day=1)) + pd.Timedelta(hours=7)
         next_month = (fecha_mes.replace(day=28) + pd.Timedelta(days=4))
         range_end_dt = pd.to_datetime(next_month.replace(day=1)) + pd.Timedelta(hours=9)
@@ -71,6 +71,7 @@ def render_gantt_chart(schedule, cfg):
                 value=min_plan_date,
                 min_value=min_plan_date,
                 max_value=max_plan_date,
+                key=f"gantt_start_{key_suffix}"
                 )
 
         with col_f2:
@@ -79,6 +80,7 @@ def render_gantt_chart(schedule, cfg):
                 value=max_plan_date,
                 min_value=min_plan_date,
                 max_value=max_plan_date,
+                key=f"gantt_end_{key_suffix}"
                 )
         range_start_dt = pd.to_datetime(fecha_inicio_filtro)
         range_end_dt = pd.to_datetime(fecha_fin_filtro) + pd.Timedelta(days=1)
@@ -147,7 +149,8 @@ def render_gantt_chart(schedule, cfg):
     vista = st.radio(
         "Seleccioná el tipo de seguimiento:",
         ["Por Máquina", "Por Orden de Trabajo (OT)"],
-        horizontal=True
+        horizontal=True,
+        key=f"gantt_view_mode_{key_suffix}"
     )
 
     fig = None
@@ -160,7 +163,7 @@ def render_gantt_chart(schedule, cfg):
                 ot_seleccionada = st.selectbox(
                     "Seguimiento por OT:",
                     opciones_ot,
-                    key="gantt_ot_select"
+                    key=f"gantt_ot_select_{key_suffix}"
                 )
                 data_gantt = schedule_gantt if ot_seleccionada == "(Todas)" else schedule_gantt[schedule_gantt["OT_id"] == ot_seleccionada]
 
