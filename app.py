@@ -133,18 +133,22 @@ with st.sidebar:
     cfg["manual_overrides"] = st.session_state.manual_overrides
     # ----------------------------------
 
+@st.cache_data(show_spinner="📥 Procesando archivo Excel...")
+def load_and_process_excel(file_bytes):
+    import io
+    df_raw = pd.read_excel(io.BytesIO(file_bytes))
+    return process_uploaded_dataframe(df_raw)
+
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
 if archivo is not None:
-    df = pd.read_excel(archivo)
     # 3.1 UI: Descartonador IDs (New)
 
     # 8. Scheduler Execution
     st.info("🧠 Generando programa…")
     
-
-    # Apply transformations to DF
-    df = process_uploaded_dataframe(df)
+    # Load and apply transformations to DF
+    df = load_and_process_excel(archivo.getvalue())
 
     cfg["custom_ids"] = render_descartonador_ids_section(cfg) 
 
@@ -175,7 +179,7 @@ if archivo is not None:
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
 
-    # @st.cache_data(show_spinner="🧠 Calculando planificación...")
+    @st.cache_data(show_spinner="🧠 Calculando planificación...")
     def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 
