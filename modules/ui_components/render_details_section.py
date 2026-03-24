@@ -25,57 +25,60 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
     }
     </style>
     """, unsafe_allow_html=True)
-    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True)
+    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina"], horizontal=True)
 
-    if modo == "Orden de Trabajo (OT)":
-        if not schedule.empty: 
-            # Obtener nombres de las OTs para el desplegable
-            ot_mapping = schedule.drop_duplicates(subset=["OT_id"])[["OT_id", "Cliente-articulo"]]
-            opciones_format = []
-            for _, row in ot_mapping.iterrows():
-                ot_id = row["OT_id"]
-                nombre = row["Cliente-articulo"]
-                nombre_str = str(nombre).strip() if pd.notna(nombre) else ""
-                if not nombre_str:
-                    nombre_str = "Sin Nombre"
-                opciones_format.append(f"{ot_id} | {nombre_str}")
-                
-            opciones = ["(Todas)"] + sorted(opciones_format)
-            elegido_str = st.selectbox("Elegí OT:", opciones)
+    # if modo == "Orden de Trabajo (OT)":
+    if not schedule.empty: 
+        # Obtener nombres de las OTs para el desplegable
+        ot_mapping = schedule.drop_duplicates(subset=["OT_id"])[["OT_id", "Cliente-articulo"]]
+        opciones_format = []
+        for _, row in ot_mapping.iterrows():
+            ot_id = row["OT_id"]
+            nombre = row["Cliente-articulo"]
+            nombre_str = str(nombre).strip() if pd.notna(nombre) else ""
+            if not nombre_str:
+                nombre_str = "Sin Nombre"
+            opciones_format.append(f"{ot_id} | {nombre_str}")
             
-            if elegido_str == "(Todas)":
-                elegido = "(Todas)"
-                df_show = schedule
-            else:
-                elegido = elegido_str.split(" | ")[0]
-                df_show = schedule[schedule["OT_id"] == elegido]
-                
-            df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
-            
-            # --- Sanitize for Streamlit/Arrow ---
-            # Drop internal columns
-            df_show = df_show.loc[:, ~df_show.columns.str.startswith("_")]
-            # Convert object columns to string to handle mixed types (e.g. Troquel/IDs)
-            for col in df_show.select_dtypes(include=['object']).columns:
-                df_show[col] = df_show[col].fillna("").astype(str)
-            # ------------------------------------
-
-            st.dataframe(df_show, width='stretch')
-            
-            # --- Custom Download Button ---
-            buf = dataframe_to_excel_bytes(df_show, sheet_name="Detalle OT")
-            st.download_button(
-                label="⬇️ Descargar Datos en Excel",
-                data=buf,
-                file_name=f"Detalle_OT_{elegido if elegido != '(Todas)' else 'Todas'}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_dl_ot_detail"
-            )
-            # ------------------------------
+        opciones = ["(Ninguna)", "(Todas)"] + sorted(opciones_format)
+        elegido_str = st.selectbox("Elegí OT:", opciones)
+        
+        if elegido_str == "(Ninguna)":
+            elegido = "(Ninguna)"
+            df_show = pd.DataFrame(columns=schedule.columns)
+        elif elegido_str == "(Todas)":
+            elegido = "(Todas)"
+            df_show = schedule
         else:
-            st.info("No hay tareas planificadas.")
+            elegido = elegido_str.split(" | ")[0]
+            df_show = schedule[schedule["OT_id"] == elegido]
+            
+        df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
+        
+        # --- Sanitize for Streamlit/Arrow ---
+        # Drop internal columns
+        df_show = df_show.loc[:, ~df_show.columns.str.startswith("_")]
+        # Convert object columns to string to handle mixed types (e.g. Troquel/IDs)
+        for col in df_show.select_dtypes(include=['object']).columns:
+            df_show[col] = df_show[col].fillna("").astype(str)
+        # ------------------------------------
 
-    elif modo == "Máquina":
+        st.dataframe(df_show, width='stretch')
+        
+        # --- Custom Download Button ---
+        # buf = dataframe_to_excel_bytes(df_show, sheet_name="Detalle OT")
+        # st.download_button(
+        #     label="⬇️ Descargar Datos en Excel",
+        #     data=buf,
+        #     file_name=f"Detalle_OT_{elegido if elegido != '(Todas)' else 'Todas'}.xlsx",
+        #     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        #     key="btn_dl_ot_detail"
+        # )
+        # # ------------------------------
+    else:
+        st.info("No hay tareas planificadas.")
+
+    if modo == "Máquina":
         if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
             maquinas_disponibles = ordenar_maquinas_personalizado(detalle_maquina["Maquina"].unique().tolist())
             maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles)
