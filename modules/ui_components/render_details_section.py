@@ -7,7 +7,7 @@ from modules.ui_components.render_save_section import render_save_section
 
 def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # Added cfg param
     """Renders the interactive details section."""
-    st.subheader("🔎 Detalle interactivo")
+    st.subheader("🔎 Busqueda de tareas")
     st.markdown("""
     <style>
     [data-testid="stDataEditor"] td,
@@ -25,7 +25,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
     }
     </style>
     """, unsafe_allow_html=True)
-    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina"], horizontal=True)
 
     # if modo == "Orden de Trabajo (OT)":
     if not schedule.empty: 
@@ -77,6 +76,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
         # # ------------------------------
     else:
         st.info("No hay tareas planificadas.")
+    
+    st.subheader("🔎 Detalle interactivo")
+    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina"], horizontal=True)
 
     if modo == "Máquina":
         if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
