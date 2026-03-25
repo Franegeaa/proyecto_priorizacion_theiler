@@ -130,6 +130,10 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                     # Get Task Details
                     task_row = df_search[df_search["OT_id"] == ot_id].iloc[0]
                     
+                    cant_prod = float(task_row.get("CantidadProductos", task_row.get("CantidadPliegos", 0)) or 0)
+                    bocas = float(task_row.get("BocasTroquel", task_row.get("Boca1_ddp", 1)) or 1)
+                    cant_pliegos_calc = cant_prod / bocas if bocas > 0 else cant_prod
+                    
                     st.markdown(f"#### Detalles para OT: **{ot_id}**")
                     c1, c2, c3, c4 = st.columns(4)
                     with c1: st.write(f"**Cliente:** {task_row['Cliente']}")
@@ -138,7 +142,7 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                         anc = task_row.get('PliAnc', 0)
                         lar = task_row.get('PliLar', 0)
                         st.write(f"**Medidas:** {anc} x {lar} cm")
-                    with c4: st.write(f"**Cantidad:** {task_row.get('CantidadPliegos', 0)}")
+                    with c4: st.write(f"**Cantidad:** {int(cant_pliegos_calc)} pliegos")
                     
                     # 2. Check Compatibility with Active Targets
                     compatible_machines = []
@@ -172,9 +176,12 @@ def render_manual_machine_assignment(cfg, df, maquinas_activas):
                                 reason = f"Medidas {anc}x{lar} fuera de rango. ({rango_desc})"
                             else:
                                 is_manual = any(k in maq_lower for k in ["troq", "manual"]) and not any(k in maq_lower for k in ["iberica", "duyan", "autom"])
-                                cant = float(task_row.get("CantidadPliegos", 0) or 0)
+                                is_auto = "duyan" in maq_lower or "autom" in maq_lower
+                                cant = cant_pliegos_calc
                                 if is_manual and cant > 2500:
                                     reason = f"Cantidad de pliegos muy alta ({int(cant)}) para ser procesada en una máquina manual."
+                                elif is_auto and cant < 2500:
+                                    reason = f"Cantidad de pliegos muy baja ({int(cant)}) para ser procesada en una máquina automática."
                         
                         # If passed logic checks, check hard constraints like MatPrima if needed?
                         # User said "parametros limitantes", usually refers to physical size.

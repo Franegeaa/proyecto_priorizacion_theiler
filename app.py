@@ -178,6 +178,9 @@ if archivo is not None:
 
     cfg_plan = cfg.copy()
     cfg_plan["maquinas"] = cfg["maquinas"][cfg["maquinas"]["Maquina"].isin(maquinas_activas)].copy()
+    
+    if "manual_assignments" in st.session_state:
+        cfg_plan["manual_assignments"] = st.session_state.manual_assignments
 
     @st.cache_data(show_spinner="🧠 Calculando planificación...")
     def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
