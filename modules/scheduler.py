@@ -983,27 +983,18 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 idx_cand = -1 
                 mejor_candidato_futuro = None # (idx, fecha_disponible)
                 mejor_candidato_setup = None 
+                mejor_candidato_prio_ready = None # (idx, priority_score)
                 
                 current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
                 
                 ultima_tarea = ultimo_en_maquina.get(maquina)
                 is_troq_machine = "troq" in maquina.lower() or "duyan" in maquina.lower() or "manual" in maquina.lower()
                 
-                if "barniz" in maquina.lower():
-                    log_debug(f"--- Ciclo Nueva Tarea @ {current_agenda_dt} ---")
-                    if ultima_tarea:
-                        log_debug(f"Ultima Tarea: {ultima_tarea.get('Cliente')} - {ultima_tarea.get('Proceso')}")
-                    else:
-                        log_debug("Ultima Tarea: NONE")
-
-                # SCAN WINDOW
-                # For prep machines, we scan up to 50 items to find "Catch Up" candidates.
-                # For others, we assume FIFO (break on first) or simple Logic.
-                
                 # VARS FOR GROUPING PRIORITY
                 is_prep_machine = "guillotin" in maquina.lower() or "bobina" in maquina.lower() or "corte" in maquina.lower()
                 best_group_score = -1
                 best_group_idx = -1
+                has_unrunnable_tasks = False
                 
                 scan_limit = 50 if is_prep_machine else 999999
                 
@@ -1062,6 +1053,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                     
                     if not runnable: 
+                        has_unrunnable_tasks = True
                         # Tarea no ejecutable: saltear y seguir buscando alternativas
                         continue
                     
@@ -1089,16 +1081,35 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Check start constraints
                         is_ready_now = not available_at or available_at <= current_agenda_dt
                         if is_ready_now:
-                            idx_cand = i
                             mejor_candidato_futuro = None
                             mejor_candidato_setup = None # Disable setup gap filling
-                            break
+                            
+                            current_prio_score = min(prio_man, prio_excel_imp, prio_excel_tro)
+                            if maquina == "Troq Nº 1 Gus":
+                                print(f"DUEL GUS [{current_agenda_dt}]: {t_cand['Cliente-articulo'][:15]} computes Prio: {current_prio_score} vs Best: {mejor_candidato_prio_ready}")
+                                
+                            if mejor_candidato_prio_ready is None:
+                                mejor_candidato_prio_ready = (i, current_prio_score)
+                            else:
+                                if current_prio_score < mejor_candidato_prio_ready[1]:
+                                    mejor_candidato_prio_ready = (i, current_prio_score)
+                                elif current_prio_score == mejor_candidato_prio_ready[1]:
+                                    t_curr_due = t_cand.get("DueDate")
+                                    t_best_due = colas[maquina][mejor_candidato_prio_ready[0]].get("DueDate")
+                                    if pd.notna(t_curr_due) and pd.notna(t_best_due) and t_curr_due < t_best_due:
+                                        mejor_candidato_prio_ready = (i, current_prio_score)
+                            
+                            # No break here, continue searching entire queue for better priority
+                            continue
                         else:
                             # If not ready IS runnable, keep it as future candidate.
                             if mejor_candidato_futuro is None:
                                 mejor_candidato_futuro = (i, available_at)
                             elif available_at < mejor_candidato_futuro[1]:
                                 mejor_candidato_futuro = (i, available_at)
+                                
+                            if maquina == "Troq Nº 1 Gus":
+                                print(f"DEBUG GUS [{current_agenda_dt}]: {t_cand['Cliente-articulo'][:15]} | Pri: {prio_man},{prio_excel_imp} | RdyNow: {is_ready_now} | Avail: {available_at} | UrgDead: {urgent_deadline_dt}")
                             
                             # Fijar límite de tiempo para gap-filling (Urgent Deadline)
                             if urgent_deadline_dt is None or available_at < urgent_deadline_dt:
@@ -1209,8 +1220,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                 # END SEARCH LOOP
                 
+                # Assign the best prioritized task if we found one
+                if mejor_candidato_prio_ready is not None:
+                    idx_cand = mejor_candidato_prio_ready[0]
+                
                 # For Prep Machines, apply the Best Group Selection
-                if is_prep_machine and best_group_idx != -1:
+                if is_prep_machine and best_group_idx != -1 and idx_cand == -1:
                     idx_cand = best_group_idx
 
                 
@@ -1256,6 +1271,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
 
                     if future_dt:
+                        # Si hay tareas esperando dependencias, no podemos dormir eternamente
+                        if has_unrunnable_tasks:
+                            max_sleep_dt = current_agenda_dt + timedelta(hours=2)
+                            if future_dt > max_sleep_dt:
+                                future_dt = max_sleep_dt
+                                idx_cand = -1 # No ejecutar la tarea futura todavía, solo avanzar el reloj
+                                
                         # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
                         # Lógica de salto de tiempo (respetando días hábiles)
                         fecha_destino = future_dt.date()
@@ -1272,6 +1294,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             agenda[maquina]["hora"] = hora_destino
                             h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                             agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
+                            
+                        # Si decidimos solo avanzar el reloj para revisar de nuevo, rompemos el ciclo
+                        if idx_cand == -1:
+                            tareas_agendadas = True
+                            break
 
                 
                 # ==========================================================
