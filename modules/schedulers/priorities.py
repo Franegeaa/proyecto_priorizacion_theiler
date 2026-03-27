@@ -47,12 +47,12 @@ def _cola_impresora_universal(q):
     q["_fecha_imp"] = q["_fecha_imp"].fillna(pd.Timestamp.max)
     
     # 0.5 UNIFICACION DE PRIORIDADES (Manual + Excel)
+    # Para que Priority 8 de Excel le gane a Manual 10 (misma escala)
     prio_imp = pd.to_numeric(q["PrioriImp"] if "PrioriImp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     prio_tro = pd.to_numeric(q["PrioriTr"] if "PrioriTr" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
-    prio_desc = pd.to_numeric(q["PrioriDesc"] if "PrioriDesc" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     prio_man = pd.to_numeric(q["ManualPriority"] if "ManualPriority" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     
-    q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_desc, prio_man], axis=1).min(axis=1)
+    q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_man], axis=1).min(axis=1)
 
     # 1. LIMPIEZA DE DATOS
     # ------------------------------------------------------------
@@ -167,10 +167,9 @@ def _cola_troquelada(q):
 
     # Prioridad Unificada
     prio_tro = pd.to_numeric(q["PrioriTr"] if "PrioriTr" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
-    prio_desc = pd.to_numeric(q["PrioriDesc"] if "PrioriDesc" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     prio_man = pd.to_numeric(q["ManualPriority"] if "ManualPriority" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     
-    q["_prio_humana"] = pd.concat([prio_tro, prio_desc, prio_man], axis=1).min(axis=1)
+    q["_prio_humana"] = pd.concat([prio_tro, prio_man], axis=1).min(axis=1)
 
     q["_troq_key"] = q.get("CodigoTroquel", "").fillna("").astype(str).str.strip().str.lower()
     grupos = []
@@ -227,15 +226,14 @@ def _cola_cortadora_bobina(q):
     else:
         q["_priori_tro_num"] = 9999
 
-    # Elegir la MEJOR prioridad entre impresión, troquelado, descartonado y Manual
+    # Elegir la MEJOR prioridad entre impresión, troquelado y Manual
     q["_mejor_fecha"] = q[["_fecha_imp", "_fecha_tro"]].min(axis=1)
     
     prio_imp = pd.to_numeric(q["PrioriImp"] if "PrioriImp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     prio_tro = pd.to_numeric(q["PrioriTr"] if "PrioriTr" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
-    prio_desc = pd.to_numeric(q["PrioriDesc"] if "PrioriDesc" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     prio_man = pd.to_numeric(q["ManualPriority"] if "ManualPriority" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
     
-    q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_desc, prio_man], axis=1).min(axis=1)
+    q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_man], axis=1).min(axis=1)
 
     # Normalización de claves
     q["_mp_key"] = q.get("MateriaPrima", "").fillna("").astype(str).str.strip().str.lower()

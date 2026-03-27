@@ -545,39 +545,16 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     desc_maquinas = sorted(desc_cfg["Maquina"].tolist()) 
 
     if not tasks.empty and len(desc_maquinas) > 1:
-        # ESTRATEGIA: ASIGNACIÓN ESPECÍFICA POR ID O POOL
-        # 1. Si OpeDes1 tiene un ID conocido (40, 194, 247957750), asignamos a esa máquina.
-        # 2. Si no, va al "POOL_DESCARTONADO" para ser tomada por cualquier máquina libre.
+        # ESTRATEGIA: COLA ÚNICA (POOL)
+        # Todas las tareas van a un "buzón" común llamado "POOL_DESCARTONADO".
+        # Las máquinas tomarán tareas de ahí a medida que se liberen.
         
-        mask_desc_base = tasks["Proceso"].eq("Descartonado") & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
+        mask_desc = tasks["Proceso"].eq("Descartonado") & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
         
-        # Mapa de IDs a nombres de máquina
-        mapa_desc_ids = {
-            40: "Descartonadora 1",
-            194: "Descartonadora 2",
-            247957750: "Descartonadora 3"
-        }
-        
-        for idx, row in tasks[mask_desc_base].iterrows():
-            # Check if it has a Manual Assignment first (locked)
-            if "ManualAssignment" in tasks.columns and tasks.loc[idx, "ManualAssignment"]:
-                continue
-                
-            val_id = row.get("OpeDes1")
-            try:
-                # Convert to numeric to match keys
-                num_id = int(float(val_id)) if not pd.isna(val_id) else None
-            except (ValueError, TypeError):
-                num_id = None
-                
-            if num_id in mapa_desc_ids:
-                tasks.loc[idx, "Maquina"] = mapa_desc_ids[num_id]
-                # Mark as ManualAssignment so it's NOT pooled
-                if "ManualAssignment" not in tasks.columns: tasks["ManualAssignment"] = False
-                tasks.loc[idx, "ManualAssignment"] = True
-            else:
-                # Regular pooling
-                tasks.loc[idx, "Maquina"] = "POOL_DESCARTONADO"
+        # EXCLUDE Manual Assignments logic
+        if "ManualAssignment" in tasks.columns:
+            mask_desc = mask_desc & (~tasks["ManualAssignment"])
+        tasks.loc[mask_desc, "Maquina"] = "POOL_DESCARTONADO"
 
     # =================================================================
     # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
@@ -632,10 +609,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             
             prio_imp = pd.to_numeric(q["PrioriImp"] if "PrioriImp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
             prio_tro = pd.to_numeric(q["PrioriTr"] if "PrioriTr" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
-            prio_desc = pd.to_numeric(q["PrioriDesc"] if "PrioriDesc" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
             prio_man = pd.to_numeric(q["ManualPriority"] if "ManualPriority" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
             
-            q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_desc, prio_man], axis=1).min(axis=1)
+            q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_man], axis=1).min(axis=1)
             
             q.sort_values(by=["_prio_humana", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
                           ascending=[True, False, True, True, False], inplace=True)
@@ -1373,16 +1349,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 # Si está lista YA
                                 if not available_at or available_at <= current_agenda_dt:
                                     # Logic Refined:
-                                    prio_man_raw = t_cand.get("ManualPriority", 9999)
-                                    prio_desc_raw = t_cand.get("PrioriDesc", 9999)
+                                    # 0. Manual Priority (Lower is better)
+                                    # 1. Urgency is King (Urgente="Si" > "No") IF Priority is equal
+                                    # 2. If Urgency is same, prefer Successor.
+                                    # 3. If both same, prefer original order (DueDate).
                                     
-                                    # Calculate effective priority for decision
-                                    try: p_man = int(float(prio_man_raw)) if not pd.isna(prio_man_raw) else 9999
-                                    except: p_man = 9999
-                                    try: p_desc = int(float(prio_desc_raw)) if not pd.isna(prio_desc_raw) else 9999
-                                    except: p_desc = 9999
-                                    
-                                    current_prio = min(p_man, p_desc)
+                                    current_prio = int(t_cand.get("ManualPriority", 9999))
                                     is_urgent = es_si(t_cand.get("Urgente"))
                                     
                                     if is_urgent and maq_has_imminent_downtime:
@@ -1397,7 +1369,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     else:
                                         # Compare current candidate (i) with best so far
                                         
-                                        # 0. Combined Priority Check (Manual or Excel)
+                                        # 0. Manual Priority Check
                                         if current_prio < best_prio:
                                             # Found better priority, replace best
                                             best_pool_idx = i
