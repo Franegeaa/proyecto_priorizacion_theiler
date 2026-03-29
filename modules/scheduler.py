@@ -1006,6 +1006,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 # URGENT DEADLINE PARA GAP FILLING
                 urgent_deadline_dt = None
+                tiene_prio_en_cola = False  # Hay alguna tarea 1-8 en la cola propia (runnable o no)
                 
                 # --- PRE-SCAN: Detectar tareas con prioridad Excel esperando dependencias ---
                 # Si hay alguna tarea con PrioriImp o PrioriTr válida que no está lista aún,
@@ -1026,6 +1027,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     prescan_prio_man = int(t_prescan.get("ManualPriority", 9999))
                     
                     if prescan_prio_excel_imp < 9999 or prescan_prio_excel_tro < 9999 or prescan_prio_man < 9000:
+                        # Hay una tarea de prioridad en esta cola (sin importar si está lista)
+                        tiene_prio_en_cola = True
                         prescan_runnable, prescan_avail = verificar_disponibilidad(t_prescan, maquina)
                         if prescan_runnable:
                             if prescan_avail and prescan_avail > current_agenda_dt:
@@ -1036,6 +1039,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 # Tarea priorizada lista AHORA → el SUPER OVERRIDE la tomará
                                 # Seguimos buscando por si hay OTRA priorizada más adelante esperando
                                 continue
+                        else:
+                            # No-runnable pero con prioridad: bloqueamos gap-filling igual
+                            urgent_deadline_dt = urgent_deadline_dt or current_agenda_dt
                 
                 for i, t_cand in enumerate(colas[maquina]):
                     if is_prep_machine and i >= scan_limit: 
@@ -1073,14 +1079,24 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     
                     tiene_prioridad = prio_man < 9000 or prio_excel_imp < 9999 or prio_excel_tro < 9999
 
+                    # --- PRIORIDAD EFECTIVA PARA ESTA MÁQUINA ---
+                    # Troqueladora: solo PrioriTr (no mezclar con PrioriImp que confunde el orden)
+                    # Imprenta/Prep: solo PrioriImp
+                    # Resto: ManualPriority
+                    if is_troq_machine:
+                        prio_efectiva_maquina = min(prio_man, prio_excel_tro)
+                    elif is_prep_machine:
+                        prio_efectiva_maquina = min(prio_man, prio_excel_imp)
+                    else:
+                        prio_efectiva_maquina = prio_man
+
                     runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                     
                     if not runnable: 
                         has_unrunnable_tasks = True
                         if tiene_prioridad:
-                            # --- BLOQUEO POR DEPENDENCIA ---
-                            # Si es prioridad y no se puede correr aún (falta proceso previo),
-                            # la máquina DEBE esperar. Detenemos cualquier búsqueda de candidatos.
+                            if mejor_candidato_prio_ready is None or prio_efectiva_maquina < mejor_candidato_prio_ready[1]:
+                                mejor_candidato_prio_ready = None
                             break
                         continue
                     
@@ -1091,7 +1107,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             mejor_candidato_futuro = None
                             mejor_candidato_setup = None # Disable setup gap filling
                             
-                            current_prio_score = min(prio_man, prio_excel_imp, prio_excel_tro)
+                            current_prio_score = prio_efectiva_maquina
                             if maquina == "Troq Nº 1 Gus":
                                 print(f"DUEL GUS [{current_agenda_dt}]: {t_cand['Cliente-articulo'][:15]} computes Prio: {current_prio_score} vs Best: {mejor_candidato_prio_ready}")
                                 
@@ -1429,6 +1445,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         # A: Auto roba a Manual o Iberica
                         elif maquina in auto_names:
+                            # NO robar si la máquina tiene prioridades propias esperando
+                            if tiene_prio_en_cola:
+                                break
                             # Targets: Manuales + Iberica
                             targets_robo = manuales 
                             for m_target in targets_robo:
@@ -1455,6 +1474,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                         # B y C: Manual roba a Auto o Manual o Iberica
                         elif any(m in maquina for m in manuales):
+                            # NO robar si la máquina tiene prioridades propias esperando
+                            if tiene_prio_en_cola:
+                                break
                             # B: Robar a Auto
                             if auto_name and colas.get(auto_name):
                                 for i, t_cand in enumerate(colas[auto_name]):

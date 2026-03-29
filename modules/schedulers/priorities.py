@@ -184,7 +184,7 @@ def _cola_troquelada(q):
         g_sorted = g.sort_values(["_prio_humana", "Urgente", "DueDate", "CantidadPliegos"], 
                                  ascending=[True, False, True, False])
         
-        grupos.append((min_prio, not es_urgente, due_min, troq, g_sorted.to_dict("records")))
+        grupos.append((min_prio, not es_urgente, fecha_tro_min, due_min, troq, g_sorted.to_dict("records")))
     
     grupos.sort()
     return deque([item for *_, recs in grupos for item in recs])
