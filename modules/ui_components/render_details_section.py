@@ -361,6 +361,32 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  final_mask_desc = mask_no_override_desc & mask_excel_has_val_desc & mask_excel_valid_desc & mask_es_descartonado
                  df_editor.loc[final_mask_desc, "Prioridad"] = df_editor.loc[final_mask_desc, "PrioriDesc"]
 
+            # Pre-fill 'Prioridad' con PrioVenDdp para Ventana
+            if "PrioVenDdp" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioVenDdp"] = pd.to_numeric(df_editor["PrioVenDdp"], errors="coerce").fillna(9999)
+                 
+                 mask_no_override_ven = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_ven = df_editor["PrioVenDdp"] != 9999
+                 mask_excel_valid_ven = df_editor["PrioVenDdp"].notna()
+                 mask_es_ventana = df_editor["Proceso"].astype(str).str.lower().str.contains("ventana", na=False)
+                 
+                 final_mask_ven = mask_no_override_ven & mask_excel_has_val_ven & mask_excel_valid_ven & mask_es_ventana
+                 df_editor.loc[final_mask_ven, "Prioridad"] = df_editor.loc[final_mask_ven, "PrioVenDdp"]
+
+            # Pre-fill 'Prioridad' con PrioPegDdp para Pegadora
+            if "PrioPegDdp" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioPegDdp"] = pd.to_numeric(df_editor["PrioPegDdp"], errors="coerce").fillna(9999)
+                 
+                 mask_no_override_peg = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_peg = df_editor["PrioPegDdp"] != 9999
+                 mask_excel_valid_peg = df_editor["PrioPegDdp"].notna()
+                 mask_es_pegadora = df_editor["Proceso"].astype(str).str.lower().str.contains("pegadora|pegado", na=False)
+                 
+                 final_mask_peg = mask_no_override_peg & mask_excel_has_val_peg & mask_excel_valid_peg & mask_es_pegadora
+                 df_editor.loc[final_mask_peg, "Prioridad"] = df_editor.loc[final_mask_peg, "PrioPegDdp"]
+
             # Select columns to show/edit
             cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]

@@ -33,8 +33,6 @@ from modules.utils.tiempos_y_setup import (
 # Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
 PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
 
-# DEBUG: OT específica para rastrear
-
 def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
     """
     Returns True if the machine has a scheduled downtime starting within max_days from current_dt.
@@ -175,7 +173,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             # Tomamos la primera coincidencia (debería ser única por proceso)
             idx_task = candidates.index[0]
             t = tasks.loc[idx_task].to_dict()
-            # t["idx"] = idx_task <-- LINEA ELIMINADA (Causaba el bug)
             
             # --- AGENDAR INMEDIATAMENTE ---
             
@@ -371,9 +368,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
 
-    for dt in cfg.get("downtimes", []):
-        print(f"  - {dt}")
-
     if not tasks.empty and manuales: 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
@@ -524,7 +518,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     return (f_penalized, h, l)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
-                # print(f"DEBUG CHOICE for group {troq_key} (Size {len(idxs)}): {m_sel}")
 
                 tasks.loc[idxs, "Maquina"] = m_sel
                 
@@ -611,10 +604,18 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             prio_tro = pd.to_numeric(q["PrioriTr"] if "PrioriTr" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
             prio_man = pd.to_numeric(q["ManualPriority"] if "ManualPriority" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
             prio_desc = pd.to_numeric(q["PrioriDesc"] if "PrioriDesc" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_ven = pd.to_numeric(q["PrioVenDdp"] if "PrioVenDdp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_peg = pd.to_numeric(q["PrioPegDdp"] if "PrioPegDdp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
             
             # Para descartonadoras, la prioridad propia (PrioriDesc) domina
             if "descartonad" in m.lower():
                 q["_prio_humana"] = pd.concat([prio_desc, prio_man], axis=1).min(axis=1)
+            # Para ventana, la prioridad propia (PrioVenDdp) domina
+            elif "ventana" in m.lower():
+                q["_prio_humana"] = pd.concat([prio_ven, prio_man], axis=1).min(axis=1)
+            # Para pegadora, la prioridad propia (PrioPegDdp) domina
+            elif any(k in m.lower() for k in ["pegadora", "pegado"]):
+                q["_prio_humana"] = pd.concat([prio_peg, prio_man], axis=1).min(axis=1)
             else:
                 q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_man], axis=1).min(axis=1)
             
@@ -1098,12 +1099,27 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         if pd.isna(prio_excel_desc): prio_excel_desc = 9999
                     except (ValueError, TypeError):
                         prio_excel_desc = 9999
+                    
+                    try:
+                        prio_excel_ven = float(t_cand.get("PrioVenDdp", 9999))
+                        if pd.isna(prio_excel_ven): prio_excel_ven = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_ven = 9999
+                    
+                    try:
+                        prio_excel_peg = float(t_cand.get("PrioPegDdp", 9999))
+                        if pd.isna(prio_excel_peg): prio_excel_peg = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_peg = 9999
 
-                    tiene_prioridad = prio_man < 9000 or prio_excel_imp < 9999 or prio_excel_tro < 9999 or prio_excel_desc < 9999
+                    tiene_prioridad = (prio_man < 9000 or prio_excel_imp < 9999 or prio_excel_tro < 9999 or 
+                                      prio_excel_desc < 9999 or prio_excel_ven < 9999 or prio_excel_peg < 9999)
 
                     # --- PRIORIDAD EFECTIVA PARA ESTA MÁQUINA ---
                     # Troqueladora: solo PrioriTr
                     # Descartonadora: solo PrioriDesc
+                    # Ventana: solo PrioVenDdp
+                    # Pegadora: solo PrioPegDdp
                     # Imprenta/Prep: solo PrioriImp
                     # Resto: ManualPriority
                     if is_troq_machine:
@@ -1114,6 +1130,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Para descartonadoras, SOLO PrioriDesc (y ManualPriority) definen prioridad
                         # PrioriTr/PrioriImp de otros procesos no deben influir aquí
                         tiene_prioridad = prio_man < 9000 or prio_excel_desc < 9999
+                    elif "ventana" in maquina.lower():
+                        prio_efectiva_maquina = min(prio_man, prio_excel_ven)
+                        # Para ventana, SOLO PrioVenDdp (y ManualPriority) definen prioridad
+                        tiene_prioridad = prio_man < 9000 or prio_excel_ven < 9999
+                    elif any(k in maquina.lower() for k in ["pegadora", "pegado"]):
+                        prio_efectiva_maquina = min(prio_man, prio_excel_peg)
+                        # Para pegadoras, SOLO PrioPegDdp (y ManualPriority) definen prioridad
+                        tiene_prioridad = prio_man < 9000 or prio_excel_peg < 9999
                     elif is_prep_machine:
                         prio_efectiva_maquina = min(prio_man, prio_excel_imp)
                     else:
@@ -1137,8 +1161,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             mejor_candidato_setup = None # Disable setup gap filling
                             
                             current_prio_score = prio_efectiva_maquina
-                            if maquina == "Troq Nº 1 Gus":
-                                print(f"DUEL GUS [{current_agenda_dt}]: {t_cand['Cliente-articulo'][:15]} computes Prio: {current_prio_score} vs Best: {mejor_candidato_prio_ready}")
                                 
                             if mejor_candidato_prio_ready is None:
                                 mejor_candidato_prio_ready = (i, current_prio_score)
@@ -1699,7 +1721,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1735,7 +1757,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 

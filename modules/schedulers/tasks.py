@@ -290,6 +290,7 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "PrioriDesc": row.get("PrioriDesc", ""),  # Prioridad desde Excel (Descartonado)
                 "OpeDes1": row.get("OpeDes1", ""),         # ID de descartonadora del Excel
                 "PrioVenDdp": row.get("PrioVenDdp", ""),   # Prioridad desde Excel (Ventana)
+                "PrioPegDdp": row.get("PrioPegDdp", ""),   # Prioridad desde Excel (Pegado)
                 
                 # Manual Override Params
                 "ManualPriority": manual_prio,
