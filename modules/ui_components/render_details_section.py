@@ -329,7 +329,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  mask_no_override = df_editor["Prioridad"] == 9999
                  mask_excel_has_val = df_editor["PrioriImp"] != 9999
                  mask_excel_valid = df_editor["PrioriImp"].notna()
-                 mask_es_impresion = df_editor["Proceso"].astype(str).str.lower().str.contains("impresi", na=False)
+                 # Barnizado comparte la prioridad de Impresión (PrioriImp)
+                 mask_es_impresion = df_editor["Proceso"].astype(str).str.lower().str.contains("impresi|barniz", na=False)
                  
                  final_mask = mask_no_override & mask_excel_has_val & mask_excel_valid & mask_es_impresion
                  df_editor.loc[final_mask, "Prioridad"] = df_editor.loc[final_mask, "PrioriImp"]
@@ -346,7 +347,19 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  
                  final_mask_tr = mask_no_override_tr & mask_excel_has_val_tr & mask_excel_valid_tr & mask_es_troquelado
                  df_editor.loc[final_mask_tr, "Prioridad"] = df_editor.loc[final_mask_tr, "PrioriTr"]
+
+            # Pre-fill 'Prioridad' con PrioriDesc para Descartonado
+            if "PrioriDesc" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioriDesc"] = pd.to_numeric(df_editor["PrioriDesc"], errors="coerce").fillna(9999)
                  
+                 mask_no_override_desc = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_desc = df_editor["PrioriDesc"] != 9999
+                 mask_excel_valid_desc = df_editor["PrioriDesc"].notna()
+                 mask_es_descartonado = df_editor["Proceso"].astype(str).str.lower().str.contains("descarton", na=False)
+                 
+                 final_mask_desc = mask_no_override_desc & mask_excel_has_val_desc & mask_excel_valid_desc & mask_es_descartonado
+                 df_editor.loc[final_mask_desc, "Prioridad"] = df_editor.loc[final_mask_desc, "PrioriDesc"]
 
             # Select columns to show/edit
             cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]

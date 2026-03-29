@@ -11,6 +11,13 @@ TROQUELADORA_ID_MAP = {
     105: "Duyan",
 }
 
+# Mapeo de ID de descartonadora del Excel a nombre de máquina interno
+DESCARTONADORA_ID_MAP = {
+    40: "Descartonadora 1",
+    194: "Descartonadora 2",
+    247957750: "Descartonadora 3",
+}
+
 
 def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_constraints=False):
     flujo = orden_std or [
@@ -160,6 +167,22 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                     maquina = elegir_maquina(proceso, row, cfg, None)
                     has_manual_prio_machine = False
 
+                # --- ASIGNACIÓN POR DESCARTONADORA DEL EXCEL (OpeDes1) ---
+                # Si la orden tiene OpeDes1 asignada, va a esa máquina específica
+                # (PrioriDesc es opcional; si la tiene, se usa para ordenar la cola)
+                if "descartonad" in proceso.lower():
+                    desc_id = row.get("OpeDes1")
+                    tiene_maq_desc = pd.notna(desc_id) and str(desc_id).strip() not in ("", "nan")
+                    
+                    if tiene_maq_desc:
+                        try:
+                            desc_id_int = int(float(desc_id))
+                            if desc_id_int in DESCARTONADORA_ID_MAP:
+                                maquina = DESCARTONADORA_ID_MAP[desc_id_int]
+                                has_manual_prio_machine = True
+                        except (ValueError, TypeError):
+                            pass
+
             
             # --- Check Outsourced/Skipped/Priority ---
             str_maq = str(maquina)
@@ -226,9 +249,14 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             elif "troquel" in proceso.lower() or "cortadora bobina" in proceso.lower():
                 # TROQUELADO y CORTADORA BOBINA: SIEMPRE dividir cantidad por bocas
                 pliegos = cant_prod / bocas if bocas > 0 else cant_prod
+            elif "descarton" in proceso.lower():
+                # DESCARTONADO: usa la cantidad planificada de descartonado, no la genérica
+                cant_desc = float(row.get("CantDesPlanDdp", 0) or 0)
+                pliegos = cant_desc if cant_desc > 0 else float(row.get("CantidadPliegos", cant_prod))
             else:
                 # Procesos restantes
                 pliegos = float(row.get("CantidadPliegos", cant_prod))
+
 
             tareas.append({
                 "idx": idx, "OT_id": ot, "CodigoProducto": row["CodigoProducto"], "Subcodigo": row["Subcodigo"],
@@ -259,6 +287,9 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "PrioriTr": row.get("PrioriTr", ""),     # Prioridad desde Excel (Troquelado)
                 "FechaTroDdp": row.get("FechaTroDdp"),   # Fecha asociada a la prioridad Excel (Troquelado)
                 "TroqueladoraDdp": row.get("TroqueladoraDdp"),  # ID de troqueladora del Excel
+                "PrioriDesc": row.get("PrioriDesc", ""),  # Prioridad desde Excel (Descartonado)
+                "OpeDes1": row.get("OpeDes1", ""),         # ID de descartonadora del Excel
+                "PrioVenDdp": row.get("PrioVenDdp", ""),   # Prioridad desde Excel (Ventana)
                 
                 # Manual Override Params
                 "ManualPriority": manual_prio,
