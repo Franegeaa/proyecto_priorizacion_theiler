@@ -26,7 +26,12 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
     </style>
     """, unsafe_allow_html=True)
 
-    # if modo == "Orden de Trabajo (OT)":
+    # --- PENDING SELECTION SYNC ---
+    # We use a buffer to avoid StreamlitAPIException when updating search from the table below
+    if "pending_ot_selection" in st.session_state and st.session_state.pending_ot_selection:
+        st.session_state.ot_search_selection = st.session_state.pending_ot_selection
+        st.session_state.pending_ot_selection = None
+
     if not schedule.empty: 
         # Obtener nombres de las OTs para el desplegable
         ot_mapping = schedule.drop_duplicates(subset=["OT_id"])[["OT_id", "Cliente-articulo"]]
@@ -40,7 +45,10 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             opciones_format.append(f"{ot_id} | {nombre_str}")
             
         opciones = ["(Ninguna)", "(Todas)"] + sorted(opciones_format)
-        elegido_str = st.selectbox("Elegí OT:", opciones)
+        if "ot_search_selection" not in st.session_state:
+            st.session_state.ot_search_selection = opciones[0] # "(Ninguna)"
+            
+        elegido_str = st.selectbox("Elegí OT:", opciones, key="ot_search_selection")
         
         if elegido_str == "(Ninguna)":
             elegido = "(Ninguna)"
@@ -201,8 +209,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             else:
                 df_full["MateriaPrimaPlanta"] = False
             
-            # Add "Eliminar" column (Virtual)
+            # Add "Eliminar" and "Ver OT" columns (Virtual)
             df_full["Eliminar OT"] = False
+            df_full["🔍 Ver"] = False
             
             # --- CALCULATE ESTIMATED COMPLETION DATE PER OT ---
             # Group by OT_id and get the max 'Fin' date
@@ -391,7 +400,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  df_editor.loc[final_mask_peg, "Prioridad"] = df_editor.loc[final_mask_peg, "PrioPegDdp"]
 
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["🔍 Ver", "Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
             
@@ -488,6 +497,11 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             edited_df = st.data_editor(
                 styled_df,
                 column_config={
+                    "🔍 Ver": st.column_config.CheckboxColumn(
+                        "🔍",
+                        help="Haz clic para ver todos los detalles de esta OT arriba",
+                        default=False,
+                    ),
                     "Urgente": st.column_config.CheckboxColumn(
                         "Urgente",
                         help="Prioridad absoluta en este proceso.",
@@ -561,6 +575,19 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 hide_index=True,
                 key="editor_plan_completo"
             )
+
+            # --- DETECT OT LINKING ---
+            # If the user checked "🔍 Ver", we redirect the search selectbox to that OT
+            if "🔍 Ver" in edited_df.columns and edited_df["🔍 Ver"].any():
+                clicked_rows = edited_df[edited_df["🔍 Ver"] == True]
+                if not clicked_rows.empty:
+                    clicked_ot = str(clicked_rows.iloc[0]["OT_id"])
+                    if clicked_ot != "---":
+                        # Find the correct string in opciones [ "OT_id | Cliente-articulo" ]
+                        for opt in opciones:
+                            if opt.startswith(clicked_ot + " | "):
+                                st.session_state.pending_ot_selection = opt
+                                st.rerun()
 
             # --- PROCESS CHANGES BUTTON ---
             col_btn, col_info = st.columns([1, 3])
