@@ -557,7 +557,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 },
                 column_order=st.session_state.details_column_order,
                 width='stretch',
-                height=600,
+                height=400,
                 hide_index=True,
                 key="editor_plan_completo"
             )
