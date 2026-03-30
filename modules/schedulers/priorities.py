@@ -103,12 +103,12 @@ def _cola_impresora_universal(q):
             due_min = g["DueDate"].min()
             es_urgente = g["Urgente"].apply(es_si).any()
             fecha_imp_min = g["_fecha_imp"].min()
-            priori_imp_min = g["_priori_imp_num"].min()
+            priori_imp_min = g["_priori_imp_num"].min() # Added for consistency
             
             g_sorted = g.sort_values(["_prio_humana", "Urgente", "DueDate", "CantidadPliegos"], 
                                      ascending=[True, False, True, False])
-            # Tupla: (PrioHumana, no_urgente, DueDate, tipo_proc, key1, key2, records)
-            grupos_todos.append((min_prio, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
+            # Tupla estandar: (PrioHumana, PrioExcel, no_urgente, DueDate, tipo_proc, key1, key2, records)
+            grupos_todos.append((min_prio, priori_imp_min, not es_urgente, due_min, 0, keys[0], keys[1], g_sorted.to_dict("records")))
 
         # 3.2 PANTONE -> Agrupar por CLIENTE + COLOR + PRIORIDAD UNIFICADA
         for keys, g in q_pantone.groupby(["_cliente_key", "_color_key", "_prio_humana"], dropna=False):
