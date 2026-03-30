@@ -222,6 +222,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 # Sort Chronologically
                 group = group.sort_values(by="Inicio")
                 
+                # Get the process for this machine from the group
+                machine_process = group["Proceso"].iloc[0] if not group.empty else "Inactivo"
+                
                 prev_fin = None
                 for _, row in group.iterrows():
                     curr_inicio = row["Inicio"]
@@ -236,7 +239,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                             
                             idle_rows.append({
                                 "Maquina": maquina,
-                                "Proceso": "Inactivo",
+                                "Proceso": machine_process,
                                 "OT_id": "---",
                                 "Cliente-articulo": "=== TIEMPO OCIOSO ===",
                                 "Cliente": "N/A",
@@ -429,8 +432,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 # We need to return an array of styles with the same length as the row
                 bg_color = ""
                 
-                # Check for idle row first
-                if str(row.get("Proceso")) == "Inactivo":
+                # Check for idle row first (OT_id is "---" for idle rows)
+                if str(row.get("OT_id")) == "---":
                     bg_color = "background-color: rgba(135, 206, 250, 0.5); font-style: italic; color: black;"
                     return [bg_color] * len(row)
                 
