@@ -665,10 +665,76 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                              del overrides["manual_priorities"][exact_key]
                              has_changes = True
                     
+                    # --- AGGREGATE OT-LEVEL RESOURCE OVERRIDES ---
+                    # We process Chapa/Troquel/MP per OT, not per process, to avoid collision
+                    unique_ots = [ot for ot in edited_df["OT_id"].unique() if ot != "---"]
+                    for ot in unique_ots:
+                        ot_rows = edited_df[edited_df["OT_id"] == ot]
+                        all_procs_for_ot = ot_rows["Proceso"].unique()
+                        
+                        # Aggregated values (True if ANY row has it True)
+                        any_mp = ot_rows["MP Pendiente"].any() if "MP Pendiente" in ot_rows.columns else False
+                        any_chapa = ot_rows["Chapa Pend"].any() if "Chapa Pend" in ot_rows.columns else False
+                        any_troq = ot_rows["Troquel Pend"].any() if "Troquel Pend" in ot_rows.columns else False
+                        
+                        # Max date for arrival (non-null)
+                        max_llegada_chapa = None
+                        if "Llegada Chapas" in ot_rows.columns:
+                            valid_chapa_dates = ot_rows["Llegada Chapas"].dropna()
+                            if not valid_chapa_dates.empty:
+                                max_llegada_chapa = valid_chapa_dates.max()
+                                
+                        max_llegada_troq = None
+                        if "Llegada Troquel" in ot_rows.columns:
+                            valid_troq_dates = ot_rows["Llegada Troquel"].dropna()
+                            if not valid_troq_dates.empty:
+                                max_llegada_troq = valid_troq_dates.max()
+                        
+                        # Apply to ALL processes of this OT
+                        for p in all_procs_for_ot:
+                            p_str = str(p)
+                            resource_key = (ot, p_str)
+                            
+                            # MP
+                            if overrides["mp_overrides"].get(resource_key) != any_mp:
+                                overrides["mp_overrides"][resource_key] = any_mp
+                                has_changes = True
+                            
+                            # Chapa
+                            if overrides["pelicula_overrides"].get(resource_key) != any_chapa:
+                                overrides["pelicula_overrides"][resource_key] = any_chapa
+                                has_changes = True
+                                
+                            # Troquel
+                            if overrides["troquel_overrides"].get(resource_key) != any_troq:
+                                overrides["troquel_overrides"][resource_key] = any_troq
+                                has_changes = True
+                                
+                            # Llegada Chapas
+                            if max_llegada_chapa is not None:
+                                if overrides["fecha_chapas_overrides"].get(resource_key) != max_llegada_chapa:
+                                    overrides["fecha_chapas_overrides"][resource_key] = max_llegada_chapa
+                                    has_changes = True
+                            else:
+                                if resource_key in overrides["fecha_chapas_overrides"]:
+                                    del overrides["fecha_chapas_overrides"][resource_key]
+                                    has_changes = True
+                                    
+                            # Llegada Troquel
+                            if max_llegada_troq is not None:
+                                if overrides["fecha_troquel_overrides"].get(resource_key) != max_llegada_troq:
+                                    overrides["fecha_troquel_overrides"][resource_key] = max_llegada_troq
+                                    has_changes = True
+                            else:
+                                if resource_key in overrides["fecha_troquel_overrides"]:
+                                    del overrides["fecha_troquel_overrides"][resource_key]
+                                    has_changes = True
+
+                    # --- PROCESS PER-ROW OVERRIDES ---
                     for idx, row in edited_df.iterrows():
                         ot = str(row["OT_id"])
                         if ot == "---":
-                            continue # Ignore dummy rows (Inactivo)
+                            continue 
                             
                         proc = str(row["Proceso"])
                         key_op = (ot, proc)
@@ -678,8 +744,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                             if key_op not in overrides["outsourced_processes"]:
                                 overrides["outsourced_processes"].add(key_op)
                                 has_changes = True
-                                
-                            # NUEVO: Si tercerizamos Troquelado, el Descartonado de la misma OT se terceriza también.
                             if proc.strip().lower() == "troquelado":
                                 key_desc = (ot, "Descartonado")
                                 if key_desc not in overrides["outsourced_processes"]:
@@ -689,8 +753,6 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                             if key_op in overrides["outsourced_processes"]:
                                 overrides["outsourced_processes"].remove(key_op)
                                 has_changes = True
-                                
-                            # Si se des-terceriza Troquelado, también quitamos Descartonado (opcional, pero consistente)
                             if proc.strip().lower() == "troquelado":
                                 key_desc = (ot, "Descartonado")
                                 if key_desc in overrides["outsourced_processes"]:
@@ -706,84 +768,13 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                             if key_op in overrides["skipped_processes"]:
                                 overrides["skipped_processes"].remove(key_op)
                                 has_changes = True
-
+ 
                         # Urgente override
                         current_urgency = bool(row["Urgente"])
                         if overrides["urgency_overrides"].get(key_op) != current_urgency:
                              overrides["urgency_overrides"][key_op] = current_urgency
                              has_changes = True
-
-                        # MP Pendiente override — solo guardar cuando se DESTILDA (False)
-                        # Si está tildado (True), NO guardamos nada: el valor viene del Excel.
-                        current_mp = bool(row["MP Pendiente"])
-                        all_procs_for_ot = edited_df[edited_df["OT_id"] == ot]["Proceso"].unique()
-                        if not current_mp:
-                             # Usuario destildó → guardar False para TODOS los procesos de la OT
-                             for p in all_procs_for_ot:
-                                 if overrides["mp_overrides"].get((ot, str(p))) != False:
-                                     overrides["mp_overrides"][(ot, str(p))] = False
-                                     has_changes = True
-                        else:
-                             # Usuario tildó (o ya estaba tildado) → REMOVER override para que use el Excel
-                             for p in all_procs_for_ot:
-                                 if (ot, str(p)) in overrides["mp_overrides"]:
-                                     del overrides["mp_overrides"][(ot, str(p))]
-                                     has_changes = True
-                                
-                        # Chapa Pendiente override
-                        if "Chapa Pend" in row:
-                            current_chapa = bool(row["Chapa Pend"])
-                            if not current_chapa:
-                                 for p in all_procs_for_ot:
-                                     if overrides["pelicula_overrides"].get((ot, str(p))) != False:
-                                         overrides["pelicula_overrides"][(ot, str(p))] = False
-                                         has_changes = True
-                            else:
-                                 for p in all_procs_for_ot:
-                                     if (ot, str(p)) in overrides["pelicula_overrides"]:
-                                         del overrides["pelicula_overrides"][(ot, str(p))]
-                                         has_changes = True                 
-
-                        # Troquel Pendiente override
-                        if "Troquel Pend" in row:
-                            current_troq = bool(row["Troquel Pend"])
-                            if not current_troq:
-                                 for p in all_procs_for_ot:
-                                     if overrides["troquel_overrides"].get((ot, str(p))) != False:
-                                         overrides["troquel_overrides"][(ot, str(p))] = False
-                                         has_changes = True
-                            else:
-                                 for p in all_procs_for_ot:
-                                     if (ot, str(p)) in overrides["troquel_overrides"]:
-                                         del overrides["troquel_overrides"][(ot, str(p))]
-                                         has_changes = True
-
-                        # Llegada Chapas override
-                        if "Llegada Chapas" in row:
-                            dt_chapa = row["Llegada Chapas"]
-                            for p in all_procs_for_ot:
-                                if pd.notna(dt_chapa):
-                                    if overrides["fecha_chapas_overrides"].get((ot, str(p))) != dt_chapa:
-                                        overrides["fecha_chapas_overrides"][(ot, str(p))] = dt_chapa
-                                        has_changes = True
-                                else:
-                                    if (ot, str(p)) in overrides["fecha_chapas_overrides"]:
-                                        del overrides["fecha_chapas_overrides"][(ot, str(p))]
-                                        has_changes = True
-
-                        # Llegada Troquel override
-                        if "Llegada Troquel" in row:
-                            dt_troq = row["Llegada Troquel"]
-                            for p in all_procs_for_ot:
-                                if pd.notna(dt_troq):
-                                    if overrides["fecha_troquel_overrides"].get((ot, str(p))) != dt_troq:
-                                        overrides["fecha_troquel_overrides"][(ot, str(p))] = dt_troq
-                                        has_changes = True
-                                else:
-                                    if (ot, str(p)) in overrides["fecha_troquel_overrides"]:
-                                        del overrides["fecha_troquel_overrides"][(ot, str(p))]
-                                        has_changes = True
-                                        
+                                         
                         # Delete OT (Blacklist)
                         if row["Eliminar OT"]:
                             overrides["blacklist_ots"].add(ot)

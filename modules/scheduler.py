@@ -1,5 +1,10 @@
 import pandas as pd
 from datetime import datetime, timedelta, time, date
+
+# Constante para bloquear prioridades que esperan procesos previos sin fecha definida aún
+# Usamos una fecha lejana pero segura para evitar OverflowError en cálculos de calendario.
+FAR_FUTURE = datetime(2030, 1, 1, 0, 0)
+
 from collections import defaultdict, deque
 
 from modules.schedulers.machines import validar_medidas_troquel, get_machine_process_order
@@ -823,12 +828,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 completados_clean = {clean(c) for c in completado[ot]}
                 
                 if p_clean not in completados_clean:
-                    # --- MEJORA: En lugar de bloquear la tarea completamente,
-                    # estimamos cuándo terminará el proceso previo.
-                    # Esto permite que la tarea entre como "candidata futura"
-                    # y se respete su prioridad manual al programar huecos.
-                    
-                    return (False, None) # Proceso previo no completado -> bloqueado
+                    # --- MEJORA: Devolvemos True con fecha lejana para que el sistema de 
+                    # Gap Filling RESPETE el orden lineal de prioridades y espere (bloqueo lineal).
+                    return (True, FAR_FUTURE) 
                 else: 
                      # Si está completado, necesitamos su nombre Raw para buscar fecha fin.
                      raw_match = next((c for c in completado[ot] if clean(c) == p_clean), None)
@@ -846,38 +848,51 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         completados_clean = {clean(c) for c in completado[ot]}
         for p in prev_procs_names:
             if clean(p) not in completados_clean:
-                return (False, None) # Falta un proceso previo
+                # Si falta un proceso previo (ej: esperando a Guillotina), 
+                # la tarea es "potencialmente ejecutable" pero en el futuro.
+                # Devolvemos True con una fecha lejana para que el sistema de 
+                # Gap Filling RESPETE el orden lineal de prioridades y espere.
+                return (True, FAR_FUTURE)
         
         # Calcular cuándo estará lista la última dependencia
         last_end = max((fin_proceso[ot].get(p) for p in prev_procs_names if fin_proceso[ot].get(p)), default=None)
         
-        # --- NUEVO: RESTRICCION POR LLEGADA DE INSUMOS (CHAPAS / TROQUEL) ---
+        # --- NUEVO: RESTRICCION POR LLEGADA DE INSUMOS (CHAPAS / TROQUEL / MP) ---
         arrival_date = None
         
-        # 1. Impresión (Offset/Flexo) depende de fecha llegada chapas (PeliculaArt)
-        if "impres" in proc_actual_clean:
-            # Si "ignoramos restricciones", asumimos que NO REQUIERE (Force False)
-            requires_pelicula = es_si(t.get("PeliculaArt"))
-            if cfg.get("ignore_constraints"):
-                requires_pelicula = False
-            
-            if requires_pelicula:
-                fecha_chapas = t.get("FechaLlegadaChapas")
-                if pd.notna(fecha_chapas):
-                    # Asumimos disponibilidad al inicio de ese día (00:00) o a las 7:00?
-                    # Mejor las 07:00 para alinear con jornada
+        # 0. Materia Prima Pendiente (MateriaPrimaPlanta)
+        if es_si(t.get("MateriaPrimaPlanta")) and not cfg.get("ignore_constraints"):
+            return (False, None)
+
+        # 1. Bloqueo por Chapas (PeliculaArt)
+        # Si el usuario lo marcó, se bloquea SIEMPRE si no hay fecha,
+        # pero el delay temporal solo aplica si el proceso es de impresión (lo normal).
+        requires_pelicula = es_si(t.get("PeliculaArt"))
+        if cfg.get("ignore_constraints"): requires_pelicula = False
+        
+        if requires_pelicula:
+            fecha_chapas = t.get("FechaLlegadaChapas")
+            if pd.notna(fecha_chapas):
+                # Solo aplicar delay por fecha si es un proceso de impresión
+                if "impres" in proc_actual_clean:
                     arrival_date = datetime.combine(fecha_chapas.date(), time(7,0))
+            else:
+                # Si no hay fecha de llegada, se BLOQUEA la tarea por completo
+                return (False, None)
 
-        # 2. Troquelado depende de fecha llegada troquel (TroquelArt)
-        elif "troquel" in proc_actual_clean:
-             requires_troquel = es_si(t.get("TroquelArt"))
-             if cfg.get("ignore_constraints"):
-                 requires_troquel = False
-
-             if requires_troquel:
-                fecha_troquel = t.get("FechaLlegadaTroquel")
-                if pd.notna(fecha_troquel):
+        # 2. Bloqueo por Troquel (TroquelArt)
+        requires_troquel = es_si(t.get("TroquelArt"))
+        if cfg.get("ignore_constraints"): requires_troquel = False
+        
+        if requires_troquel:
+            fecha_troquel = t.get("FechaLlegadaTroquel")
+            if pd.notna(fecha_troquel):
+                # Solo aplicar delay por fecha si es un proceso de troquelado
+                if "troquel" in proc_actual_clean:
                     arrival_date = datetime.combine(fecha_troquel.date(), time(7,0))
+            else:
+                # Si no hay fecha de llegada, se BLOQUEA la tarea por completo
+                return (False, None)
         
         # Fusionar restricciones: la fecha efectiva es el MAX(dependencia, llegada_insumo)
         
@@ -1057,8 +1072,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 # Seguimos buscando por si hay OTRA priorizada más adelante esperando
                                 continue
                         else:
-                            # No-runnable pero con prioridad: bloqueamos gap-filling igual
-                            urgent_deadline_dt = urgent_deadline_dt or current_agenda_dt
+                            # Tarea bloqueada INDEFINIDAMENTE (sin fecha)
+                            # No seteamos urgent_deadline_dt para permitir que la máquina siga trabajando 
+                            # con otras tareas mientras esperamos que llegue el recurso para la prioritaria.
+                            pass
                 
                 for i, t_cand in enumerate(colas[maquina]):
                     if is_prep_machine and i >= scan_limit: 
@@ -1147,10 +1164,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     
                     if not runnable: 
                         has_unrunnable_tasks = True
-                        if tiene_prioridad:
-                            if mejor_candidato_prio_ready is None or prio_efectiva_maquina < mejor_candidato_prio_ready[1]:
-                                mejor_candidato_prio_ready = None
-                            break
+                        # Si es prioritaria pero está bloqueada, NO ROMPER el bucle.
+                        # Hacemos 'continue' para dejar que el programador busque otras tareas (Gap Filling).
                         continue
                     
                     if tiene_prioridad:
@@ -1177,10 +1192,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             continue
                         else:
                             # If not ready IS runnable, keep it as future candidate.
-                            if mejor_candidato_futuro is None:
-                                mejor_candidato_futuro = (i, available_at)
-                            elif available_at < mejor_candidato_futuro[1]:
-                                mejor_candidato_futuro = (i, available_at)
+                            # PERO SOLO si tiene una fecha real (no FAR_FUTURE)
+                            if available_at != FAR_FUTURE:
+                                if mejor_candidato_futuro is None:
+                                    mejor_candidato_futuro = (i, available_at)
+                                elif available_at < mejor_candidato_futuro[1]:
+                                    mejor_candidato_futuro = (i, available_at)
                                 
                             # Fijar límite de tiempo para gap-filling (Urgent Deadline)
                             # Si hay una tarea priorizada esperando, bloqueamos cualquier relleno de hueco.
@@ -1244,11 +1261,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     
                     else:
                         # Si no está lista ya, pero es runnable, la guardamos como opción futura
-                        if mejor_candidato_futuro is None:
-                            mejor_candidato_futuro = (i, available_at)
-                        else:
-                            if available_at < mejor_candidato_futuro[1]:
+                        # PERO SOLO si tiene una fecha real (no FAR_FUTURE)
+                        if available_at != FAR_FUTURE:
+                            if mejor_candidato_futuro is None:
                                 mejor_candidato_futuro = (i, available_at)
+                            else:
+                                if available_at < mejor_candidato_futuro[1]:
+                                    mejor_candidato_futuro = (i, available_at)
                             
                     # -- LÓGICA FRANCOTIRADOR (SMART WAIT) --
                     if es_setup:
