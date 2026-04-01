@@ -202,6 +202,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             if "ManualPriority" not in df_full.columns: df_full["ManualPriority"] = 9999
             if "IsOutsourced" not in df_full.columns: df_full["IsOutsourced"] = False
             if "IsSkipped" not in df_full.columns: df_full["IsSkipped"] = False
+            if "ForzarInicio" not in df_full.columns: df_full["ForzarInicio"] = False
             
             # Ensure MateriaPrimaPlanta is boolean for checkbox display
             if "MateriaPrimaPlanta" in df_full.columns:
@@ -260,6 +261,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                                 "IsOutsourced": False,
                                 "MateriaPrimaPlanta": False,
                                 "Urgente": False,
+                                "ForzarInicio": False,
                                 "ManualPriority": 9999
                             })
                     
@@ -324,6 +326,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                 "IsSkipped": "Saltar",
                 "ManualPriority": "Prioridad",
                 "Urgente": "Urgente",
+                "ForzarInicio": "Forzar Inicio",
                 "MateriaPrimaPlanta": "MP Pendiente",
                 "PeliculaArt": "Chapa Pend",
                 "TroquelArt": "Troquel Pend",
@@ -400,7 +403,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                  df_editor.loc[final_mask_peg, "Prioridad"] = df_editor.loc[final_mask_peg, "PrioPegDdp"]
 
             # Select columns to show/edit
-            cols_editable = ["🔍 Ver", "Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["🔍 Ver", "Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Forzar Inicio", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
             
@@ -507,6 +510,11 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         help="Prioridad absoluta en este proceso.",
                         default=False,
                     ),
+                    "Forzar Inicio": st.column_config.CheckboxColumn(
+                        "Forzar Inicio",
+                        help="Ejecutar proceso sin esperar tiempos ociosos ni procesos previos.",
+                        default=False,
+                    ),
                     "MP Pendiente": st.column_config.CheckboxColumn(
                         "MP Pendiente",
                         help="Materia Prima pendiente. Desactivar cuando llegue el material.",
@@ -609,6 +617,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         overrides["fecha_chapas_overrides"] = {}
                     if "fecha_troquel_overrides" not in overrides:
                         overrides["fecha_troquel_overrides"] = {}
+                    if "forzar_inicio_overrides" not in overrides:
+                        overrides["forzar_inicio_overrides"] = {}
 
                     from modules.utils.config_loader import normalize_machine_name
                     
@@ -712,6 +722,13 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
                         if overrides["urgency_overrides"].get(key_op) != current_urgency:
                              overrides["urgency_overrides"][key_op] = current_urgency
                              has_changes = True
+
+                        # Forzar Inicio override
+                        if "Forzar Inicio" in row:
+                            current_forzar = bool(row["Forzar Inicio"])
+                            if overrides["forzar_inicio_overrides"].get(key_op) != current_forzar:
+                                 overrides["forzar_inicio_overrides"][key_op] = current_forzar
+                                 has_changes = True
 
                         # MP Pendiente override — solo guardar cuando se DESTILDA (False)
                         # Si está tildado (True), NO guardamos nada: el valor viene del Excel.

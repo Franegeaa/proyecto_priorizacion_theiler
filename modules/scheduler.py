@@ -206,7 +206,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 # Guardamos resultado
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} | 
+                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} | 
                                  {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
                                   "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
                 
@@ -236,6 +236,16 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 mask = (tasks["OT_id"].astype(str) == str(ot_urg)) & (tasks["Proceso"].astype(str) == str(proc_urg))
                 if mask.any():
                     tasks.loc[mask, "Urgente"] = is_urgent
+
+        # 1a. Apply Forzar Inicio Overrides
+        if "forzar_inicio_overrides" in cfg["manual_overrides"]:
+            forzar_overrides = cfg["manual_overrides"]["forzar_inicio_overrides"]
+            if "ForzarInicio" not in tasks.columns:
+                tasks["ForzarInicio"] = False
+            for (ot_fz, proc_fz), is_forzar in forzar_overrides.items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_fz)) & (tasks["Proceso"].astype(str) == str(proc_fz))
+                if mask.any():
+                    tasks.loc[mask, "ForzarInicio"] = is_forzar
 
         # 1b. Apply MP Overrides (MateriaPrimaPlanta)
         if "mp_overrides" in cfg["manual_overrides"]:
@@ -713,6 +723,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # 2. Ignorará la falta de fechas de llegada para Chapas (Pelicula) y Troqueles.
         # Esto permite generar una planificación "ideal" basada solo en capacidad de máquina y tiempos de proceso.
         
+        # --- FORZAR INICIO ---
+        if t.get("ForzarInicio", False):
+            return (True, None)
+
         # --- REORDENAMIENTO DINAMICO (ProcesoDpd / TroqAntes) ---
         dynamic_order_applied = False
         
@@ -943,7 +957,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Register Result
                         filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
                                         {"Setup_min": 0.0, "Proceso_h": duration_virt,
                                         "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
                                         "Motivo": "Outsourced/Skipped", "Maquina": maquina})
@@ -1721,7 +1735,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1757,7 +1771,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 

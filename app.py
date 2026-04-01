@@ -128,7 +128,8 @@ with st.sidebar:
             "outsourced_processes": set(),
             "skipped_processes": set(),
             "urgency_overrides": {},
-            "mp_overrides": {}
+            "mp_overrides": {},
+            "forzar_inicio_overrides": {}
         }
     cfg["manual_overrides"] = st.session_state.manual_overrides
     # ----------------------------------

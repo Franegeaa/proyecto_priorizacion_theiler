@@ -212,6 +212,10 @@ class PersistenceManager:
                 else:
                     fecha_troquel_clean[key_str] = None
 
+            # 10. Forzar Inicio
+            forzar_raw = overrides.get("forzar_inicio_overrides", {})
+            forzar_clean = {f"{ot}|{proc}": val for (ot, proc), val in forzar_raw.items()}
+
             # Prepare for DB
             data_map = {
                 "blacklist_ots": json.dumps(blacklist),
@@ -224,7 +228,8 @@ class PersistenceManager:
                 "pelicula_overrides": json.dumps(pelicula_clean),
                 "troquel_overrides": json.dumps(troquel_clean),
                 "fecha_chapas_overrides": json.dumps(fecha_chapas_clean),
-                "fecha_troquel_overrides": json.dumps(fecha_troquel_clean)
+                "fecha_troquel_overrides": json.dumps(fecha_troquel_clean),
+                "forzar_inicio_overrides": json.dumps(forzar_clean)
             }
 
             # Debug Log
@@ -266,7 +271,8 @@ class PersistenceManager:
                 "pelicula_overrides": {},
                 "troquel_overrides": {},
                 "fecha_chapas_overrides": {},
-                "fecha_troquel_overrides": {}
+                "fecha_troquel_overrides": {},
+                "forzar_inicio_overrides": {}
             }
 
         try:
@@ -355,6 +361,14 @@ class PersistenceManager:
                 if "|" in k:
                     parts = k.split("|", 1)
                     res_fecha_troquel[(parts[0], parts[1])] = pd.to_datetime(v) if v else pd.NaT
+
+            # 11. Forzar Inicio
+            res_forzar = {}
+            forzar_dict = json.loads(raw_data.get("forzar_inicio_overrides", "{}"))
+            for k, v in forzar_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_forzar[(parts[0], parts[1])] = v
             
             return {
                 "blacklist_ots": res_blacklist,
@@ -367,7 +381,8 @@ class PersistenceManager:
                 "pelicula_overrides": res_pelicula,
                 "troquel_overrides": res_troquel,
                 "fecha_chapas_overrides": res_fecha_chapas,
-                "fecha_troquel_overrides": res_fecha_troquel
+                "fecha_troquel_overrides": res_fecha_troquel,
+                "forzar_inicio_overrides": res_forzar
             }
 
         except Exception as e:
@@ -382,7 +397,8 @@ class PersistenceManager:
                 "pelicula_overrides": {},
                 "troquel_overrides": {},
                 "fecha_chapas_overrides": {},
-                "fecha_troquel_overrides": {}
+                "fecha_troquel_overrides": {},
+                "forzar_inicio_overrides": {}
             }
 
     def get_locked_assignments(self, lookahead_days=0):
