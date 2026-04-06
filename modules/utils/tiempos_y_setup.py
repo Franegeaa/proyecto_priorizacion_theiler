@@ -126,8 +126,19 @@ def tiempo_operacion_h(orden, proceso, maquina, cfg):
     """Devuelve (setup_h, proc_h) con soporte para dorso, barnizado y procesos tercerizados."""
     proceso_lower = proceso.lower().strip()
 
+    # Procesos tercerizados con duración fija SOLO si la máquina NO es custom.
+    # Las máquinas del Excel (placeholder) tienen capacidad definida pero siguen
+    # siendo tercerizadas. Solo las máquinas custom (_IsCustom=True) usan la velocidad real.
     if proceso_lower in TERCERIZADOS_DURACION_FIJA_H:
-        return (0.0, TERCERIZADOS_DURACION_FIJA_H[proceso_lower])
+        maq_rows = cfg["maquinas"][cfg["maquinas"]["Maquina"] == maquina]
+        is_custom = (
+            not maq_rows.empty
+            and "_IsCustom" in maq_rows.columns
+            and bool(maq_rows["_IsCustom"].iloc[0]) is True
+        )
+        if not is_custom:
+            return (0.0, TERCERIZADOS_DURACION_FIJA_H[proceso_lower])
+        # Máquina custom → caer en el cálculo normal por velocidad ↓
 
     cap = capacidad_pliegos_h(proceso, maquina, cfg)
 

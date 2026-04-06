@@ -21,7 +21,8 @@ from modules.ui_components import (
     render_capacity_analysis,
     render_save_section,
     render_delayed_orders_section,
-    render_daily_schedule_view
+    render_daily_schedule_view,
+    render_create_machine
 )
 
 from modules.utils.visualizations import render_gantt_chart
@@ -33,6 +34,9 @@ st.title("📦 Planificador de Producción – Theiler Packaging")
 # Load Config (Always active)
 if "cfg" not in st.session_state:
     st.session_state.cfg = cargar_config("config/Config_Priorizacion_Theiler.xlsx")
+    # Guardar copia base inmutable del DataFrame de máquinas para poder
+    # reconstruir limpio en cada rerun cuando cambian las máquinas custom.
+    st.session_state.cfg["_maquinas_base"] = st.session_state.cfg["maquinas"].copy()
 cfg = st.session_state.cfg
 
 # --- SIDEBAR CONFIGURATION (Always visible) ---
@@ -118,6 +122,11 @@ with st.sidebar:
             if db_pending:
                  st.session_state.pending_processes = db_pending
 
+            # 8. LOAD CUSTOM MACHINES
+            db_custom_machines = pm.load_custom_machines()
+            if db_custom_machines:
+                st.session_state.custom_machines = db_custom_machines
+
     # -------------------------------------------------
         
     # --- MANUAL OVERRIDES INJECTION ---
@@ -151,7 +160,10 @@ if archivo is not None:
     # Load and apply transformations to DF
     df = load_and_process_excel(archivo.getvalue())
 
-    cfg["custom_ids"] = render_descartonador_ids_section(cfg) 
+    cfg["custom_ids"] = render_descartonador_ids_section(cfg)
+
+    # 0. UI: Create / Manage custom machines
+    render_create_machine(cfg, persistence=pm)
 
     # 1. UI: Machine Speeds
     render_machine_speed_inputs(cfg)
@@ -184,10 +196,13 @@ if archivo is not None:
         cfg_plan["manual_assignments"] = st.session_state.manual_assignments
 
     @st.cache_data(show_spinner="🧠 Calculando planificación...")
-    def generar_planificacion(df_in, cfg_in, fecha_in, hora_in):
+    def generar_planificacion(df_in, cfg_in, fecha_in, hora_in, _machine_hash=None):
         return programar(df_in, cfg_in, start=fecha_in, start_time=hora_in)
 
-    schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan)
+    # Hash de máquinas activas para invalidar caché cuando cambian (incluyendo custom)
+    _maq_hash = tuple(sorted(cfg_plan["maquinas"]["Maquina"].tolist()))
+    schedule, carga_md, resumen_ot, detalle_maquina = generar_planificacion(df, cfg_plan, fecha_inicio_plan, hora_inicio_plan, _machine_hash=_maq_hash)
+
     st.session_state.last_schedule = schedule
 
     render_gantt_chart(schedule, cfg)

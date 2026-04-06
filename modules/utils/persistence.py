@@ -739,3 +739,58 @@ class PersistenceManager:
         except Exception as e:
             logger.error(f"Failed to load pending processes: {e}")
             return []
+
+    def save_custom_machines(self, machines_list):
+        """
+        Guarda la lista de máquinas personalizadas creadas desde la UI.
+        Structure: List of dicts with machine configuration.
+        """
+        if not self.connected:
+            return False
+
+        try:
+            ts = datetime.now()
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+
+            with self.engine.connect() as conn:
+                conn.execute(
+                    text(query),
+                    {"key": "custom_machines", "data": json.dumps(machines_list), "ts": ts},
+                )
+                conn.commit()
+
+            logger.info(f"Saved {len(machines_list)} custom machines to DB.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save custom machines: {e}")
+            st.warning(f"Error guardando máquinas personalizadas en BD: {e}")
+            return False
+
+    def load_custom_machines(self):
+        """
+        Carga la lista de máquinas personalizadas desde la BD.
+        Returns: list of dicts (same format as session_state.custom_machines) or [].
+        """
+        if not self.connected:
+            return []
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = 'custom_machines'"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query)).fetchone()
+
+            if result and result[0]:
+                return json.loads(result[0])
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to load custom machines: {e}")
+            return []
+

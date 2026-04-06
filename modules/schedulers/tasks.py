@@ -4,6 +4,13 @@ from modules.utils.config_loader import es_si
 from .machines import elegir_maquina
 from .priorities import _clave_prioridad_maquina
 
+# Default set of processes that are outsourced with no queue (72h fixed)
+# Stored here to avoid circular imports with scheduler.py
+def _default_terc():
+    return {"stamping", "plastificado", "encapado", "cuño"}
+
+
+
 # Mapeo de ID de troqueladora del Excel a nombre de máquina interno
 TROQUELADORA_ID_MAP = {
     7: "Troq Nº 2 Ema",
@@ -195,7 +202,67 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             if is_skipped:
                 maquina = "SALTADO"
             elif is_outsourced:
-                maquina = "TERCERIZADO"
+                # Si el proceso tiene una máquina CUSTOM (_IsCustom=True), NO lo mandamos
+                # a TERCERIZADO. Las máquinas del Excel para procesos como Encapado/Stamping
+                # son solo de referencia; solo una máquina creada desde la UI convierte
+                # el proceso en interno con cola.
+                proc_lower_chk = str_proc.strip().lower()
+                maquinas_df = cfg["maquinas"]
+                custom_col = maquinas_df.get("_IsCustom", None)
+                if custom_col is not None:
+                    proc_tiene_custom = any(
+                        (row_m["_IsCustom"] == True) and
+                        (proc_lower_chk in str(row_m["Proceso"]).strip().lower())
+                        for _, row_m in maquinas_df.iterrows()
+                    )
+                else:
+                    proc_tiene_custom = False
+
+                if proc_tiene_custom:
+                    pass  # Tiene máquina custom → mantener la asignación automática
+                else:
+                    maquina = "TERCERIZADO"
+
+            # -------------------------------------------------------
+            # GUARD: Procesos tercierizados por defecto
+            # Si el proceso es del conjunto default (encapado/stamping/etc.):
+            #   - Si hay máquina CUSTOM → asignar esa en lugar del placeholder del Excel
+            #   - Si NO hay máquina custom → TERCERIZADO (72h, sin cola)
+            # -------------------------------------------------------
+            if maquina not in ("SALTADO", "TERCERIZADO"):
+                proc_lower_guard = str_proc.strip().lower()
+                if proc_lower_guard in _default_terc():
+                    maq_df_g = cfg["maquinas"]
+
+                    # Ver si la máquina actual ya es custom (raro pero posible)
+                    maq_row_g = maq_df_g[maq_df_g["Maquina"] == maquina]
+                    is_currently_custom = (
+                        not maq_row_g.empty
+                        and "_IsCustom" in maq_row_g.columns
+                        and bool(maq_row_g["_IsCustom"].iloc[0]) is True
+                    )
+
+                    if not is_currently_custom:
+                        # Buscar si existe alguna máquina custom para este proceso
+                        if "_IsCustom" in maq_df_g.columns:
+                            custom_para_proc = maq_df_g[
+                                (maq_df_g["_IsCustom"] == True) &
+                                (maq_df_g["Proceso"].str.lower().str.strip() == proc_lower_guard)
+                            ]
+                        else:
+                            custom_para_proc = maq_df_g.iloc[0:0]  # vacío
+
+                        if not custom_para_proc.empty:
+                            # Usar la primera máquina custom disponible para este proceso.
+                            # El balanceo de carga (paso 3.2 del scheduler) redistribuirá
+                            # entre todas las customs si hay más de una.
+                            maquina = custom_para_proc.iloc[0]["Maquina"]
+                        else:
+                            # Sin máquina custom → TERCERIZADO
+                            maquina = "TERCERIZADO"
+                            is_outsourced = True
+
+
 
             # Manual Priority (check with ORIGINAL machine name or new one? Original makes sense for user input)
             # User selected "Imp. Offset 1" in UI. If we change it to TERCERIZADO, we lose that key.

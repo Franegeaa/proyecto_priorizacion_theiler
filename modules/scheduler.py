@@ -30,8 +30,13 @@ from modules.utils.tiempos_y_setup import (
 )
 
 
-# Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
-PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
+# Procesos tercerizados sin cola (duración fija, concurrencia ilimitada) — DEFAULT.
+# En tiempo de ejecución, cualquier proceso de esta lista que tenga una máquina
+# real asignada en cfg["maquinas"] será sacado automáticamente del conjunto.
+_PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT = {"stamping", "plastificado", "encapado", "cuño"}
+
+# Alias de módulo (mantiene compatibilidad con referencias directas al nombre viejo)
+PROCESOS_TERCERIZADOS_SIN_COLA = _PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT
 
 def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
     """
@@ -72,6 +77,27 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     if df_ordenes.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df_ordenes["OT_id"] = df_ordenes["CodigoProducto"].astype(str) + "-" + df_ordenes["Subcodigo"].astype(str)
+
+    # ---------------------------------------------------------------
+    # CALCULAR PROCESOS_TERCERIZADOS_SIN_COLA EFECTIVO
+    # SOLO si hay una máquina CUSTOM (_IsCustom=True) para ese proceso
+    # lo sacamos del conjunto. Las máquinas del Excel NO cuentan porque
+    # esas siempre fueron outsourced y solo sirven de referencia.
+    # ---------------------------------------------------------------
+    custom_mask = cfg["maquinas"].get("_IsCustom", False) == True
+    procesos_con_maquina_custom = set(
+        cfg["maquinas"].loc[custom_mask, "Proceso"].dropna()
+        .str.strip().str.lower().unique()
+    )
+    PROCESOS_TERCERIZADOS_SIN_COLA = {
+        p for p in _PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT
+        if p not in procesos_con_maquina_custom
+    }
+    # Guardamos en cfg para que tasks.py pueda acceder
+    cfg["_procesos_terc_sin_cola"] = PROCESOS_TERCERIZADOS_SIN_COLA
+    # ---------------------------------------------------------------
+
+
     agenda = construir_calendario(cfg, start=start, start_time=start_time)
     inicio_general = datetime.combine(agenda["General"]["fecha"], agenda["General"]["hora"])
 
@@ -560,8 +586,87 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         tasks.loc[mask_desc, "Maquina"] = "POOL_DESCARTONADO"
 
     # =================================================================
-    # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
+    # 3.2 BALANCEO DE CARGA GENÉRICO (Procesos con múltiples máquinas)
     # =================================================================
+    # Para cualquier proceso que tenga >1 máquina activa (excepto Troquelado y
+    # Descartonado que ya tienen su lógica propia), redistribuir las tareas
+    # asignadas a la máquina "principal" entre todas las máquinas disponibles,
+    # usando el mismo criterio de fecha estimada de finalización.
+    #
+    # Esto permite que máquinas custom (creadas desde la UI) participen en la
+    # planificación sin necesidad de lógica especial por proceso.
+
+    PROCESOS_CON_LOGICA_PROPIA = {"troquelado", "descartonado"}
+
+    # Agrupar máquinas activas por proceso
+    proc_to_maquinas = {}
+    for _, row_m in cfg["maquinas"].iterrows():
+        proc_key = str(row_m["Proceso"]).strip().lower()
+        maq = row_m["Maquina"]
+        if proc_key not in proc_to_maquinas:
+            proc_to_maquinas[proc_key] = []
+        proc_to_maquinas[proc_key].append(maq)
+
+    for proc_key, maquinas_proc in proc_to_maquinas.items():
+        # No balancear procesos con lógica propia
+        if any(p in proc_key for p in PROCESOS_CON_LOGICA_PROPIA):
+            continue
+        if not tasks.empty and not any(proc_key in str(t).lower() for t in tasks["Proceso"].unique()):
+            continue
+
+        # Para procesos del conjunto default-tercerizado, solo usar máquinas CUSTOM.
+        # El placeholder del Excel (Encapado, Stamping, etc.) NO debe recibir tareas.
+        if proc_key in _PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT:
+            if "_IsCustom" in cfg["maquinas"].columns:
+                maquinas_proc = [
+                    mq for mq in maquinas_proc
+                    if bool(cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mq, "_IsCustom"]
+                            .fillna(False).values[0]) is True
+                    if len(cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mq]) > 0
+                ]
+            else:
+                maquinas_proc = []
+
+        # Solo procesar si quedan >1 máquinas válidas
+        if len(maquinas_proc) <= 1:
+            continue
+
+        # Máscara: tareas de este proceso que NO son virtuales ni manuales
+        mask_proc = (
+            tasks["Proceso"].str.lower().str.strip() == proc_key
+        ) & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO", "POOL_DESCARTONADO"]))
+
+        if "ManualAssignment" in tasks.columns:
+            mask_proc = mask_proc & (~tasks["ManualAssignment"])
+
+        proc_tasks_idx = tasks.index[mask_proc].tolist()
+        if not proc_tasks_idx:
+            continue
+
+        # Capacidad (pliegos/h) por máquina
+        cap_proc = {}
+        for mq in maquinas_proc:
+            c = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mq, "Capacidad_pliegos_hora"]
+            cap_proc[mq] = float(c.iloc[0]) if not c.empty and float(c.iloc[0]) > 0 else 1.0
+
+        # Carga acumulada simulada por máquina (en horas)
+        load_proc = {mq: 0.0 for mq in maquinas_proc}
+
+        # Ordenar por DueDate para asignar respetando prioridad
+        sub = tasks.loc[proc_tasks_idx].copy()
+        sub["_dd_sort"] = pd.to_datetime(sub["DueDate"], errors="coerce")
+        if "ManualPriority" in sub.columns:
+            sub["_mp_sort"] = pd.to_numeric(sub["ManualPriority"], errors="coerce").fillna(9999)
+        else:
+            sub["_mp_sort"] = 9999
+        sub.sort_values(["_mp_sort", "_dd_sort"], inplace=True)
+
+        for idx_t in sub.index:
+            cant = float(tasks.at[idx_t, "CantidadPliegos"]) if tasks.at[idx_t, "CantidadPliegos"] else 0
+            m_sel = min(maquinas_proc, key=lambda mq: load_proc[mq])
+            tasks.at[idx_t, "Maquina"] = m_sel
+            dur_est = cant / cap_proc[m_sel] if cap_proc[m_sel] > 0 else 0
+            load_proc[m_sel] += dur_est
 
     colas = {}
     buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador

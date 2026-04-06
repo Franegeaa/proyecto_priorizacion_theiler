@@ -74,6 +74,69 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
     
     return cfg
 
+
+def apply_custom_machines(cfg, custom_machines_list):
+    """
+    Reconstruye cfg['maquinas'] desde la copia base del Excel y luego inyecta
+    las máquinas personalizadas de la UI.
+
+    Al partir siempre desde '_maquinas_base' (copia inmutable cargada al inicio),
+    garantizamos que eliminar una máquina custom realmente la saca del DataFrame,
+    y que no se acumulan máquinas fantasma entre reruns.
+
+    Cada elemento de custom_machines_list es un dict con:
+      nombre, proceso, velocidad, setup_base, setup_menor, planta, activa_por_defecto,
+      es_troqueladora, tipo_troquel, pli_max_anc, pli_max_lar, pli_min_anc, pli_min_lar
+    """
+    # 1. Restaurar desde la base original (sea cual sea el estado actual)
+    base = cfg.get("_maquinas_base")
+    if base is not None:
+        cfg["maquinas"] = base.copy()
+        # Asegurar que las filas del Excel queden marcadas como NO custom
+        cfg["maquinas"]["_IsCustom"] = False
+    # Si no hay base (ej. tests que no pasan por app.py), trabajamos sobre lo que hay.
+
+    if not custom_machines_list:
+        return  # Solo se hizo el reset → listo
+
+    # 2. Asegurar que las columnas extra existan en la base restaurada
+    for col in ["PliMaxAnc", "PliMaxLar", "PliMinAnc", "PliMinLar", "TipoTroquel", "Planta", "_IsCustom"]:
+        if col not in cfg["maquinas"].columns:
+            cfg["maquinas"][col] = False if col == "_IsCustom" else None
+
+    # 3. Construir filas nuevas
+    required_cols = list(cfg["maquinas"].columns)
+    new_rows = []
+    existing_names = set(cfg["maquinas"]["Maquina"].str.lower())
+
+    for cm in custom_machines_list:
+        nombre = cm["nombre"]
+        if nombre.lower() in existing_names:
+            continue  # Nombre duplicado con el Excel (no debería pasar, UI lo valida)
+
+        row = {col: None for col in required_cols}
+        row["Maquina"] = nombre
+        row["Proceso"] = cm["proceso"]
+        row["Capacidad_pliegos_hora"] = cm["velocidad"]
+        row["Setup_base_min"] = cm["setup_base"]
+        row["Setup_menor_min"] = cm["setup_menor"]
+        row["PliMaxAnc"] = cm.get("pli_max_anc")
+        row["PliMaxLar"] = cm.get("pli_max_lar")
+        row["PliMinAnc"] = cm.get("pli_min_anc")
+        row["PliMinLar"] = cm.get("pli_min_lar")
+        row["TipoTroquel"] = cm.get("tipo_troquel")
+        row["Planta"] = cm.get("planta", "Planta 1")
+        row["_IsCustom"] = True  # ← marca clave que distingue de máquinas del Excel
+        new_rows.append(row)
+        existing_names.add(nombre.lower())
+
+    if not new_rows:
+        return
+
+    new_df = pd.DataFrame(new_rows)
+    cfg["maquinas"] = pd.concat([cfg["maquinas"], new_df], ignore_index=True)
+
+
 # Machine name aliases for priority mapping
 ALIAS_MAP = {
     "Manual 2": "Troq Nº 1 Gus",
