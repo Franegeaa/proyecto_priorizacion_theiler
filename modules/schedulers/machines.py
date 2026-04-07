@@ -55,8 +55,13 @@ def elegir_maquina(proceso, orden, cfg, plan_actual=None):
     # Default fallback
     return candidatos[0]
 
-def validar_medidas_troquel(maquina, anc, lar):
-    """Valida si un pliego entra en la máquina de troquelado."""
+def validar_medidas_troquel(maquina, anc, lar, cfg=None):
+    """Valida si un pliego entra en la máquina de troquelado.
+
+    Si cfg está disponible y la máquina tiene columnas PliMaxAnc/PliMaxLar/PliMinAnc/PliMinLar
+    definidas (ej. máquinas custom creadas desde la UI), se usan esos valores.
+    De lo contrario, se utiliza la lógica hardcodeada por nombre de máquina.
+    """
     # Normalizar nombre
     m = str(maquina).lower().strip()
     # Dimensiones de la tarea (CON ROTACIÓN)
@@ -68,6 +73,34 @@ def validar_medidas_troquel(maquina, anc, lar):
     pliego_min = min(w_orig, l_orig)
     pliego_max = max(w_orig, l_orig)
 
+    # --- DYNAMIC LOOKUP: custom machines from the UI ---
+    if cfg is not None and "maquinas" in cfg:
+        fila = cfg["maquinas"][cfg["maquinas"]["Maquina"] == maquina]
+        if not fila.empty:
+            pli_max_anc = fila["PliMaxAnc"].iloc[0] if "PliMaxAnc" in fila.columns else None
+            pli_max_lar = fila["PliMaxLar"].iloc[0] if "PliMaxLar" in fila.columns else None
+            pli_min_anc = fila["PliMinAnc"].iloc[0] if "PliMinAnc" in fila.columns else None
+            pli_min_lar = fila["PliMinLar"].iloc[0] if "PliMinLar" in fila.columns else None
+            tipo = fila["TipoTroquel"].iloc[0] if "TipoTroquel" in fila.columns else None
+
+            has_max = pli_max_anc is not None and pli_max_lar is not None and (pli_max_anc > 0 or pli_max_lar > 0)
+            has_min = pli_min_anc is not None and pli_min_lar is not None and (pli_min_anc > 0 or pli_min_lar > 0)
+
+            if has_max or has_min:
+                ok = True
+                if has_max:
+                    mq_max_val = max(float(pli_max_anc), float(pli_max_lar))
+                    mq_min_val = min(float(pli_max_anc), float(pli_max_lar))
+                    # El pliego debe CABER: pliego_max <= machine_max y pliego_min <= machine_min
+                    ok = ok and pliego_max <= mq_max_val and pliego_min <= mq_min_val
+                if has_min:
+                    mq_min_req_max = max(float(pli_min_anc), float(pli_min_lar))
+                    mq_min_req_min = min(float(pli_min_anc), float(pli_min_lar))
+                    # El pliego debe superar el mínimo
+                    ok = ok and pliego_max >= mq_min_req_max and pliego_min >= mq_min_req_min
+                return ok
+
+    # --- HARDCODED LOGIC (original machines) ---
     if "autom" in m or "duyan" in m:
         # Min 38x38 (Ambos lados deben ser >= 38)
         # Como es minimo, ambos lados deben superar 38, asi que da igual la rotación si min(pliego) >= 38
@@ -102,6 +135,7 @@ def validar_medidas_troquel(maquina, anc, lar):
         return (pliego_min <= mq_min and pliego_max <= mq_max) and (pliego_min >= mq_min2 and pliego_max >= mq_max2)
     
     return True # Por defecto si no matchea nombre
+
 
 def get_machine_process_order(maquina, cfg):
     """Devuelve una tupla (orden_proceso, orden_tipo) para ordenar máquinas."""

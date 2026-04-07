@@ -7,7 +7,7 @@ from modules.ui_components.render_save_section import render_save_section
 
 def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key_suffix=""): # Added cfg param
     """Renders the interactive details section."""
-    st.subheader("🔎 Detalle interactivo")
+    st.subheader("🔎 Busqueda de tareas")
     st.markdown("""
     <style>
     [data-testid="stDataEditor"] td,
@@ -25,6 +25,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
     }
     </style>
     """, unsafe_allow_html=True)
+<<<<<<< HEAD
     modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina", "Orden de Trabajo (OT)"], horizontal=True, key=f"details_mode_{key_suffix}")
 
     if modo == "Orden de Trabajo (OT)":
@@ -59,9 +60,28 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
             for col in df_show.select_dtypes(include=['object']).columns:
                 df_show[col] = df_show[col].fillna("").astype(str)
             # ------------------------------------
+=======
 
-            st.dataframe(df_show, width='stretch')
+    # --- PENDING SELECTION SYNC ---
+    # We use a buffer to avoid StreamlitAPIException when updating search from the table below
+    if "pending_ot_selection" in st.session_state and st.session_state.pending_ot_selection:
+        st.session_state.ot_search_selection = st.session_state.pending_ot_selection
+        st.session_state.pending_ot_selection = None
+>>>>>>> main
+
+    if not schedule.empty: 
+        # Obtener nombres de las OTs para el desplegable
+        ot_mapping = schedule.drop_duplicates(subset=["OT_id"])[["OT_id", "Cliente-articulo"]]
+        opciones_format = []
+        for _, row in ot_mapping.iterrows():
+            ot_id = row["OT_id"]
+            nombre = row["Cliente-articulo"]
+            nombre_str = str(nombre).strip() if pd.notna(nombre) else ""
+            if not nombre_str:
+                nombre_str = "Sin Nombre"
+            opciones_format.append(f"{ot_id} | {nombre_str}")
             
+<<<<<<< HEAD
             # --- Custom Download Button ---
             buf = dataframe_to_excel_bytes(df_show, sheet_name="Detalle OT")
             st.download_button(
@@ -72,10 +92,53 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                 key=f"btn_dl_ot_detail_{key_suffix}"
             )
             # ------------------------------
+=======
+        opciones = ["(Ninguna)", "(Todas)"] + sorted(opciones_format)
+        if "ot_search_selection" not in st.session_state:
+            st.session_state.ot_search_selection = opciones[0] # "(Ninguna)"
+            
+        elegido_str = st.selectbox("Elegí OT:", opciones, key="ot_search_selection")
+        
+        if elegido_str == "(Ninguna)":
+            elegido = "(Ninguna)"
+            df_show = pd.DataFrame(columns=schedule.columns)
+        elif elegido_str == "(Todas)":
+            elegido = "(Todas)"
+            df_show = schedule
+>>>>>>> main
         else:
-            st.info("No hay tareas planificadas.")
+            elegido = elegido_str.split(" | ")[0]
+            df_show = schedule[schedule["OT_id"] == elegido]
+            
+        df_show = df_show.drop(columns=["CodigoProducto", "Subcodigo"], errors="ignore")
+        
+        # --- Sanitize for Streamlit/Arrow ---
+        # Drop internal columns
+        df_show = df_show.loc[:, ~df_show.columns.str.startswith("_")]
+        # Convert object columns to string to handle mixed types (e.g. Troquel/IDs)
+        for col in df_show.select_dtypes(include=['object']).columns:
+            df_show[col] = df_show[col].fillna("").astype(str)
+        # ------------------------------------
 
-    elif modo == "Máquina":
+        st.dataframe(df_show, width='stretch')
+        
+        # --- Custom Download Button ---
+        # buf = dataframe_to_excel_bytes(df_show, sheet_name="Detalle OT")
+        # st.download_button(
+        #     label="⬇️ Descargar Datos en Excel",
+        #     data=buf,
+        #     file_name=f"Detalle_OT_{elegido if elegido != '(Todas)' else 'Todas'}.xlsx",
+        #     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        #     key="btn_dl_ot_detail"
+        # )
+        # # ------------------------------
+    else:
+        st.info("No hay tareas planificadas.")
+    
+    st.subheader("🔎 Detalle interactivo")
+    modo = st.radio("Ver detalle por:", ["Plan Completo (Todas)", "Máquina"], horizontal=True)
+
+    if modo == "Máquina":
         if not schedule.empty and detalle_maquina is not None and not detalle_maquina.empty:
             maquinas_disponibles = ordenar_maquinas_personalizado(detalle_maquina["Maquina"].unique().tolist())
             maquina_sel = st.selectbox("Seleccioná una máquina:", maquinas_disponibles, key=f"details_maq_select_{key_suffix}")
@@ -189,6 +252,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
             if "ManualPriority" not in df_full.columns: df_full["ManualPriority"] = 9999
             if "IsOutsourced" not in df_full.columns: df_full["IsOutsourced"] = False
             if "IsSkipped" not in df_full.columns: df_full["IsSkipped"] = False
+            if "ForzarInicio" not in df_full.columns: df_full["ForzarInicio"] = False
             
             # Ensure MateriaPrimaPlanta is boolean for checkbox display
             if "MateriaPrimaPlanta" in df_full.columns:
@@ -196,8 +260,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
             else:
                 df_full["MateriaPrimaPlanta"] = False
             
-            # Add "Eliminar" column (Virtual)
+            # Add "Eliminar" and "Ver OT" columns (Virtual)
             df_full["Eliminar OT"] = False
+            df_full["🔍 Ver"] = False
             
             # --- CALCULATE ESTIMATED COMPLETION DATE PER OT ---
             # Group by OT_id and get the max 'Fin' date
@@ -217,6 +282,9 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                 # Sort Chronologically
                 group = group.sort_values(by="Inicio")
                 
+                # Get the process for this machine from the group
+                machine_process = group["Proceso"].iloc[0] if not group.empty else "Inactivo"
+                
                 prev_fin = None
                 for _, row in group.iterrows():
                     curr_inicio = row["Inicio"]
@@ -231,7 +299,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                             
                             idle_rows.append({
                                 "Maquina": maquina,
-                                "Proceso": "Inactivo",
+                                "Proceso": machine_process,
                                 "OT_id": "---",
                                 "Cliente-articulo": "=== TIEMPO OCIOSO ===",
                                 "Cliente": "N/A",
@@ -243,6 +311,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                                 "IsOutsourced": False,
                                 "MateriaPrimaPlanta": False,
                                 "Urgente": False,
+                                "ForzarInicio": False,
                                 "ManualPriority": 9999
                             })
                     
@@ -307,6 +376,7 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                 "IsSkipped": "Saltar",
                 "ManualPriority": "Prioridad",
                 "Urgente": "Urgente",
+                "ForzarInicio": "Forzar Inicio",
                 "MateriaPrimaPlanta": "MP Pendiente",
                 "PeliculaArt": "Chapa Pend",
                 "TroquelArt": "Troquel Pend",
@@ -324,7 +394,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                  mask_no_override = df_editor["Prioridad"] == 9999
                  mask_excel_has_val = df_editor["PrioriImp"] != 9999
                  mask_excel_valid = df_editor["PrioriImp"].notna()
-                 mask_es_impresion = df_editor["Proceso"].astype(str).str.lower().str.contains("impresi", na=False)
+                 # Barnizado comparte la prioridad de Impresión (PrioriImp)
+                 mask_es_impresion = df_editor["Proceso"].astype(str).str.lower().str.contains("impresi|barniz", na=False)
                  
                  final_mask = mask_no_override & mask_excel_has_val & mask_excel_valid & mask_es_impresion
                  df_editor.loc[final_mask, "Prioridad"] = df_editor.loc[final_mask, "PrioriImp"]
@@ -341,10 +412,48 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                  
                  final_mask_tr = mask_no_override_tr & mask_excel_has_val_tr & mask_excel_valid_tr & mask_es_troquelado
                  df_editor.loc[final_mask_tr, "Prioridad"] = df_editor.loc[final_mask_tr, "PrioriTr"]
+
+            # Pre-fill 'Prioridad' con PrioriDesc para Descartonado
+            if "PrioriDesc" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioriDesc"] = pd.to_numeric(df_editor["PrioriDesc"], errors="coerce").fillna(9999)
                  
+                 mask_no_override_desc = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_desc = df_editor["PrioriDesc"] != 9999
+                 mask_excel_valid_desc = df_editor["PrioriDesc"].notna()
+                 mask_es_descartonado = df_editor["Proceso"].astype(str).str.lower().str.contains("descarton", na=False)
+                 
+                 final_mask_desc = mask_no_override_desc & mask_excel_has_val_desc & mask_excel_valid_desc & mask_es_descartonado
+                 df_editor.loc[final_mask_desc, "Prioridad"] = df_editor.loc[final_mask_desc, "PrioriDesc"]
+
+            # Pre-fill 'Prioridad' con PrioVenDdp para Ventana
+            if "PrioVenDdp" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioVenDdp"] = pd.to_numeric(df_editor["PrioVenDdp"], errors="coerce").fillna(9999)
+                 
+                 mask_no_override_ven = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_ven = df_editor["PrioVenDdp"] != 9999
+                 mask_excel_valid_ven = df_editor["PrioVenDdp"].notna()
+                 mask_es_ventana = df_editor["Proceso"].astype(str).str.lower().str.contains("ventana", na=False)
+                 
+                 final_mask_ven = mask_no_override_ven & mask_excel_has_val_ven & mask_excel_valid_ven & mask_es_ventana
+                 df_editor.loc[final_mask_ven, "Prioridad"] = df_editor.loc[final_mask_ven, "PrioVenDdp"]
+
+            # Pre-fill 'Prioridad' con PrioPegDdp para Pegadora
+            if "PrioPegDdp" in df_editor.columns:
+                 df_editor["Prioridad"] = pd.to_numeric(df_editor["Prioridad"], errors="coerce").fillna(9999)
+                 df_editor["PrioPegDdp"] = pd.to_numeric(df_editor["PrioPegDdp"], errors="coerce").fillna(9999)
+                 
+                 mask_no_override_peg = df_editor["Prioridad"] == 9999
+                 mask_excel_has_val_peg = df_editor["PrioPegDdp"] != 9999
+                 mask_excel_valid_peg = df_editor["PrioPegDdp"].notna()
+                 mask_es_pegadora = df_editor["Proceso"].astype(str).str.lower().str.contains("pegadora|pegado", na=False)
+                 
+                 final_mask_peg = mask_no_override_peg & mask_excel_has_val_peg & mask_excel_valid_peg & mask_es_pegadora
+                 df_editor.loc[final_mask_peg, "Prioridad"] = df_editor.loc[final_mask_peg, "PrioPegDdp"]
 
             # Select columns to show/edit
-            cols_editable = ["Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
+            cols_editable = ["🔍 Ver", "Maquina", "Proceso", "OT_id", "Cliente-articulo", "CantidadPliegos",  "Prioridad", "Inicio", "Fin", "DueDate", "FechaEntregaEstimada", "Saltar", "Urgente", "Forzar Inicio", "Chapa Pend", "Llegada Chapas", "Troquel Pend", "Llegada Troquel", "MP Pendiente", "Tercerizar", "Eliminar OT", "Colores", "CodigoTroquel", "PliAnc", "PliLar", "Duracion_h"]
             cols_final = [c for c in cols_editable if c in df_editor.columns]
             df_editor = df_editor[cols_final]
             
@@ -385,8 +494,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                 # We need to return an array of styles with the same length as the row
                 bg_color = ""
                 
-                # Check for idle row first
-                if str(row.get("Proceso")) == "Inactivo":
+                # Check for idle row first (OT_id is "---" for idle rows)
+                if str(row.get("OT_id")) == "---":
                     bg_color = "background-color: rgba(135, 206, 250, 0.5); font-style: italic; color: black;"
                     return [bg_color] * len(row)
                 
@@ -441,9 +550,19 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
             edited_df = st.data_editor(
                 styled_df,
                 column_config={
+                    "🔍 Ver": st.column_config.CheckboxColumn(
+                        "🔍",
+                        help="Haz clic para ver todos los detalles de esta OT arriba",
+                        default=False,
+                    ),
                     "Urgente": st.column_config.CheckboxColumn(
                         "Urgente",
                         help="Prioridad absoluta en este proceso.",
+                        default=False,
+                    ),
+                    "Forzar Inicio": st.column_config.CheckboxColumn(
+                        "Forzar Inicio",
+                        help="Ejecutar proceso sin esperar tiempos ociosos ni procesos previos.",
                         default=False,
                     ),
                     "MP Pendiente": st.column_config.CheckboxColumn(
@@ -510,10 +629,23 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                 },
                 column_order=st.session_state.details_column_order,
                 width='stretch',
-                height=600,
+                height=400,
                 hide_index=True,
                 key=f"editor_plan_completo_{key_suffix}"
             )
+
+            # --- DETECT OT LINKING ---
+            # If the user checked "🔍 Ver", we redirect the search selectbox to that OT
+            if "🔍 Ver" in edited_df.columns and edited_df["🔍 Ver"].any():
+                clicked_rows = edited_df[edited_df["🔍 Ver"] == True]
+                if not clicked_rows.empty:
+                    clicked_ot = str(clicked_rows.iloc[0]["OT_id"])
+                    if clicked_ot != "---":
+                        # Find the correct string in opciones [ "OT_id | Cliente-articulo" ]
+                        for opt in opciones:
+                            if opt.startswith(clicked_ot + " | "):
+                                st.session_state.pending_ot_selection = opt
+                                st.rerun()
 
             # --- PROCESS CHANGES BUTTON ---
             col_btn, col_info = st.columns([1, 3])
@@ -535,6 +667,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                         overrides["fecha_chapas_overrides"] = {}
                     if "fecha_troquel_overrides" not in overrides:
                         overrides["fecha_troquel_overrides"] = {}
+                    if "forzar_inicio_overrides" not in overrides:
+                        overrides["forzar_inicio_overrides"] = {}
 
                     from modules.utils.config_loader import normalize_machine_name
                     
@@ -638,6 +772,13 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None, key
                         if overrides["urgency_overrides"].get(key_op) != current_urgency:
                              overrides["urgency_overrides"][key_op] = current_urgency
                              has_changes = True
+
+                        # Forzar Inicio override
+                        if "Forzar Inicio" in row:
+                            current_forzar = bool(row["Forzar Inicio"])
+                            if overrides["forzar_inicio_overrides"].get(key_op) != current_forzar:
+                                 overrides["forzar_inicio_overrides"][key_op] = current_forzar
+                                 has_changes = True
 
                         # MP Pendiente override — solo guardar cuando se DESTILDA (False)
                         # Si está tildado (True), NO guardamos nada: el valor viene del Excel.

@@ -212,6 +212,10 @@ class PersistenceManager:
                 else:
                     fecha_troquel_clean[key_str] = None
 
+            # 10. Forzar Inicio
+            forzar_raw = overrides.get("forzar_inicio_overrides", {})
+            forzar_clean = {f"{ot}|{proc}": val for (ot, proc), val in forzar_raw.items()}
+
             # Prepare for DB
             data_map = {
                 "blacklist_ots": json.dumps(blacklist),
@@ -224,7 +228,8 @@ class PersistenceManager:
                 "pelicula_overrides": json.dumps(pelicula_clean),
                 "troquel_overrides": json.dumps(troquel_clean),
                 "fecha_chapas_overrides": json.dumps(fecha_chapas_clean),
-                "fecha_troquel_overrides": json.dumps(fecha_troquel_clean)
+                "fecha_troquel_overrides": json.dumps(fecha_troquel_clean),
+                "forzar_inicio_overrides": json.dumps(forzar_clean)
             }
 
             # Debug Log
@@ -266,7 +271,8 @@ class PersistenceManager:
                 "pelicula_overrides": {},
                 "troquel_overrides": {},
                 "fecha_chapas_overrides": {},
-                "fecha_troquel_overrides": {}
+                "fecha_troquel_overrides": {},
+                "forzar_inicio_overrides": {}
             }
 
         try:
@@ -355,6 +361,14 @@ class PersistenceManager:
                 if "|" in k:
                     parts = k.split("|", 1)
                     res_fecha_troquel[(parts[0], parts[1])] = pd.to_datetime(v) if v else pd.NaT
+
+            # 11. Forzar Inicio
+            res_forzar = {}
+            forzar_dict = json.loads(raw_data.get("forzar_inicio_overrides", "{}"))
+            for k, v in forzar_dict.items():
+                if "|" in k:
+                    parts = k.split("|", 1)
+                    res_forzar[(parts[0], parts[1])] = v
             
             return {
                 "blacklist_ots": res_blacklist,
@@ -367,7 +381,8 @@ class PersistenceManager:
                 "pelicula_overrides": res_pelicula,
                 "troquel_overrides": res_troquel,
                 "fecha_chapas_overrides": res_fecha_chapas,
-                "fecha_troquel_overrides": res_fecha_troquel
+                "fecha_troquel_overrides": res_fecha_troquel,
+                "forzar_inicio_overrides": res_forzar
             }
 
         except Exception as e:
@@ -382,7 +397,8 @@ class PersistenceManager:
                 "pelicula_overrides": {},
                 "troquel_overrides": {},
                 "fecha_chapas_overrides": {},
-                "fecha_troquel_overrides": {}
+                "fecha_troquel_overrides": {},
+                "forzar_inicio_overrides": {}
             }
 
     def get_locked_assignments(self, lookahead_days=0):
@@ -723,3 +739,58 @@ class PersistenceManager:
         except Exception as e:
             logger.error(f"Failed to load pending processes: {e}")
             return []
+
+    def save_custom_machines(self, machines_list):
+        """
+        Guarda la lista de máquinas personalizadas creadas desde la UI.
+        Structure: List of dicts with machine configuration.
+        """
+        if not self.connected:
+            return False
+
+        try:
+            ts = datetime.now()
+            query = """
+            INSERT INTO manual_overrides (override_key, data_json, last_updated)
+            VALUES (:key, :data, :ts)
+            ON CONFLICT (override_key) DO UPDATE SET
+                data_json = EXCLUDED.data_json,
+                last_updated = EXCLUDED.last_updated;
+            """
+
+            with self.engine.connect() as conn:
+                conn.execute(
+                    text(query),
+                    {"key": "custom_machines", "data": json.dumps(machines_list), "ts": ts},
+                )
+                conn.commit()
+
+            logger.info(f"Saved {len(machines_list)} custom machines to DB.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save custom machines: {e}")
+            st.warning(f"Error guardando máquinas personalizadas en BD: {e}")
+            return False
+
+    def load_custom_machines(self):
+        """
+        Carga la lista de máquinas personalizadas desde la BD.
+        Returns: list of dicts (same format as session_state.custom_machines) or [].
+        """
+        if not self.connected:
+            return []
+
+        try:
+            query = "SELECT data_json FROM manual_overrides WHERE override_key = 'custom_machines'"
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query)).fetchone()
+
+            if result and result[0]:
+                return json.loads(result[0])
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to load custom machines: {e}")
+            return []
+

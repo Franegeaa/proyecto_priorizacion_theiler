@@ -4,11 +4,25 @@ from modules.utils.config_loader import es_si
 from .machines import elegir_maquina
 from .priorities import _clave_prioridad_maquina
 
+# Default set of processes that are outsourced with no queue (72h fixed)
+# Stored here to avoid circular imports with scheduler.py
+def _default_terc():
+    return {"stamping", "plastificado", "encapado", "cuño"}
+
+
+
 # Mapeo de ID de troqueladora del Excel a nombre de máquina interno
 TROQUELADORA_ID_MAP = {
     7: "Troq Nº 2 Ema",
     5: "Troq Nº 1 Gus",
     105: "Duyan",
+}
+
+# Mapeo de ID de descartonadora del Excel a nombre de máquina interno
+DESCARTONADORA_ID_MAP = {
+    40: "Descartonadora 1",
+    194: "Descartonadora 2",
+    247957750: "Descartonadora 3",
 }
 
 
@@ -162,6 +176,22 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                     maquina = elegir_maquina(proceso, row, cfg, None)
                     has_manual_prio_machine = False
 
+                # --- ASIGNACIÓN POR DESCARTONADORA DEL EXCEL (OpeDes1) ---
+                # Si la orden tiene OpeDes1 asignada, va a esa máquina específica
+                # (PrioriDesc es opcional; si la tiene, se usa para ordenar la cola)
+                if "descartonad" in proceso.lower():
+                    desc_id = row.get("OpeDes1")
+                    tiene_maq_desc = pd.notna(desc_id) and str(desc_id).strip() not in ("", "nan")
+                    
+                    if tiene_maq_desc:
+                        try:
+                            desc_id_int = int(float(desc_id))
+                            if desc_id_int in DESCARTONADORA_ID_MAP:
+                                maquina = DESCARTONADORA_ID_MAP[desc_id_int]
+                                has_manual_prio_machine = True
+                        except (ValueError, TypeError):
+                            pass
+
             
             # --- Check Outsourced/Skipped/Priority ---
             str_maq = str(maquina)
@@ -174,7 +204,67 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             if is_skipped:
                 maquina = "SALTADO"
             elif is_outsourced:
-                maquina = "TERCERIZADO"
+                # Si el proceso tiene una máquina CUSTOM (_IsCustom=True), NO lo mandamos
+                # a TERCERIZADO. Las máquinas del Excel para procesos como Encapado/Stamping
+                # son solo de referencia; solo una máquina creada desde la UI convierte
+                # el proceso en interno con cola.
+                proc_lower_chk = str_proc.strip().lower()
+                maquinas_df = cfg["maquinas"]
+                custom_col = maquinas_df.get("_IsCustom", None)
+                if custom_col is not None:
+                    proc_tiene_custom = any(
+                        (row_m["_IsCustom"] == True) and
+                        (proc_lower_chk in str(row_m["Proceso"]).strip().lower())
+                        for _, row_m in maquinas_df.iterrows()
+                    )
+                else:
+                    proc_tiene_custom = False
+
+                if proc_tiene_custom:
+                    pass  # Tiene máquina custom → mantener la asignación automática
+                else:
+                    maquina = "TERCERIZADO"
+
+            # -------------------------------------------------------
+            # GUARD: Procesos tercierizados por defecto
+            # Si el proceso es del conjunto default (encapado/stamping/etc.):
+            #   - Si hay máquina CUSTOM → asignar esa en lugar del placeholder del Excel
+            #   - Si NO hay máquina custom → TERCERIZADO (72h, sin cola)
+            # -------------------------------------------------------
+            if maquina not in ("SALTADO", "TERCERIZADO"):
+                proc_lower_guard = str_proc.strip().lower()
+                if proc_lower_guard in _default_terc():
+                    maq_df_g = cfg["maquinas"]
+
+                    # Ver si la máquina actual ya es custom (raro pero posible)
+                    maq_row_g = maq_df_g[maq_df_g["Maquina"] == maquina]
+                    is_currently_custom = (
+                        not maq_row_g.empty
+                        and "_IsCustom" in maq_row_g.columns
+                        and bool(maq_row_g["_IsCustom"].iloc[0]) is True
+                    )
+
+                    if not is_currently_custom:
+                        # Buscar si existe alguna máquina custom para este proceso
+                        if "_IsCustom" in maq_df_g.columns:
+                            custom_para_proc = maq_df_g[
+                                (maq_df_g["_IsCustom"] == True) &
+                                (maq_df_g["Proceso"].str.lower().str.strip() == proc_lower_guard)
+                            ]
+                        else:
+                            custom_para_proc = maq_df_g.iloc[0:0]  # vacío
+
+                        if not custom_para_proc.empty:
+                            # Usar la primera máquina custom disponible para este proceso.
+                            # El balanceo de carga (paso 3.2 del scheduler) redistribuirá
+                            # entre todas las customs si hay más de una.
+                            maquina = custom_para_proc.iloc[0]["Maquina"]
+                        else:
+                            # Sin máquina custom → TERCERIZADO
+                            maquina = "TERCERIZADO"
+                            is_outsourced = True
+
+
 
             # Manual Priority (check with ORIGINAL machine name or new one? Original makes sense for user input)
             # User selected "Imp. Offset 1" in UI. If we change it to TERCERIZADO, we lose that key.
@@ -228,9 +318,14 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             elif "troquel" in proceso.lower() or "cortadora bobina" in proceso.lower():
                 # TROQUELADO y CORTADORA BOBINA: SIEMPRE dividir cantidad por bocas
                 pliegos = cant_prod / bocas if bocas > 0 else cant_prod
+            elif "descarton" in proceso.lower():
+                # DESCARTONADO: usa la cantidad planificada de descartonado, no la genérica
+                cant_desc = float(row.get("CantDesPlanDdp", 0) or 0)
+                pliegos = cant_desc if cant_desc > 0 else float(row.get("CantidadPliegos", cant_prod))
             else:
                 # Procesos restantes
                 pliegos = float(row.get("CantidadPliegos", cant_prod))
+
 
             tareas.append({
                 "idx": idx, "OT_id": ot, "CodigoProducto": row["CodigoProducto"], "Subcodigo": row["Subcodigo"],
@@ -261,6 +356,10 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "PrioriTr": row.get("PrioriTr", ""),     # Prioridad desde Excel (Troquelado)
                 "FechaTroDdp": row.get("FechaTroDdp"),   # Fecha asociada a la prioridad Excel (Troquelado)
                 "TroqueladoraDdp": row.get("TroqueladoraDdp"),  # ID de troqueladora del Excel
+                "PrioriDesc": row.get("PrioriDesc", ""),  # Prioridad desde Excel (Descartonado)
+                "OpeDes1": row.get("OpeDes1", ""),         # ID de descartonadora del Excel
+                "PrioVenDdp": row.get("PrioVenDdp", ""),   # Prioridad desde Excel (Ventana)
+                "PrioPegDdp": row.get("PrioPegDdp", ""),   # Prioridad desde Excel (Pegado)
                 
                 # Manual Override Params
                 "ManualPriority": manual_prio,

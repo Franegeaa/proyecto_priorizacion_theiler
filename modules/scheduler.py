@@ -30,10 +30,13 @@ from modules.utils.tiempos_y_setup import (
 )
 
 
-# Procesos tercerizados sin cola (duración fija, concurrencia ilimitada)
-PROCESOS_TERCERIZADOS_SIN_COLA = {"stamping", "plastificado", "encapado", "cuño"}
+# Procesos tercerizados sin cola (duración fija, concurrencia ilimitada) — DEFAULT.
+# En tiempo de ejecución, cualquier proceso de esta lista que tenga una máquina
+# real asignada en cfg["maquinas"] será sacado automáticamente del conjunto.
+_PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT = {"stamping", "plastificado", "encapado", "cuño"}
 
-# DEBUG: OT específica para rastrear
+# Alias de módulo (mantiene compatibilidad con referencias directas al nombre viejo)
+PROCESOS_TERCERIZADOS_SIN_COLA = _PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT
 
 def has_imminent_downtime(maquina, current_dt, cfg, max_days=2):
     """
@@ -74,6 +77,27 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     if df_ordenes.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df_ordenes["OT_id"] = df_ordenes["CodigoProducto"].astype(str) + "-" + df_ordenes["Subcodigo"].astype(str)
+
+    # ---------------------------------------------------------------
+    # CALCULAR PROCESOS_TERCERIZADOS_SIN_COLA EFECTIVO
+    # SOLO si hay una máquina CUSTOM (_IsCustom=True) para ese proceso
+    # lo sacamos del conjunto. Las máquinas del Excel NO cuentan porque
+    # esas siempre fueron outsourced y solo sirven de referencia.
+    # ---------------------------------------------------------------
+    custom_mask = cfg["maquinas"].get("_IsCustom", False) == True
+    procesos_con_maquina_custom = set(
+        cfg["maquinas"].loc[custom_mask, "Proceso"].dropna()
+        .str.strip().str.lower().unique()
+    )
+    PROCESOS_TERCERIZADOS_SIN_COLA = {
+        p for p in _PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT
+        if p not in procesos_con_maquina_custom
+    }
+    # Guardamos en cfg para que tasks.py pueda acceder
+    cfg["_procesos_terc_sin_cola"] = PROCESOS_TERCERIZADOS_SIN_COLA
+    # ---------------------------------------------------------------
+
+
     agenda = construir_calendario(cfg, start=start, start_time=start_time)
     inicio_general = datetime.combine(agenda["General"]["fecha"], agenda["General"]["hora"])
 
@@ -82,9 +106,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE (Solo para Planta 1) ---
-    # Toda orden que sea de "Cartonaje" se elimina si no es Planta 2
-    if "Cliente" in tasks.columns and cfg.get("planta") != 2:
+    # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE ---
+    # Toda orden que sea de "Cartonaje" se elimina completamente del plan
+    if "Cliente" in tasks.columns:
         tasks = tasks[~tasks["Cliente"].astype(str).str.lower().str.contains("cartonaje", na=False)]
         
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -175,7 +199,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             # Tomamos la primera coincidencia (debería ser única por proceso)
             idx_task = candidates.index[0]
             t = tasks.loc[idx_task].to_dict()
-            # t["idx"] = idx_task <-- LINEA ELIMINADA (Causaba el bug)
             
             # --- AGENDAR INMEDIATAMENTE ---
             
@@ -209,7 +232,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 
                 # Guardamos resultado
                 filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
-                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} | 
+                                                        "MateriaPrima", "Gramaje", "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} | 
                                  {"Setup_min": 0.0, "Proceso_h": round(proc_h, 3),
                                   "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo, "Maquina": pp_maquina}) # Forzamos Maquina real
                 
@@ -239,6 +262,16 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 mask = (tasks["OT_id"].astype(str) == str(ot_urg)) & (tasks["Proceso"].astype(str) == str(proc_urg))
                 if mask.any():
                     tasks.loc[mask, "Urgente"] = is_urgent
+
+        # 1a. Apply Forzar Inicio Overrides
+        if "forzar_inicio_overrides" in cfg["manual_overrides"]:
+            forzar_overrides = cfg["manual_overrides"]["forzar_inicio_overrides"]
+            if "ForzarInicio" not in tasks.columns:
+                tasks["ForzarInicio"] = False
+            for (ot_fz, proc_fz), is_forzar in forzar_overrides.items():
+                mask = (tasks["OT_id"].astype(str) == str(ot_fz)) & (tasks["Proceso"].astype(str) == str(proc_fz))
+                if mask.any():
+                    tasks.loc[mask, "ForzarInicio"] = is_forzar
 
         # 1b. Apply MP Overrides (MateriaPrimaPlanta)
         if "mp_overrides" in cfg["manual_overrides"]:
@@ -366,13 +399,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # =================================================================
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
-    manuales = [m for m in troq_cfg["Maquina"].tolist() if "troq" in str(m).lower() or "manual" in str(m).lower()]
+    manuales = [m for m in troq_cfg["Maquina"].tolist() if "troq n" in str(m).lower()]
     iberica = [m for m in troq_cfg["Maquina"].tolist() if "iberica" in str(m).lower()]
     auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
     auto_name = auto_names[0] if auto_names else None
-
-    for dt in cfg.get("downtimes", []):
-        print(f"  - {dt}")
 
     if not tasks.empty and manuales: 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
@@ -524,7 +554,6 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     return (f_penalized, h, l)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
-                # print(f"DEBUG CHOICE for group {troq_key} (Size {len(idxs)}): {m_sel}")
 
                 tasks.loc[idxs, "Maquina"] = m_sel
                 
@@ -557,8 +586,87 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         tasks.loc[mask_desc, "Maquina"] = "POOL_DESCARTONADO"
 
     # =================================================================
-    # 4. CONSTRUCCIÓN DE COLAS INTELIGENTES
+    # 3.2 BALANCEO DE CARGA GENÉRICO (Procesos con múltiples máquinas)
     # =================================================================
+    # Para cualquier proceso que tenga >1 máquina activa (excepto Troquelado y
+    # Descartonado que ya tienen su lógica propia), redistribuir las tareas
+    # asignadas a la máquina "principal" entre todas las máquinas disponibles,
+    # usando el mismo criterio de fecha estimada de finalización.
+    #
+    # Esto permite que máquinas custom (creadas desde la UI) participen en la
+    # planificación sin necesidad de lógica especial por proceso.
+
+    PROCESOS_CON_LOGICA_PROPIA = {"troquelado", "descartonado"}
+
+    # Agrupar máquinas activas por proceso
+    proc_to_maquinas = {}
+    for _, row_m in cfg["maquinas"].iterrows():
+        proc_key = str(row_m["Proceso"]).strip().lower()
+        maq = row_m["Maquina"]
+        if proc_key not in proc_to_maquinas:
+            proc_to_maquinas[proc_key] = []
+        proc_to_maquinas[proc_key].append(maq)
+
+    for proc_key, maquinas_proc in proc_to_maquinas.items():
+        # No balancear procesos con lógica propia
+        if any(p in proc_key for p in PROCESOS_CON_LOGICA_PROPIA):
+            continue
+        if not tasks.empty and not any(proc_key in str(t).lower() for t in tasks["Proceso"].unique()):
+            continue
+
+        # Para procesos del conjunto default-tercerizado, solo usar máquinas CUSTOM.
+        # El placeholder del Excel (Encapado, Stamping, etc.) NO debe recibir tareas.
+        if proc_key in _PROCESOS_TERCERIZADOS_SIN_COLA_DEFAULT:
+            if "_IsCustom" in cfg["maquinas"].columns:
+                maquinas_proc = [
+                    mq for mq in maquinas_proc
+                    if bool(cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mq, "_IsCustom"]
+                            .fillna(False).values[0]) is True
+                    if len(cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mq]) > 0
+                ]
+            else:
+                maquinas_proc = []
+
+        # Solo procesar si quedan >1 máquinas válidas
+        if len(maquinas_proc) <= 1:
+            continue
+
+        # Máscara: tareas de este proceso que NO son virtuales ni manuales
+        mask_proc = (
+            tasks["Proceso"].str.lower().str.strip() == proc_key
+        ) & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO", "POOL_DESCARTONADO"]))
+
+        if "ManualAssignment" in tasks.columns:
+            mask_proc = mask_proc & (~tasks["ManualAssignment"])
+
+        proc_tasks_idx = tasks.index[mask_proc].tolist()
+        if not proc_tasks_idx:
+            continue
+
+        # Capacidad (pliegos/h) por máquina
+        cap_proc = {}
+        for mq in maquinas_proc:
+            c = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mq, "Capacidad_pliegos_hora"]
+            cap_proc[mq] = float(c.iloc[0]) if not c.empty and float(c.iloc[0]) > 0 else 1.0
+
+        # Carga acumulada simulada por máquina (en horas)
+        load_proc = {mq: 0.0 for mq in maquinas_proc}
+
+        # Ordenar por DueDate para asignar respetando prioridad
+        sub = tasks.loc[proc_tasks_idx].copy()
+        sub["_dd_sort"] = pd.to_datetime(sub["DueDate"], errors="coerce")
+        if "ManualPriority" in sub.columns:
+            sub["_mp_sort"] = pd.to_numeric(sub["ManualPriority"], errors="coerce").fillna(9999)
+        else:
+            sub["_mp_sort"] = 9999
+        sub.sort_values(["_mp_sort", "_dd_sort"], inplace=True)
+
+        for idx_t in sub.index:
+            cant = float(tasks.at[idx_t, "CantidadPliegos"]) if tasks.at[idx_t, "CantidadPliegos"] else 0
+            m_sel = min(maquinas_proc, key=lambda mq: load_proc[mq])
+            tasks.at[idx_t, "Maquina"] = m_sel
+            dur_est = cant / cap_proc[m_sel] if cap_proc[m_sel] > 0 else 0
+            load_proc[m_sel] += dur_est
 
     colas = {}
     buffer_espera = {m: [] for m in maquinas} # Buffer para Francotirador
@@ -595,19 +703,38 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             else:
                 q["_priori_tro_num"] = 9999
 
-            # Elegir la MEJOR prioridad entre impresión y troquelado:
-            # La fecha más temprana y la prioridad más baja ganan
+            # Elegir la MEJOR prioridad entre humana (Manual), impresión y troquelado
+            q["_prio_humana"] = q[["ManualPriority", "_priori_imp_num", "_priori_tro_num"]].min(axis=1)
             q["_mejor_fecha"] = q[["_fecha_imp", "_fecha_tro"]].min(axis=1)
-            q["_mejor_priori"] = q[["_priori_imp_num", "_priori_tro_num"]].min(axis=1)
                 
-            q.sort_values(by=["ManualPriority", "_mejor_fecha", "_mejor_priori", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
-                          ascending=[True, True, True, False, True, True, False], inplace=True)
+            q.sort_values(by=["_prio_humana", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                          ascending=[True, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
         else: 
-            # Orden por defecto: ManualPriority -> Agrupados -> New Urgent -> Soft Locked -> Urgente -> DueDate -> Orden Proceso -> Cantidad
-            # Standard sorting
-            q.sort_values(by=["ManualPriority", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+            # Unified Prioridad for all other machines (including Excel priorities)
+            if "ManualPriority" not in q.columns: q["ManualPriority"] = 9999
+            
+            prio_imp = pd.to_numeric(q["PrioriImp"] if "PrioriImp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_tro = pd.to_numeric(q["PrioriTr"] if "PrioriTr" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_man = pd.to_numeric(q["ManualPriority"] if "ManualPriority" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_desc = pd.to_numeric(q["PrioriDesc"] if "PrioriDesc" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_ven = pd.to_numeric(q["PrioVenDdp"] if "PrioVenDdp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            prio_peg = pd.to_numeric(q["PrioPegDdp"] if "PrioPegDdp" in q.columns else pd.Series([9999]*len(q), index=q.index), errors="coerce").fillna(9999)
+            
+            # Para descartonadoras, la prioridad propia (PrioriDesc) domina
+            if "descartonad" in m.lower():
+                q["_prio_humana"] = pd.concat([prio_desc, prio_man], axis=1).min(axis=1)
+            # Para ventana, la prioridad propia (PrioVenDdp) domina
+            elif "ventana" in m.lower():
+                q["_prio_humana"] = pd.concat([prio_ven, prio_man], axis=1).min(axis=1)
+            # Para pegadora, la prioridad propia (PrioPegDdp) domina
+            elif any(k in m.lower() for k in ["pegadora", "pegado"]):
+                q["_prio_humana"] = pd.concat([prio_peg, prio_man], axis=1).min(axis=1)
+            else:
+                q["_prio_humana"] = pd.concat([prio_imp, prio_tro, prio_man], axis=1).min(axis=1)
+            
+            q.sort_values(by=["_prio_humana", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
                           ascending=[True, False, True, True, False], inplace=True)
             colas[m] = deque(q.to_dict("records"))
 
@@ -618,8 +745,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     if "POOL_DESCARTONADO" in tasks["Maquina"].values:
         q_pool = tasks[tasks["Maquina"] == "POOL_DESCARTONADO"].copy()
         
-        q_pool.sort_values(by=["ManualPriority", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
-                           ascending=[True, False, True, True, False], inplace=True)
+        # Ordenar por PrioriDesc (prioridad de descartonado) luego ManualPriority, Urgente, DueDate
+        if "PrioriDesc" in q_pool.columns:
+            q_pool["_prio_desc_num"] = pd.to_numeric(q_pool["PrioriDesc"], errors="coerce").fillna(9999)
+        else:
+            q_pool["_prio_desc_num"] = 9999
+            
+        q_pool.sort_values(by=["_prio_desc_num", "ManualPriority", "Urgente", "DueDate", "_orden_proceso", "CantidadPliegos"], 
+                           ascending=[True, True, False, True, True, False], inplace=True)
         colas["POOL_DESCARTONADO"] = deque(q_pool.to_dict("records"))
     else:
         colas["POOL_DESCARTONADO"] = deque()
@@ -695,6 +828,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
         # 2. Ignorará la falta de fechas de llegada para Chapas (Pelicula) y Troqueles.
         # Esto permite generar una planificación "ideal" basada solo en capacidad de máquina y tiempos de proceso.
         
+        # --- FORZAR INICIO ---
+        if t.get("ForzarInicio", False):
+            return (True, None)
+
         # --- REORDENAMIENTO DINAMICO (ProcesoDpd / TroqAntes) ---
         dynamic_order_applied = False
         
@@ -925,7 +1062,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # Register Result
                         filas.append({k: t_virt.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", 
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
                                         {"Setup_min": 0.0, "Proceso_h": duration_virt,
                                         "Inicio": start_virt, "Fin": end_virt, "Duracion_h": duration_virt, 
                                         "Motivo": "Outsourced/Skipped", "Maquina": maquina})
@@ -983,32 +1120,24 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 idx_cand = -1 
                 mejor_candidato_futuro = None # (idx, fecha_disponible)
                 mejor_candidato_setup = None 
+                mejor_candidato_prio_ready = None # (idx, priority_score)
                 
                 current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
                 
                 ultima_tarea = ultimo_en_maquina.get(maquina)
                 is_troq_machine = "troq" in maquina.lower() or "duyan" in maquina.lower() or "manual" in maquina.lower()
                 
-                if "barniz" in maquina.lower():
-                    log_debug(f"--- Ciclo Nueva Tarea @ {current_agenda_dt} ---")
-                    if ultima_tarea:
-                        log_debug(f"Ultima Tarea: {ultima_tarea.get('Cliente')} - {ultima_tarea.get('Proceso')}")
-                    else:
-                        log_debug("Ultima Tarea: NONE")
-
-                # SCAN WINDOW
-                # For prep machines, we scan up to 50 items to find "Catch Up" candidates.
-                # For others, we assume FIFO (break on first) or simple Logic.
-                
                 # VARS FOR GROUPING PRIORITY
                 is_prep_machine = "guillotin" in maquina.lower() or "bobina" in maquina.lower() or "corte" in maquina.lower()
                 best_group_score = -1
                 best_group_idx = -1
+                has_unrunnable_tasks = False
                 
                 scan_limit = 50 if is_prep_machine else 999999
                 
                 # URGENT DEADLINE PARA GAP FILLING
                 urgent_deadline_dt = None
+                tiene_prio_en_cola = False  # Hay alguna tarea 1-8 en la cola propia (runnable o no)
                 
                 # --- PRE-SCAN: Detectar tareas con prioridad Excel esperando dependencias ---
                 # Si hay alguna tarea con PrioriImp o PrioriTr válida que no está lista aún,
@@ -1027,8 +1156,15 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         prescan_prio_excel_tro = 9999
 
                     prescan_prio_man = int(t_prescan.get("ManualPriority", 9999))
+                    try:
+                        prescan_prio_desc = float(t_prescan.get("PrioriDesc", 9999))
+                        if pd.isna(prescan_prio_desc): prescan_prio_desc = 9999
+                    except (ValueError, TypeError):
+                        prescan_prio_desc = 9999
                     
-                    if prescan_prio_excel_imp < 9999 or prescan_prio_excel_tro < 9999 or prescan_prio_man < 9000:
+                    if prescan_prio_excel_imp < 9999 or prescan_prio_excel_tro < 9999 or prescan_prio_man < 9000 or prescan_prio_desc < 9999:
+                        # Hay una tarea de prioridad en esta cola (sin importar si está lista)
+                        tiene_prio_en_cola = True
                         prescan_runnable, prescan_avail = verificar_disponibilidad(t_prescan, maquina)
                         if prescan_runnable:
                             if prescan_avail and prescan_avail > current_agenda_dt:
@@ -1039,6 +1175,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                 # Tarea priorizada lista AHORA → el SUPER OVERRIDE la tomará
                                 # Seguimos buscando por si hay OTRA priorizada más adelante esperando
                                 continue
+                        else:
+                            # No-runnable pero con prioridad: bloqueamos gap-filling igual
+                            urgent_deadline_dt = urgent_deadline_dt or current_agenda_dt
                 
                 for i, t_cand in enumerate(colas[maquina]):
                     if is_prep_machine and i >= scan_limit: 
@@ -1059,22 +1198,14 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     if not mp_ok:
                         continue
 
-                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                    
-                    if not runnable: 
-                        # Tarea no ejecutable: saltear y seguir buscando alternativas
-                        continue
-                    
-                    # --- SUPER OVERRIDE: MANUAL PRIORITY / EXCEL PRIORITY ---
+                    # --- DEFINICIÓN DE PRIORIDAD (MANUAL O EXCEL) ---
                     prio_man = int(t_cand.get("ManualPriority", 9999))
-                    
                     # Verificar la prioridad de Impresión (PrioriImp)
                     try:
                         prio_excel_imp = float(t_cand.get("PrioriImp", 9999))
                         if pd.isna(prio_excel_imp): prio_excel_imp = 9999
                     except (ValueError, TypeError):
                         prio_excel_imp = 9999
-
                     # Verificar la prioridad de Troquelado (PrioriTr)
                     try:
                         prio_excel_tro = float(t_cand.get("PrioriTr", 9999))
@@ -1082,39 +1213,103 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     except (ValueError, TypeError):
                         prio_excel_tro = 9999
                     
-                    # Si tiene prioridad alta (manual < 9000, Impresión < 9999 o Troquel < 9999), es sagrada.
-                    tiene_prioridad = prio_man < 9000 or prio_excel_imp < 9999 or prio_excel_tro < 9999
+                    try:
+                        prio_excel_desc = float(t_cand.get("PrioriDesc", 9999))
+                        if pd.isna(prio_excel_desc): prio_excel_desc = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_desc = 9999
+                    
+                    try:
+                        prio_excel_ven = float(t_cand.get("PrioVenDdp", 9999))
+                        if pd.isna(prio_excel_ven): prio_excel_ven = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_ven = 9999
+                    
+                    try:
+                        prio_excel_peg = float(t_cand.get("PrioPegDdp", 9999))
+                        if pd.isna(prio_excel_peg): prio_excel_peg = 9999
+                    except (ValueError, TypeError):
+                        prio_excel_peg = 9999
+
+                    tiene_prioridad = (prio_man < 9000 or prio_excel_imp < 9999 or prio_excel_tro < 9999 or 
+                                      prio_excel_desc < 9999 or prio_excel_ven < 9999 or prio_excel_peg < 9999)
+
+                    # --- PRIORIDAD EFECTIVA PARA ESTA MÁQUINA ---
+                    # Troqueladora: solo PrioriTr
+                    # Descartonadora: solo PrioriDesc
+                    # Ventana: solo PrioVenDdp
+                    # Pegadora: solo PrioPegDdp
+                    # Imprenta/Prep: solo PrioriImp
+                    # Resto: ManualPriority
+                    if is_troq_machine:
+                        prio_efectiva_maquina = min(prio_man, prio_excel_tro)
+                        # tiene_prioridad ya está calculado arriba, OK
+                    elif "descartonad" in maquina.lower():
+                        prio_efectiva_maquina = min(prio_man, prio_excel_desc)
+                        # Para descartonadoras, SOLO PrioriDesc (y ManualPriority) definen prioridad
+                        # PrioriTr/PrioriImp de otros procesos no deben influir aquí
+                        tiene_prioridad = prio_man < 9000 or prio_excel_desc < 9999
+                    elif "ventana" in maquina.lower():
+                        prio_efectiva_maquina = min(prio_man, prio_excel_ven)
+                        # Para ventana, SOLO PrioVenDdp (y ManualPriority) definen prioridad
+                        tiene_prioridad = prio_man < 9000 or prio_excel_ven < 9999
+                    elif any(k in maquina.lower() for k in ["pegadora", "pegado"]):
+                        prio_efectiva_maquina = min(prio_man, prio_excel_peg)
+                        # Para pegadoras, SOLO PrioPegDdp (y ManualPriority) definen prioridad
+                        tiene_prioridad = prio_man < 9000 or prio_excel_peg < 9999
+                    elif is_prep_machine:
+                        prio_efectiva_maquina = min(prio_man, prio_excel_imp)
+                    else:
+                        prio_efectiva_maquina = prio_man
+
+                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                    
+                    if not runnable: 
+                        has_unrunnable_tasks = True
+                        if tiene_prioridad:
+                            if mejor_candidato_prio_ready is None or prio_efectiva_maquina < mejor_candidato_prio_ready[1]:
+                                mejor_candidato_prio_ready = None
+                            break
+                        continue
                     
                     if tiene_prioridad:
                         # Check start constraints
                         is_ready_now = not available_at or available_at <= current_agenda_dt
                         if is_ready_now:
-                            idx_cand = i
                             mejor_candidato_futuro = None
                             mejor_candidato_setup = None # Disable setup gap filling
-                            break
+                            
+                            current_prio_score = prio_efectiva_maquina
+                                
+                            if mejor_candidato_prio_ready is None:
+                                mejor_candidato_prio_ready = (i, current_prio_score)
+                            else:
+                                if current_prio_score < mejor_candidato_prio_ready[1]:
+                                    mejor_candidato_prio_ready = (i, current_prio_score)
+                                elif current_prio_score == mejor_candidato_prio_ready[1]:
+                                    t_curr_due = t_cand.get("DueDate")
+                                    t_best_due = colas[maquina][mejor_candidato_prio_ready[0]].get("DueDate")
+                                    if pd.notna(t_curr_due) and pd.notna(t_best_due) and t_curr_due < t_best_due:
+                                        mejor_candidato_prio_ready = (i, current_prio_score)
+                            
+                            # No break here, continue searching entire queue for better priority
+                            continue
                         else:
                             # If not ready IS runnable, keep it as future candidate.
                             if mejor_candidato_futuro is None:
                                 mejor_candidato_futuro = (i, available_at)
                             elif available_at < mejor_candidato_futuro[1]:
                                 mejor_candidato_futuro = (i, available_at)
-                            
+                                
                             # Fijar límite de tiempo para gap-filling (Urgent Deadline)
+                            # Si hay una tarea priorizada esperando, bloqueamos cualquier relleno de hueco.
                             if urgent_deadline_dt is None or available_at < urgent_deadline_dt:
                                 urgent_deadline_dt = available_at
                             
-                            # --- MEJORA RAJATABLA (SOLO IMPRESIÓN) ---
-                            # Si es una máquina de impresión (Heidelberg, Flexo, etc.)
-                            # y la tarea con prioridad no está lista aún, dejamos de buscar 
-                            # alternativas (break) para que la máquina la espere inactivamente.
-                            # Para el RESTO de las máquinas (Troquelado, etc.), permitimos
-                            # el "Gap Filling" (continue) para no dejar la máquina parada.
-                            es_impresion = any(kw in maquina.lower() for kw in ["heidelberg", "flexo", "offset", "impresion", "impresora"])
-                            if es_impresion:
-                                break
-                            else:
-                                continue
+                            # --- MEJORA RAJATABLA (TODAS LAS MÁQUINAS) ---
+                            # El usuario exigió que no haya gap-filling si hay una tarea 
+                            # con prioridad manual o de excel esperando. La máquina esperará ociosa.
+                            break
 
                     es_setup = False
                     if ultima_tarea:
@@ -1139,31 +1334,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     
                     if is_ready_now:
                         # --- NUEVA RESTRICCIÓN DE GAP FILLING ---
-                        # Si hay una tarea prioritaria esperando en el futuro, no permitimos
-                        # meter una tarea "gap filler" que dure demasiado y bloquee la prioridad.
+                        # Si hay una tarea prioritaria esperando en el futuro, bloqueamos 
+                        # absolutamente el gap filling para respetar el orden de cola.
                         fits_gap = True
                         if urgent_deadline_dt is not None:
-                            # --- REGLA ESTRICTA: tareas SIN prioridad no pueden rellenar huecos ---
-                            # Si hay una tarea priorizada esperando, solo otras tareas con prioridad
-                            # pueden llenar el hueco. Tareas sin prioridad se saltan.
-                            if not tiene_prioridad:
-                                fits_gap = False
-                            else:
-                                try:
-                                    t_gap_pliegos = float(t_cand.get("CantidadPliegos", 0))
-                                    orden_fake = df_ordenes.loc[t_cand["idx"]].copy() if "idx" in t_cand else df_ordenes.iloc[0].copy()
-                                    orden_fake["CantidadPliegos"] = t_gap_pliegos
-                                    _, proc_h_gap = tiempo_operacion_h(orden_fake, str(t_cand.get("Proceso", "")), maquina, cfg)
-                                    
-                                    # Tiempo disponible hasta que llegue la prioritaria
-                                    time_to_urgent = (urgent_deadline_dt - current_agenda_dt).total_seconds() / 3600.0
-                                    
-                                    # Tolerancia de 2 horas sobre el hueco
-                                    if (proc_h_gap > time_to_urgent + 2.0) and (not is_prep_machine or time_to_urgent < 24.0):
-                                         fits_gap = False
-                                except Exception:
-                                    fits_gap = True
-                                
+                            fits_gap = False
+                        
                         if not fits_gap:
                             continue
                         
@@ -1209,8 +1385,12 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                 # END SEARCH LOOP
                 
+                # Assign the best prioritized task if we found one
+                if mejor_candidato_prio_ready is not None:
+                    idx_cand = mejor_candidato_prio_ready[0]
+                
                 # For Prep Machines, apply the Best Group Selection
-                if is_prep_machine and best_group_idx != -1:
+                if is_prep_machine and best_group_idx != -1 and idx_cand == -1:
                     idx_cand = best_group_idx
 
                 
@@ -1223,11 +1403,21 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                     log_debug(f"End Loop. IdxCand: {idx_cand}. BestFut: {mejor_candidato_futuro}. BestSetup: {mejor_candidato_setup}")
 
                 # 1. Si ya tenemos uno listo (idx_cand != -1), checkeamos si vale la pena ESPERAR por setup
-                #    PERO SOLO SI NO ES UNA PRIORIDAD MANUAL
+                #    PERO SOLO SI NO ES UNA PRIORIDAD MANUAL O EXCEL
                 is_manual_override = False
                 if idx_cand != -1:
                     t_sel = colas[maquina][idx_cand]
-                    if int(t_sel.get("ManualPriority", 9999)) < 9000:
+                    
+                    p_man_chk = int(t_sel.get("ManualPriority", 9999))
+                    try: p_imp_chk = float(t_sel.get("PrioriImp", 9999))
+                    except (ValueError, TypeError): p_imp_chk = 9999
+                    try: p_tr_chk = float(t_sel.get("PrioriTr", 9999))
+                    except (ValueError, TypeError): p_tr_chk = 9999
+                    
+                    if pd.isna(p_imp_chk): p_imp_chk = 9999
+                    if pd.isna(p_tr_chk): p_tr_chk = 9999
+
+                    if p_man_chk < 9000 or p_imp_chk < 9999 or p_tr_chk < 9999:
                         is_manual_override = True
 
                 if idx_cand != -1 and mejor_candidato_setup and not is_manual_override:
@@ -1256,6 +1446,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
 
                     if future_dt:
+                        # Si hay tareas esperando dependencias, no podemos dormir eternamente
+                        if has_unrunnable_tasks:
+                            max_sleep_dt = current_agenda_dt + timedelta(hours=2)
+                            if future_dt > max_sleep_dt:
+                                future_dt = max_sleep_dt
+                                idx_cand = -1 # No ejecutar la tarea futura todavía, solo avanzar el reloj
+                                
                         # AVANZAR EL RELOJ DE LA MÁQUINA (Solo aquí, cuando decidimos esperar)
                         # Lógica de salto de tiempo (respetando días hábiles)
                         fecha_destino = future_dt.date()
@@ -1272,6 +1469,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             agenda[maquina]["hora"] = hora_destino
                             h_usadas = (hora_destino.hour - 7) + (hora_destino.minute / 60.0)
                             agenda[maquina]["resto_horas"] = max(0, h_dia - h_usadas)
+                            
+                        # Si decidimos solo avanzar el reloj para revisar de nuevo, rompemos el ciclo
+                        if idx_cand == -1:
+                            tareas_agendadas = True
+                            break
 
                 
                 # ==========================================================
@@ -1297,115 +1499,103 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         is_restricted_desc = "descartonadora 3" in maquina.lower() or "descartonadora 4" in maquina.lower()
                         
                         if "descartonad" in maquina.lower() and colas.get("POOL_DESCARTONADO") and not is_restricted_desc:
-                            best_pool_idx = -1
-                            best_pool_future = None # (idx, available_at)
-                            best_has_successor = False # Flag for priority
-                            best_is_urgent = False
-                            current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
-                            maq_has_imminent_downtime = has_imminent_downtime(maquina, current_agenda_dt, cfg)
+                            # Si la máquina tiene prioridades propias esperando, NO tomar del POOL
+                            if tiene_prio_en_cola:
+                                pass  # Espera: no roba del POOL cuando hay prio propias pendientes
+                            else:
+                                best_pool_idx = -1
+                                best_pool_future = None # (idx, available_at)
+                                best_has_successor = False # Flag for priority
+                                best_is_urgent = False
+                                current_agenda_dt = datetime.combine(agenda[maquina]["fecha"], agenda[maquina]["hora"])
+                                maq_has_imminent_downtime = has_imminent_downtime(maquina, current_agenda_dt, cfg)
 
-                            for i, t_cand in enumerate(colas["POOL_DESCARTONADO"]):
-                                # Validar MP
-                                mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                
-                                if cfg.get("ignore_constraints"):
-                                    mp_ok = True
+                                for i, t_cand in enumerate(colas["POOL_DESCARTONADO"]):
+                                    # Validar MP
+                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                    
+                                    if cfg.get("ignore_constraints"):
+                                        mp_ok = True
 
-                                if not mp_ok: continue
-                                
-                                runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                                
-                                if not runnable: continue
+                                    if not mp_ok: continue
+                                    
+                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                    
+                                    if not runnable: continue
 
-                                # Check for successors (Pegado, Ventana, etc.)
-                                # We check if there are any pending processes that are NOT Descartonado or previous ones.
-                                # A simple heuristic: check if '_PEN_Pegado' or '_PEN_Ventana' or similar are 'Si'.
-                                # Or check if there are any pending keys starting with '_PEN_' other than current.
-                                has_successor = False
-                                for k, v in t_cand.items():
-                                    if k.startswith("_PEN_") and str(v).lower() == "si":
-                                        proc_pend = k.replace("_PEN_", "").lower()
-                                        if "descartonado" not in proc_pend and "impres" not in proc_pend and "troquel" not in proc_pend:
-                                            has_successor = True
-                                            break
-                                
-                                # Si está lista YA
-                                if not available_at or available_at <= current_agenda_dt:
-                                    # Logic Refined:
-                                    # 0. Manual Priority (Lower is better)
-                                    # 1. Urgency is King (Urgente="Si" > "No") IF Priority is equal
-                                    # 2. If Urgency is same, prefer Successor.
-                                    # 3. If both same, prefer original order (DueDate).
+                                    # Check for successors (Pegado, Ventana, etc.)
+                                    has_successor = False
+                                    for k, v in t_cand.items():
+                                        if k.startswith("_PEN_") and str(v).lower() == "si":
+                                            proc_pend = k.replace("_PEN_", "").lower()
+                                            if "descartonado" not in proc_pend and "impres" not in proc_pend and "troquel" not in proc_pend:
+                                                has_successor = True
+                                                break
                                     
-                                    current_prio = int(t_cand.get("ManualPriority", 9999))
-                                    is_urgent = es_si(t_cand.get("Urgente"))
-                                    
-                                    if is_urgent and maq_has_imminent_downtime:
-                                         current_prio += 5000
-                                         is_urgent = False
-                                    
-                                    if best_pool_idx == -1:
-                                        best_pool_idx = i
-                                        best_has_successor = has_successor
-                                        best_is_urgent = is_urgent
-                                        best_prio = current_prio
-                                    else:
-                                        # Compare current candidate (i) with best so far
+                                    # Si está lista YA
+                                    if not available_at or available_at <= current_agenda_dt:
+                                        # 0. PrioriDesc o ManualPriority (menor es mejor)
+                                        # 1. Urgente sobre no-urgente si misma prioridad
+                                        # 2. Con sucesor sobre sin sucesor si mismo todo
+                                        try:
+                                            prio_desc_cand = float(t_cand.get("PrioriDesc", 9999) or 9999)
+                                            if pd.isna(prio_desc_cand): prio_desc_cand = 9999
+                                        except (ValueError, TypeError):
+                                            prio_desc_cand = 9999
+                                        current_prio = min(int(t_cand.get("ManualPriority", 9999)), int(prio_desc_cand))
+                                        is_urgent = es_si(t_cand.get("Urgente"))
                                         
-                                        # 0. Manual Priority Check
-                                        if current_prio < best_prio:
-                                            # Found better priority, replace best
+                                        if is_urgent and maq_has_imminent_downtime:
+                                             current_prio += 5000
+                                             is_urgent = False
+                                        
+                                        if best_pool_idx == -1:
                                             best_pool_idx = i
                                             best_has_successor = has_successor
                                             best_is_urgent = is_urgent
                                             best_prio = current_prio
-                                        elif current_prio > best_prio:
-                                            # Current is worse priority, keep best.
-                                            pass
                                         else:
-                                            # Same Manual Priority. Check Urgency.
-                                            if is_urgent and not best_is_urgent:
-                                                # Found urgent, replace non-urgent best
+                                            if current_prio < best_prio:
                                                 best_pool_idx = i
                                                 best_has_successor = has_successor
-                                                best_is_urgent = True
+                                                best_is_urgent = is_urgent
                                                 best_prio = current_prio
-                                            elif not is_urgent and best_is_urgent:
-                                                # Current is not urgent, best is. Keep best.
+                                            elif current_prio > best_prio:
                                                 pass
                                             else:
-                                                # Same urgency status. Check Successor.
-                                                if has_successor and not best_has_successor:
+                                                if is_urgent and not best_is_urgent:
                                                     best_pool_idx = i
-                                                    best_has_successor = True
-                                                    best_is_urgent = is_urgent
+                                                    best_has_successor = has_successor
+                                                    best_is_urgent = True
                                                     best_prio = current_prio
-                                                # Else: Keep best (respects original sort order which is DueDate)
+                                                elif not is_urgent and best_is_urgent:
+                                                    pass
+                                                else:
+                                                    if has_successor and not best_has_successor:
+                                                        best_pool_idx = i
+                                                        best_has_successor = True
+                                                        best_is_urgent = is_urgent
+                                                        best_prio = current_prio
+                                        continue
                                     
-                                    # Note: We don't break immediately anymore because we want to scan for a better priority task
-                                    continue
-                                
-                                # Si es futura
-                                if best_pool_future is None:
-                                    best_pool_future = (i, available_at)
-                                else:
-                                    if available_at < best_pool_future[1]:
+                                    # Si es futura
+                                    if best_pool_future is None:
                                         best_pool_future = (i, available_at)
-                            
-                            # Decisión final del POOL
-                            idx_robado = -1
-                            if best_pool_idx != -1:
-                                idx_robado = best_pool_idx
-                            elif best_pool_future:
-                                idx_robado = best_pool_future[0]
-                                # Nota: Al robar una futura, el avance de agenda ocurrirá naturalmente
-                                # cuando se procese la tarea en el paso 4 (verificar_disponibilidad se llama de nuevo)
-                            
-                            if idx_robado != -1:
-                                tarea_encontrada = colas["POOL_DESCARTONADO"][idx_robado]
-                                fuente_maquina = "POOL_DESCARTONADO"
-                                # No break aquí, dejamos que fluya al bloque de ejecución de robo
+                                    else:
+                                        if available_at < best_pool_future[1]:
+                                            best_pool_future = (i, available_at)
+                                
+                                # Decisión final del POOL
+                                idx_robado = -1
+                                if best_pool_idx != -1:
+                                    idx_robado = best_pool_idx
+                                elif best_pool_future:
+                                    idx_robado = best_pool_future[0]
+                                
+                                if idx_robado != -1:
+                                    tarea_encontrada = colas["POOL_DESCARTONADO"][idx_robado]
+                                    fuente_maquina = "POOL_DESCARTONADO"
                         
                         if tarea_encontrada:
                             # Ejecutar robo del POOL inmediatamente
@@ -1413,6 +1603,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         # A: Auto roba a Manual o Iberica
                         elif maquina in auto_names:
+                            # NO robar si la máquina tiene prioridades propias esperando
+                            if tiene_prio_en_cola:
+                                break
                             # Targets: Manuales + Iberica
                             targets_robo = manuales 
                             for m_target in targets_robo:
@@ -1439,6 +1632,9 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                         # B y C: Manual roba a Auto o Manual o Iberica
                         elif any(m in maquina for m in manuales):
+                            # NO robar si la máquina tiene prioridades propias esperando
+                            if tiene_prio_en_cola:
+                                break
                             # B: Robar a Auto
                             if auto_name and colas.get(auto_name):
                                 for i, t_cand in enumerate(colas[auto_name]):
@@ -1530,20 +1726,22 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         # D: Robo entre Descartonadoras
                         # Tampoco roban si son las restringidas
                         elif "descartonad" in maquina.lower() and not is_restricted_desc:
-                            vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
-                            for vecina in vecinas_desc:
-                                if not colas.get(vecina): continue
-                                for i, t_cand in enumerate(colas[vecina]):
-                                    if t_cand.get("ManualAssignment"): continue
-                                    if "descartonad" not in t_cand["Proceso"].lower(): continue
-                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                    if not mp_ok: continue
-                                    
-                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                                    if runnable and (not available_at or available_at <= current_agenda_dt):
-                                        tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
-                                if tarea_encontrada: break
+                            # NO robar si la máquina tiene prioridades propias esperando
+                            if not tiene_prio_en_cola:
+                                vecinas_desc = [m for m in colas.keys() if "descartonad" in m.lower() and m != maquina]
+                                for vecina in vecinas_desc:
+                                    if not colas.get(vecina): continue
+                                    for i, t_cand in enumerate(colas[vecina]):
+                                        if t_cand.get("ManualAssignment"): continue
+                                        if "descartonad" not in t_cand["Proceso"].lower(): continue
+                                        mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
+                                        if not mp_ok: continue
+                                        
+                                        runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                        if runnable and (not available_at or available_at <= current_agenda_dt):
+                                            tarea_encontrada = t_cand; fuente_maquina = vecina; idx_robado = i; break
+                                    if tarea_encontrada: break
 
                         # Ejecutar Robo
                         if tarea_encontrada:
@@ -1577,7 +1775,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         t_candidata = colas[maquina][0]
                         if se_ejecuta_ya:
                             t_final = colas[maquina].popleft()
-
+                    
                     #========================================
                     # PASO 4: EJECUCIÓN FINAL
                     #========================================
@@ -1642,7 +1840,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                             filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                                 "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
+                                                                "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
                                          {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                           "Inicio": inicio, "Fin": fin, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
@@ -1678,7 +1876,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                         
                         filas.append({k: t.get(k) for k in ["OT_id", "CodigoProducto", "Subcodigo", "CantidadPliegos", "CantidadPliegosNetos",
                                                             "Bocas", "Poses", "Cliente", "Cliente-articulo", "Proceso", "Maquina", "DueDate", "PliAnc", "PliLar", "MateriaPrima", "Gramaje",
-                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp"]} |
+                                                            "Urgente", "ManualPriority", "IsOutsourced", "IsSkipped", "ForzarInicio", "Colores", "CodigoTroquel", "MateriaPrimaPlanta", "PrioriImp", "ProcesoDpd", "PeliculaArt", "TroquelArt", "FechaLlegadaChapas", "FechaLlegadaTroquel", "PrioriTr", "FechaTroDdp", "TroqueladoraDdp", "PrioriDesc", "OpeDes1", "PrioVenDdp", "PrioPegDdp"]} |
                                      {"Setup_min": round(setup_min, 2), "Proceso_h": round(proc_h, 3),
                                       "Inicio": inicio_real, "Fin": fin_real, "Duracion_h": round(total_h, 3), "Motivo": motivo})
 
