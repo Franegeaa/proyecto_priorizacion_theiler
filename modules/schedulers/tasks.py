@@ -30,7 +30,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_const
     flujo = orden_std or [
         "Cortadora Bobina", "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
         "OPP", "Stamping", "Plastificado", "Encapado", "Cuño","Troquelado", 
-        "Descartonado", "Ventana", "Pegado"
+        "Descartonado", "Ventana", "Pegado", "Prensado"
     ]
     flujo = [p.strip() for p in flujo] 
     orden_idx = {p: i for i, p in enumerate(flujo)}
@@ -72,6 +72,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_const
     if es_si(orden.get("_PEN_Descartonado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Descartonado")
     if es_si(orden.get("_PEN_Ventana")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Ventana")
     if es_si(orden.get("_PEN_Pegado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Pegado")
+    if orden.get("_PEN_Prensado") is True or orden.get("_PEN_Prensado") == True: pendientes.append("Prensado")
     
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(dict.fromkeys(pendientes))

@@ -16,6 +16,7 @@ color_map_procesos = {
     "Descartonado": "dodgerblue",   # Azul brillante
     "Ventana": "skyblue",           # Azul cielo
     "Pegado": "mediumpurple",         # Púrpura medio
+    "Prensado": "tomato",             # Rojo-naranja (proceso G2)
 }
 
 def ordenar_maquinas_personalizado(lista_maquinas):

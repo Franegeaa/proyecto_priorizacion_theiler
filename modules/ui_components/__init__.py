@@ -15,3 +15,4 @@ from .render_delayed_orders_section import render_delayed_orders_section
 from .render_daily_details_section import render_daily_details_section
 from .render_daily_schedule_view import render_daily_schedule_view
 from .render_create_machine import render_create_machine
+from .render_galpon2_page import render_galpon2_page

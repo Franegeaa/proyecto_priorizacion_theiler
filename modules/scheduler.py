@@ -107,9 +107,10 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # --- FILTRO GLOBAL: IGNORAR CLIENTE CARTONAJE ---
-    # Toda orden que sea de "Cartonaje" se elimina completamente del plan
-    if "Cliente" in tasks.columns:
-        tasks = tasks[~tasks["Cliente"].astype(str).str.lower().str.contains("cartonaje", na=False)]
+    # Solo aplicar en Galpón 1. En Galpón 2 (_galpon=2) ya viene filtrado con SOLO Cartonaje.
+    if cfg.get("_galpon", 1) != 2:
+        if "Cliente" in tasks.columns:
+            tasks = tasks[~tasks["Cliente"].astype(str).str.lower().str.contains("cartonaje", na=False)]
         
     if tasks.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
@@ -399,22 +400,42 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # =================================================================
     
     troq_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("troquel")]
-    manuales = [m for m in troq_cfg["Maquina"].tolist() if "troq n" in str(m).lower()]
-    iberica = [m for m in troq_cfg["Maquina"].tolist() if "iberica" in str(m).lower()]
-    auto_names = [m for m in troq_cfg["Maquina"].tolist() if "autom" in str(m).lower() or "duyan" in str(m).lower()]
-    auto_name = auto_names[0] if auto_names else None
+    
+    manuales = []
+    auto_names = []
+    
+    for _, row_m in troq_cfg.iterrows():
+        m_name = str(row_m["Maquina"]).lower()
+        m_tipo = str(row_m.get("TipoMaquina", "")).lower()
+        
+        # Considerar manual si tiene 'manual' en el tipo o cumple patrones de nombre manual
+        # (Galpón 1 usa "Troq Nº X", Galpón 2 usa "X-TroqNºX")
+        if m_tipo == "manual" or "nº" in m_name or "n°" in m_name or "manual" in m_name:
+            # Casos especiales de máquinas automáticas que el usuario a veces etiqueta con Nº
+            if "autom" in m_name or "duyan" in m_name or "iberica" in m_name or m_tipo == "automatica":
+                auto_names.append(row_m["Maquina"])
+            else:
+                manuales.append(row_m["Maquina"])
+        elif "iberica" in m_name or "autom" in m_name or "duyan" in m_name or m_tipo == "automatica":
+            auto_names.append(row_m["Maquina"])
+            
+    # auto_name es el representante para la lógica de "roaming" al final (opcional)
+    auto_name = None
+    if auto_names:
+        primera_opciones = [m for m in auto_names if "duyan" in m.lower() or "autom" in m.lower()]
+        auto_name = primera_opciones[0] if primera_opciones else auto_names[0]
 
-    if not tasks.empty and manuales: 
+    if not tasks.empty and (manuales or auto_names): 
         if "CodigoTroquel" not in tasks.columns: tasks["CodigoTroquel"] = ""
         tasks["CodigoTroquel"] = tasks["CodigoTroquel"].fillna("").astype(str).str.strip().str.lower()
         
         cap = {} 
-        for m in manuales + ([auto_name] if auto_name else []):
+        pool_maquinas = manuales + auto_names
+        for m in pool_maquinas:
             if m: cap[m] = float(capacidad_pliegos_h("Troquelado", m, cfg))
         load_h = {m: 0.0 for m in cap.keys()} 
 
-        # Agenda simulada solo para lectura de fechas (ahora con escritura simulada)
-        # IMPORTANTE: Incluir "nombre" para que _reservar_en_agenda pueda buscar los downtimes
+        # Agenda simulada solo para lectura de fechas
         agenda_m = {
             m: {
                 "fecha": agenda[m]["fecha"], 
@@ -427,14 +448,17 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
         mask_troq = tasks["Proceso"].eq("Troquelado") & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
         
-        # EXCLUDE Manual Assignments logic
         if "ManualAssignment" in tasks.columns:
             mask_troq = mask_troq & (~tasks["ManualAssignment"])
             
         troq_df = tasks.loc[mask_troq].copy()
 
         if not troq_df.empty:
-            troq_df["_troq_key"] = troq_df["CodigoTroquel"]
+            # Fix para Galpón 2: Si no hay código de troquel, tratar como tareas individuales
+            troq_df["_troq_key"] = troq_df.apply(
+                lambda row: row["CodigoTroquel"] if str(row["CodigoTroquel"]).strip() != "" else f"NO_TROQ_{row['OT_id']}",
+                axis=1
+            )
             troq_df["CantidadPliegos"] = pd.to_numeric(troq_df["CantidadPliegos"], errors='coerce').fillna(0)
             
             grupos = [] 
@@ -442,12 +466,11 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                 due_min = pd.to_datetime(g["DueDate"], errors="coerce").min() or pd.Timestamp.max
                 total_pliegos = float(g["CantidadPliegos"].sum())
                 
-                # Datos para validación de medidas
                 max_anc = g["PliAnc"].max()
                 max_lar = g["PliLar"].max()
                 min_anc = g["PliAnc"].min()
                 min_lar = g["PliLar"].min()
-                bocas = float(g["Bocas"].max()) # Tomamos el maximo de bocas del grupo
+                bocas = float(g["Bocas"].max())
                 es_urgente = g["Urgente"].apply(lambda x: es_si(x)).any()
 
                 grupos.append((due_min, troq_key, g.index.tolist(), total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente))
@@ -455,115 +478,58 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
             for _, troq_key, idxs, total_pliegos, max_anc, max_lar, min_anc, min_lar, bocas, es_urgente in grupos:
                 candidatas = []
-                
-                # 1. Validar candidatos por TAMAÑO primero
-                posibles = manuales + ([auto_name] if auto_name else [])
                 candidatos_tamano = []
-                for m in posibles:
-                    if "autom" in str(m).lower() or "duyan" in str(m).lower():
-                        # Para Automatica (Restricción de MINIMO), usamos las dimensiones MINIMAS del grupo
-                        # Si la hoja más chica es < 38, NO entra en Auto.
+                for m in pool_maquinas:
+                    if "autom" in str(m).lower() or "duyan" in str(m).lower() or "iberica" in str(m).lower():
                         if validar_medidas_troquel(m, min_anc, min_lar):
                             candidatos_tamano.append(m)
                     else:
-                        # Para Manuales (Restricción de MAXIMO), usamos las dimensiones MAXIMAS del grupo
-                        # Si la hoja más grande es > 80, NO entra en Manual.
                         if validar_medidas_troquel(m, max_anc, max_lar):
                             candidatos_tamano.append(m)
                 
                 if not candidatos_tamano: continue
 
-                # --- 1.5 CHECK PREFERENCIAS MANUALES (Config) ---
-                # Si el código de troquel está asignado a una máquina específica, 
-                # forzamos esa máquina (siempre que entre por tamaño).
                 prefs = cfg.get("troquel_preferences", {})
                 valid_preferred = []
-                
                 if prefs:
-                    # Buscar en qué maquina(s) estÃ¡ este troquel
                     for m_pref, codes in prefs.items():
-                        # Normalizar lista de codigos
                         codes_norm = [str(c).lower().strip() for c in codes]
-                        if troq_key in codes_norm:
-                            # Encontrado! Chequear si es valid candidate por tamaño
-                            # Nota: prefs keys might not match official names exactly if changed, 
-                            # but usually they come from UI dropdowns which use official names.
-                            
-                            # Intentar matchear nombre
-                            # El nombre en prefs debe coincidir con 'posibles' list
-                            # Buscamos m_pref en candidatos_tamano'
+                        if str(troq_key).lower() in codes_norm:
                             if m_pref in candidatos_tamano:
                                 valid_preferred.append(m_pref)
-                            else:
-                                pass
 
                 if valid_preferred:
-                    # Override Logic: Si hay preferencias válidas, USARLAS EXCLUSIVAMENTE
                     candidatas = valid_preferred
-                    
                 else:
-                    # --- LÓGICA ESTÁNDAR (Si no hay preferencia explícita) ---
-                    
-                    # 2. REGLA DE BOCAS (> 6) -> Automática Obligatoria (si entra)
-                    if bocas > 6:
-                        if auto_name and (auto_name in candidatos_tamano):
-                            candidatas = [auto_name]
-                        else:
-                            # Si no entra en Auto, va a manual compatible
-                            candidatas = [m for m in candidatos_tamano if m != auto_name]
-                    
-                    # 3. REGLA DE CANTIDAD (> 2500) -> Automática Obligatoria (si entra)
-                    elif total_pliegos > 2500:
-                        if auto_name and (auto_name in candidatos_tamano):
-                            candidatas = [auto_name]
-                        else:
-                            candidatas = [m for m in candidatos_tamano if m != auto_name]
-                    
-                    # 4. DEFAULT (<= 3000 y <= 6 Bocas) -> Preferencia Manual Standard > Iberica > Auto
+                    if bocas > 6 or total_pliegos > 2500:
+                        # Prioridad Automática, pero permitir Manual como fallback si las autos están saturadas
+                        candidatas = candidatos_tamano
                     else:
-                        # Preference 1: Manuales Standard
+                        # Prioridad Manual estricta para trabajos pequeños (para que no 'ensucien' las autos)
                         manuales_std = [m for m in candidatos_tamano if m in manuales]
-                        
                         if manuales_std:
                             candidatas = manuales_std
                         else:
-                            # Preference 2: Iberica (Si no entra en ninguna standard)
-                            manuales_todas = [m for m in candidatos_tamano if m != auto_name]
-                            if manuales_todas:
-                                candidatas = manuales_todas
-                            else:
-                                # Preference 3: Auto (Si no entra en ninguna manual)
-                                candidatas = candidatos_tamano
+                            candidatas = candidatos_tamano
 
                 if not candidatas: continue
 
                 def criterio_balanceo(m):
-                    # Balancear por: FECHA TERMINACION ESTIMADA (incluyendo downtimes) -> HORA -> CARGA
-                    # agenda_m se ira actualizando con cada asignacion
                     f = agenda_m[m]["fecha"]
                     h = agenda_m[m]["hora"]
                     l = load_h[m]
-                    
                     penalty_days = 0
                     if es_urgente:
                         current_dt = datetime.combine(f, h)
                         if has_imminent_downtime(m, current_dt, cfg):
-                            penalty_days = 30 # Penalización gigante para evitar esta máquina
-                            
+                            penalty_days = 30
                     f_penalized = f + timedelta(days=penalty_days)
                     return (f_penalized, h, l)
 
                 m_sel = min(candidatas, key=criterio_balanceo)
-
                 tasks.loc[idxs, "Maquina"] = m_sel
-                
-                # ACTUALIZAR SIMULACION: Reservar tiempo en agenda_m para que la proxima iteracion "vea" que esta ocupada
                 duracion_estimada = total_pliegos / cap[m_sel]
-                
-                # Usamos la funcion real de agenda para saltar paros/feriados y mover el puntero fecha/hora
                 _reservar_en_agenda(agenda_m[m_sel], duracion_estimada, cfg)
-                
-                # Tambien actualizamos carga bruta por si acaso
                 load_h[m_sel] += duracion_estimada
 
     # =====================================================================
@@ -585,6 +551,41 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
             mask_desc = mask_desc & (~tasks["ManualAssignment"])
         tasks.loc[mask_desc, "Maquina"] = "POOL_DESCARTONADO"
 
+    # =====================================================================
+    # 3.15 REASIGNACIÓN PRENSADO – GALPÓN 2 (Solo asigna, NO reserva tiempo)
+    # =====================================================================
+    # Las prensas que ya tienen asignación manual/locked (de scheduler_g2 via
+    # _Prensa_Asignada) se respetan. Las demás se balancean por carga.
+
+    pren_cfg = cfg["maquinas"][cfg["maquinas"]["Proceso"].str.lower().str.contains("prensado")]
+    prensas_all = pren_cfg["Maquina"].tolist()
+
+    if not tasks.empty and prensas_all:
+        mask_prens = (
+            tasks["Proceso"].eq("Prensado")
+            & ~(tasks["Maquina"].isin(["SALTADO", "TERCERIZADO"]))
+        )
+        if "ManualAssignment" in tasks.columns:
+            mask_prens = mask_prens & (~tasks["ManualAssignment"])
+
+        prens_df = tasks.loc[mask_prens].copy()
+        if not prens_df.empty:
+            # Capacidad y carga simulada por prensa
+            cap_prens = {}
+            for mp in prensas_all:
+                c = cfg["maquinas"].loc[cfg["maquinas"]["Maquina"] == mp, "Capacidad_pliegos_hora"]
+                cap_prens[mp] = float(c.iloc[0]) if not c.empty and float(c.iloc[0]) > 0 else 1.0
+            load_p = {mp: 0.0 for mp in prensas_all}
+
+            prens_df["_dd_sort"] = pd.to_datetime(prens_df["DueDate"], errors="coerce")
+            prens_df.sort_values("_dd_sort", inplace=True)
+
+            for idx_t in prens_df.index:
+                cant = float(tasks.at[idx_t, "CantidadPliegos"]) if tasks.at[idx_t, "CantidadPliegos"] else 0
+                m_sel = min(prensas_all, key=lambda mp: load_p[mp])
+                tasks.at[idx_t, "Maquina"] = m_sel
+                load_p[m_sel] += cant / cap_prens[m_sel] if cap_prens[m_sel] > 0 else 0
+
     # =================================================================
     # 3.2 BALANCEO DE CARGA GENÉRICO (Procesos con múltiples máquinas)
     # =================================================================
@@ -596,7 +597,7 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
     # Esto permite que máquinas custom (creadas desde la UI) participen en la
     # planificación sin necesidad de lógica especial por proceso.
 
-    PROCESOS_CON_LOGICA_PROPIA = {"troquelado", "descartonado"}
+    PROCESOS_CON_LOGICA_PROPIA = {"troquelado", "descartonado", "prensado"}
 
     # Agrupar máquinas activas por proceso
     proc_to_maquinas = {}
@@ -1635,27 +1636,32 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                             # NO robar si la máquina tiene prioridades propias esperando
                             if tiene_prio_en_cola:
                                 break
-                            # B: Robar a Auto
-                            if auto_name and colas.get(auto_name):
-                                for i, t_cand in enumerate(colas[auto_name]):
-                                    if t_cand.get("ManualAssignment"): continue
-                                    if t_cand["Proceso"].strip() != "Troquelado": continue
+                            # B: Robar a Automáticas
+                            if auto_names:
+                                for a_maq in auto_names:
+                                    if a_maq == maquina: continue # Por si acaso
+                                    if not colas.get(a_maq): continue
                                     
-                                    # REGLA: Manual solo roba si cantidad <= 3000
-                                    cant = float(t_cand.get("CantidadPliegos", 0) or 0)
-                                    if cant > 2500: continue 
+                                    for i, t_cand in enumerate(colas[a_maq]):
+                                        if t_cand.get("ManualAssignment"): continue
+                                        if t_cand["Proceso"].strip() != "Troquelado": continue
+                                        
+                                        # REGLA: Manual solo roba si cantidad <= 3000 (o 2500 según config)
+                                        cant = float(t_cand.get("CantidadPliegos", 0) or 0)
+                                        if cant > 2500: continue 
 
-                                    # Validar medidas para ESTA manual
-                                    anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
-                                    if not validar_medidas_troquel(maquina, anc, lar): continue
-                                    
-                                    mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                    mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                    if not mp_ok: continue
-                                    
-                                    runnable, available_at = verificar_disponibilidad(t_cand, maquina)
-                                    if runnable and (not available_at or available_at <= current_agenda_dt):
-                                        tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
+                                        # Validar medidas para ESTA manual
+                                        anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
+                                        if not validar_medidas_troquel(maquina, anc, lar): continue
+                                        
+                                        mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
+                                        no_hay_mp = mp in ("false", "0", "no", "falso")
+                                        if no_hay_mp: continue
+                                        
+                                        runnable, available_at = verificar_disponibilidad(t_cand, maquina)
+                                        if runnable and (not available_at or available_at <= current_agenda_dt):
+                                            tarea_encontrada = t_cand; fuente_maquina = a_maq; idx_robado = i; break
+                                    if tarea_encontrada: break
                             
                             # C: Robar a Vecina Manual
                             if not tarea_encontrada:
@@ -1672,8 +1678,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                         if not validar_medidas_troquel(maquina, anc, lar): continue
 
                                         mp = str(t_cand.get("MateriaPrimaPlanta")).strip().lower()
-                                        mp_ok = mp in ("false", "0", "no", "falso", "") or not t_cand.get("MateriaPrimaPlanta")
-                                        if not mp_ok: continue
+                                        no_hay_mp = mp in ("false", "0", "no", "falso")
+                                        if no_hay_mp: continue
                                         
                                         runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                                         if runnable and (not available_at or available_at <= current_agenda_dt):
@@ -1682,15 +1688,13 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
 
                         # # Z: Iberica roba a Auto o Manual
                         # elif any(m in maquina for m in iberica):
-                        #     # Z.1: Robar a Auto
-                        #     if auto_name and colas.get(auto_name):
-                        #         for i, t_cand in enumerate(colas[auto_name]):
+                        #     # Z.1: Robar a Autos
+                        #     for a_maq in auto_names:
+                        #         if a_maq == maquina: continue
+                        #         if not colas.get(a_maq): continue
+                                
+                        #         for i, t_cand in enumerate(colas[a_maq]):
                         #             if t_cand["Proceso"].strip() != "Troquelado": continue
-                                    
-                        #             # REGLA: Iberica roba lo que le sirva (asumimos lógica similar a Manual/Auto)
-                        #             # Preferencia: Si hay algo en auto, intentar robarlo?
-                        #             # User dijo: "para el robo de la automatica hay que poner que la iberica este como opcion para robar"
-                        #             # AND "Iberica puede robar a las manuales y a la automatica".
                                     
                         #             anc = float(t_cand.get("PliAnc", 0) or 0); lar = float(t_cand.get("PliLar", 0) or 0)
                         #             if not validar_medidas_troquel(maquina, anc, lar): continue
@@ -1701,7 +1705,8 @@ def programar(df_ordenes, cfg, start=date.today(), start_time=None, debug=False)
                                     
                         #             runnable, available_at = verificar_disponibilidad(t_cand, maquina)
                         #             if runnable and (not available_at or available_at <= current_agenda_dt):
-                        #                 tarea_encontrada = t_cand; fuente_maquina = auto_name; idx_robado = i; break
+                        #                 tarea_encontrada = t_cand; fuente_maquina = a_maq; idx_robado = i; break
+                        #         if tarea_encontrada: break
                             
                             # Z.2: Robar a Manuales
                             if not tarea_encontrada:

@@ -22,7 +22,8 @@ from modules.ui_components import (
     render_save_section,
     render_delayed_orders_section,
     render_daily_schedule_view,
-    render_create_machine
+    render_create_machine,
+    render_galpon2_page
 )
 
 from modules.utils.visualizations import render_gantt_chart
@@ -30,6 +31,22 @@ from modules.printing_suggestions import render_printing_suggestions
 
 st.set_page_config(page_title="Priorización de Órdenes", layout="wide")
 st.title("📦 Planificador de Producción – Theiler Packaging")
+
+# =======================================================
+# SELECTOR DE GALPÓN
+# =======================================================
+galpon_col1, galpon_col2 = st.columns([2, 5])
+with galpon_col1:
+    galpon_activo = st.radio(
+        "Seleccionar Galpón:",
+        options=["🏭 Galpón 1 (Producción General)", "📦 Galpón 2 (Cartonaje)"],
+        index=0,
+        horizontal=True,
+        key="galpon_selector"
+    )
+st.markdown("---")
+
+es_galpon2 = "Galpón 2" in galpon_activo
 
 # Load Config (Always active)
 if "cfg" not in st.session_state:
@@ -152,13 +169,24 @@ def load_and_process_excel(file_bytes):
 archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
 
 if archivo is not None:
+    # Load and apply transformations to DF
+    df = load_and_process_excel(archivo.getvalue())
+
+    # ============================================================
+    # Branch: Galpón 2 (Cartonaje) — planificación independiente
+    # ============================================================
+    if es_galpon2:
+        render_galpon2_page(df)
+        st.stop()  # No seguir ejecutando el resto del G1
+
+    # ============================================================
+    # Branch: Galpón 1 (flujo original completo)
+    # ============================================================
+
     # 3.1 UI: Descartonador IDs (New)
 
     # 8. Scheduler Execution
     st.info("🧠 Generando programa…")
-    
-    # Load and apply transformations to DF
-    df = load_and_process_excel(archivo.getvalue())
 
     cfg["custom_ids"] = render_descartonador_ids_section(cfg)
 

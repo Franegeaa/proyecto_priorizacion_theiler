@@ -97,6 +97,8 @@ def process_uploaded_dataframe(df):
     df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada
     df["_IMP_FreyDorDpd"] = to_bool_series(["FreyDorDpd"])    # Offset → doble pasada
     
+    df["_PEN_Prensado"]  = df["TienePrensado"].notna() & (df["TienePrensado"].astype(str).str.strip() != "") & (df["TienePrensado"].astype(str).str.lower() != "false") & (df["TienePrensado"].astype(str).str.lower() != "nan") if "TienePrensado" in df.columns else pd.Series(False, index=df.index)
+
     # --- FLAGO DE REORDENAMIENTO (TROQUEL ANTES DE IMPRESION) ---
     df["_TroqAntes"] = to_bool_series(["TroqAntes", "TroquelAntes", "TroqueladoAntes"])
 
