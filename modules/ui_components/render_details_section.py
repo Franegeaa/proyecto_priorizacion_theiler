@@ -601,8 +601,8 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             col_btn, col_info = st.columns([1, 3])
             
             if col_btn.button("Aplicar Cambios y Recalcular"):
-                if cfg and "manual_overrides" in st.session_state:
-                    overrides = st.session_state.manual_overrides
+                if cfg and "manual_overrides" in cfg:
+                    overrides = cfg["manual_overrides"]
                     has_changes = False
                     
                     if "urgency_overrides" not in overrides:
@@ -816,14 +816,14 @@ def render_details_section(schedule, detalle_maquina, df, cfg=None, pm=None): # 
             #render_save_section(pm)
             
             # --- RESTORE SECTION (For Blacklisted OTs) ---
-            if cfg and "manual_overrides" in st.session_state:
-                blacklist = st.session_state.manual_overrides["blacklist_ots"]
+            if cfg and "manual_overrides" in cfg:
+                blacklist = cfg["manual_overrides"]["blacklist_ots"]
                 if blacklist:
                      with st.expander(f"♻️ Restaurar Órdenes Eliminadas ({len(blacklist)})"):
                         to_restore = st.multiselect("Seleccionar OT para restaurar:", sorted(list(blacklist)))
                         if st.button("Restaurar Seleccionadas"):
                             for ot in to_restore:
-                                st.session_state.manual_overrides["blacklist_ots"].remove(ot)
+                                cfg["manual_overrides"]["blacklist_ots"].remove(ot)
                             st.rerun()
                             
         else:

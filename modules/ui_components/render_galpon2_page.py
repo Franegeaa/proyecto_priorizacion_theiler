@@ -17,6 +17,8 @@ from modules.galpon2.config_g2 import cargar_config_galpon2
 from modules.galpon2.scheduler_g2 import programar_galpon2
 from modules.utils.visualizations import render_gantt_chart
 from modules.utils.config_loader import horas_por_dia
+from modules.ui_components.render_details_section import render_details_section
+from modules.ui_components.render_download_section import render_download_section
 
 
 def render_galpon2_page(df_ordenes: pd.DataFrame):
@@ -81,6 +83,21 @@ def render_galpon2_page(df_ordenes: pd.DataFrame):
     cfg_g2["locked_assignments"] = {}
 
     # ----------------------------------------------------------------
+    # Manual overrides exclusivos del Galpón 2 (aislados del G1)
+    # ----------------------------------------------------------------
+    if "manual_overrides_g2" not in st.session_state:
+        st.session_state.manual_overrides_g2 = {
+            "blacklist_ots": set(),
+            "manual_priorities": {},
+            "outsourced_processes": set(),
+            "skipped_processes": set(),
+            "urgency_overrides": {},
+            "mp_overrides": {},
+            "forzar_inicio_overrides": {}
+        }
+    cfg_g2["manual_overrides"] = st.session_state.manual_overrides_g2
+
+    # ----------------------------------------------------------------
     # Tabla de máquinas del G2 (informativa + velocidades editables)
     # ----------------------------------------------------------------
     with st.expander("🔧 Máquinas del Galpón 2", expanded=False):
@@ -129,37 +146,11 @@ def render_galpon2_page(df_ordenes: pd.DataFrame):
     render_gantt_chart(schedule_g2, cfg_g2)
 
     # ----------------------------------------------------------------
-    # Tabla de detalle de tareas
+    # Detalle interactivo (igual que Galpón 1)
     # ----------------------------------------------------------------
-    with st.expander("📋 Detalle de Tareas – Galpón 2", expanded=False):
-        if not schedule_g2.empty:
-            cols_mostrar = [c for c in ["OT_id", "Cliente", "Proceso", "Maquina", "Inicio", "Fin", "Duracion_h", "DueDate"]
-                            if c in schedule_g2.columns]
-            df_show = schedule_g2[cols_mostrar].copy()
-            if "Inicio" in df_show.columns:
-                df_show["Inicio"] = pd.to_datetime(df_show["Inicio"]).dt.strftime("%d/%m %H:%M")
-            if "Fin" in df_show.columns:
-                df_show["Fin"] = pd.to_datetime(df_show["Fin"]).dt.strftime("%d/%m %H:%M")
-            st.dataframe(df_show, use_container_width=True, hide_index=True)
+    render_details_section(schedule_g2, detalle_g2, df_ordenes, cfg=cfg_g2)
 
     # ----------------------------------------------------------------
-    # Descarga
+    # Descarga (igual que Galpón 1)
     # ----------------------------------------------------------------
-    with st.expander("⬇️ Descargar Resultados – Galpón 2", expanded=False):
-        if not schedule_g2.empty:
-            import io
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                schedule_g2.to_excel(writer, sheet_name="Plan_G2", index=False)
-                if not resumen_g2.empty:
-                    resumen_g2.to_excel(writer, sheet_name="Resumen_OT_G2", index=False)
-                if not carga_g2.empty:
-                    carga_g2.to_excel(writer, sheet_name="Carga_Maquinas_G2", index=False)
-            buffer.seek(0)
-            st.download_button(
-                label="📥 Descargar Excel – Galpón 2",
-                data=buffer,
-                file_name=f"plan_galpon2_{fecha_inicio.strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="g2_download"
-            )
+    render_download_section(schedule_g2, resumen_g2, carga_g2)
