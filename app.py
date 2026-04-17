@@ -152,7 +152,7 @@ def load_and_process_excel(file_bytes):
 # --- DATA SOURCE ---
 if use_demo_data:
     st.warning("⚠️ Modo Demo activo: usando datos simulados.")
-    df = generate_demo_dataframe(n_rows=50)
+    df = process_uploaded_dataframe(generate_demo_dataframe(n_rows=50))
     archivo = None
 else:
     archivo = st.file_uploader("📁 Subí el Excel de órdenes desde Access (.xlsx)", type=["xlsx"])
