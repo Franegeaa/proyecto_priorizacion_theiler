@@ -9,12 +9,12 @@ from unittest.mock import MagicMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Mock external dependencies
-import modules.tiempos_y_setup
-modules.tiempos_y_setup.tiempo_operacion_h = MagicMock(return_value=(0, 1.0)) # 1 hour per task
-modules.tiempos_y_setup.usa_setup_menor = MagicMock(return_value=False)
-modules.tiempos_y_setup.capacidad_pliegos_h = MagicMock(return_value=1000)
-modules.tiempos_y_setup.setup_base_min = MagicMock(return_value=15)
-modules.tiempos_y_setup.setup_menor_min = MagicMock(return_value=5)
+import modules.utils.tiempos_y_setup
+modules.utils.tiempos_y_setup.tiempo_operacion_h = MagicMock(return_value=(0, 1.0)) # 1 hour per task
+modules.utils.tiempos_y_setup.usa_setup_menor = MagicMock(return_value=False)
+modules.utils.tiempos_y_setup.capacidad_pliegos_h = MagicMock(return_value=1000)
+modules.utils.tiempos_y_setup.setup_base_min = MagicMock(return_value=15)
+modules.utils.tiempos_y_setup.setup_menor_min = MagicMock(return_value=5)
 
 from modules.scheduler import programar
 

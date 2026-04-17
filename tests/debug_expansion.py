@@ -5,7 +5,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from modules.schedulers.tasks import _expandir_tareas
-from modules.config_loader import cargar_config
+from modules.utils.config_loader import cargar_config
 
 def debug_expansion():
     data = [

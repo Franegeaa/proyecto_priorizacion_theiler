@@ -1,5 +1,5 @@
 import pandas as pd
-from modules.config_loader import cargar_config, es_si
+from .config_loader import cargar_config, es_si
 
 # Duraciones fijas para procesos tercerizados sin cola (horas)
 TERCERIZADOS_DURACION_FIJA_H = {
@@ -86,17 +86,24 @@ def usa_setup_menor(prev, curr, proceso):
             return True
 
     # ---------------------------------------------------------
-    # 3. PEGADO (Tipo + Material)
+    # 3. PEGADO (Tipo + Material) O VENTANA (Troquel)
     # ---------------------------------------------------------
-    if "peg" in proceso_lower:
-        tipo_prev = str(prev.get("PegadoTipo", "")).strip().lower()
-        tipo_curr = str(curr.get("PegadoTipo", "")).strip().lower()
-        
-        mat_prev = str(prev.get("MateriaPrima", "")).strip().lower()
-        mat_curr = str(curr.get("MateriaPrima", "")).strip().lower()
+    if "peg" in proceso_lower or "ventana" in proceso_lower:
+        if "ventana" in proceso_lower:
+            # Ventana agrupa exclusivamente por código de troquel
+            t_prev = str(prev.get("CodigoTroquel", "")).strip().lower()
+            t_curr = str(curr.get("CodigoTroquel", "")).strip().lower()
+            if t_prev and t_curr and t_prev == t_curr:
+                return True
+        else:
+            tipo_prev = str(prev.get("PegadoTipo", "")).strip().lower()
+            tipo_curr = str(curr.get("PegadoTipo", "")).strip().lower()
+            
+            mat_prev = str(prev.get("MateriaPrima", "")).strip().lower()
+            mat_curr = str(curr.get("MateriaPrima", "")).strip().lower()
 
-        if (tipo_prev == tipo_curr) and (mat_prev == mat_curr) and tipo_prev:
-            return True
+            if (tipo_prev == tipo_curr) and (mat_prev == mat_curr) and tipo_prev:
+                return True
 
 
     # ---------------------------------------------------------
@@ -119,8 +126,19 @@ def tiempo_operacion_h(orden, proceso, maquina, cfg):
     """Devuelve (setup_h, proc_h) con soporte para dorso, barnizado y procesos tercerizados."""
     proceso_lower = proceso.lower().strip()
 
+    # Procesos tercerizados con duración fija SOLO si la máquina NO es custom.
+    # Las máquinas del Excel (placeholder) tienen capacidad definida pero siguen
+    # siendo tercerizadas. Solo las máquinas custom (_IsCustom=True) usan la velocidad real.
     if proceso_lower in TERCERIZADOS_DURACION_FIJA_H:
-        return (0.0, TERCERIZADOS_DURACION_FIJA_H[proceso_lower])
+        maq_rows = cfg["maquinas"][cfg["maquinas"]["Maquina"] == maquina]
+        is_custom = (
+            not maq_rows.empty
+            and "_IsCustom" in maq_rows.columns
+            and bool(maq_rows["_IsCustom"].iloc[0]) is True
+        )
+        if not is_custom:
+            return (0.0, TERCERIZADOS_DURACION_FIJA_H[proceso_lower])
+        # Máquina custom → caer en el cálculo normal por velocidad ↓
 
     cap = capacidad_pliegos_h(proceso, maquina, cfg)
 

@@ -1,14 +1,36 @@
 import pandas as pd
-from modules.config_loader import es_si 
+import numpy as np
+from modules.utils.config_loader import es_si 
 from .machines import elegir_maquina
 from .priorities import _clave_prioridad_maquina
 
+# Default set of processes that are outsourced with no queue (72h fixed)
+# Stored here to avoid circular imports with scheduler.py
+def _default_terc():
+    return {"stamping", "plastificado", "encapado", "cuño"}
 
-def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
+
+
+# Mapeo de ID de troqueladora del Excel a nombre de máquina interno
+TROQUELADORA_ID_MAP = {
+    7: "Troq Nº 2 Ema",
+    5: "Troq Nº 1 Gus",
+    105: "Duyan",
+}
+
+# Mapeo de ID de descartonadora del Excel a nombre de máquina interno
+DESCARTONADORA_ID_MAP = {
+    40: "Descartonadora 1",
+    194: "Descartonadora 2",
+    247957750: "Descartonadora 3",
+}
+
+
+def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None, ignore_constraints=False):
     flujo = orden_std or [
         "Cortadora Bobina", "Guillotina", "Impresión Flexo", "Impresión Offset", "Barnizado",
         "OPP", "Stamping", "Plastificado", "Encapado", "Cuño","Troquelado", 
-        "Descartonado", "Ventana", "Pegado"
+        "Descartonado", "Ventana", "Pegado", "Prensado"
     ]
     flujo = [p.strip() for p in flujo] 
     orden_idx = {p: i for i, p in enumerate(flujo)}
@@ -25,6 +47,11 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     tiene_troquel = es_si(orden.get("TroquelArt"))
     fecha_troquel = orden.get("FechaLlegadaTroquel")
     bloqueado_por_troquel = tiene_troquel and (pd.isna(fecha_troquel) or str(fecha_troquel).strip() == "")
+
+    # OVERRIDE: Si ignoramos restricciones, no bloqueamos por falta de película/troquel
+    if ignore_constraints:
+        bloqueado_por_pelicula = False
+        bloqueado_por_troquel = False
 
     if es_si(orden.get("CorteSNDdp")): pendientes.append("Cortadora Bobina")
     
@@ -45,6 +72,7 @@ def _procesos_pendientes_de_orden(orden: pd.Series, orden_std=None):
     if es_si(orden.get("_PEN_Descartonado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Descartonado")
     if es_si(orden.get("_PEN_Ventana")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Ventana")
     if es_si(orden.get("_PEN_Pegado")) and not bloqueado_por_pelicula and not bloqueado_por_troquel: pendientes.append("Pegado")
+    if orden.get("_PEN_Prensado") is True or orden.get("_PEN_Prensado") == True: pendientes.append("Prensado")
     
     pendientes_limpios = [p.strip() for p in pendientes]
     pendientes_limpios = list(dict.fromkeys(pendientes))
@@ -92,19 +120,80 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
         if ot in blacklist:
             continue
             
-        pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio)
+        pendientes = _procesos_pendientes_de_orden(row, orden_std_limpio, ignore_constraints=cfg.get("ignore_constraints", False))
 
         if not pendientes:
             continue
 
         for proceso in pendientes:
-            maquina = elegir_maquina(proceso, row, cfg, None) # Asignación inicial simple
-            
-            # --- Check Outsourced/Skipped/Priority ---
+            # --- Check if Manual Priority specifies a machine ---
+            # If user set priority for (OT, SpecificMachine), use that machine instead of auto-assignment
             str_ot = str(ot)
             str_proc = str(proceso)
-            str_maq = str(maquina)
             
+            # Look for any priority entry for this OT
+            maquina_from_priority = None
+            from modules.utils.config_loader import normalize_machine_name
+            for (prio_ot, prio_maq), prio_val in priorities.items():
+                if prio_ot == str_ot:
+                    # Check if this machine handles this process (prio_maq is normalized to avoid º vs ° issues)
+                    for _, row_m in cfg["maquinas"].iterrows():
+                        m_raw = row_m["Maquina"]
+                        if normalize_machine_name(m_raw) == normalize_machine_name(prio_maq):
+                            maq_proceso = row_m["Proceso"]
+                            if str_proc.lower() in maq_proceso.lower() or maq_proceso.lower() in str_proc.lower():
+                                maquina_from_priority = m_raw
+                                break
+                    if maquina_from_priority:
+                        break
+            
+            # Use priority machine if found, otherwise auto-assign
+            if maquina_from_priority:
+                maquina = maquina_from_priority
+                has_manual_prio_machine = True
+            else:
+                # --- ASIGNACIÓN POR TROQUELADORA DEL EXCEL (TroqueladoraDdp) ---
+                # Solo forzar máquina del Excel si tiene FECHA y PRIORIDAD asignadas
+                if "troquel" in proceso.lower():
+                    troq_id = row.get("TroqueladoraDdp")
+                    fecha_tro = row.get("FechaTroDdp")
+                    priori_tro = row.get("PrioriTr")
+                    tiene_plan_completo = (pd.notna(troq_id) and pd.notna(fecha_tro) and pd.notna(priori_tro))
+                    
+                    if tiene_plan_completo:
+                        troq_id_int = int(float(troq_id))
+                        if troq_id_int in TROQUELADORA_ID_MAP:
+                            maquina = TROQUELADORA_ID_MAP[troq_id_int]
+                            has_manual_prio_machine = True  # Excel plan overrides locked_assignments
+                        else:
+                            maquina = elegir_maquina(proceso, row, cfg, None)
+                            has_manual_prio_machine = False
+                    else:
+                        maquina = elegir_maquina(proceso, row, cfg, None)
+                        has_manual_prio_machine = False
+                else:
+                    maquina = elegir_maquina(proceso, row, cfg, None)
+                    has_manual_prio_machine = False
+
+                # --- ASIGNACIÓN POR DESCARTONADORA DEL EXCEL (OpeDes1) ---
+                # Si la orden tiene OpeDes1 asignada, va a esa máquina específica
+                # (PrioriDesc es opcional; si la tiene, se usa para ordenar la cola)
+                if "descartonad" in proceso.lower():
+                    desc_id = row.get("OpeDes1")
+                    tiene_maq_desc = pd.notna(desc_id) and str(desc_id).strip() not in ("", "nan")
+                    
+                    if tiene_maq_desc:
+                        try:
+                            desc_id_int = int(float(desc_id))
+                            if desc_id_int in DESCARTONADORA_ID_MAP:
+                                maquina = DESCARTONADORA_ID_MAP[desc_id_int]
+                                has_manual_prio_machine = True
+                        except (ValueError, TypeError):
+                            pass
+
+            
+            # --- Check Outsourced/Skipped/Priority ---
+            str_maq = str(maquina)
             key_proc = (str_ot, str_proc)
             
             is_outsourced = key_proc in outsourced
@@ -114,8 +203,68 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
             if is_skipped:
                 maquina = "SALTADO"
             elif is_outsourced:
-                maquina = "TERCERIZADO"
-            
+                # Si el proceso tiene una máquina CUSTOM (_IsCustom=True), NO lo mandamos
+                # a TERCERIZADO. Las máquinas del Excel para procesos como Encapado/Stamping
+                # son solo de referencia; solo una máquina creada desde la UI convierte
+                # el proceso en interno con cola.
+                proc_lower_chk = str_proc.strip().lower()
+                maquinas_df = cfg["maquinas"]
+                custom_col = maquinas_df.get("_IsCustom", None)
+                if custom_col is not None:
+                    proc_tiene_custom = any(
+                        (row_m["_IsCustom"] == True) and
+                        (proc_lower_chk in str(row_m["Proceso"]).strip().lower())
+                        for _, row_m in maquinas_df.iterrows()
+                    )
+                else:
+                    proc_tiene_custom = False
+
+                if proc_tiene_custom:
+                    pass  # Tiene máquina custom → mantener la asignación automática
+                else:
+                    maquina = "TERCERIZADO"
+
+            # -------------------------------------------------------
+            # GUARD: Procesos tercierizados por defecto
+            # Si el proceso es del conjunto default (encapado/stamping/etc.):
+            #   - Si hay máquina CUSTOM → asignar esa en lugar del placeholder del Excel
+            #   - Si NO hay máquina custom → TERCERIZADO (72h, sin cola)
+            # -------------------------------------------------------
+            if maquina not in ("SALTADO", "TERCERIZADO"):
+                proc_lower_guard = str_proc.strip().lower()
+                if proc_lower_guard in _default_terc():
+                    maq_df_g = cfg["maquinas"]
+
+                    # Ver si la máquina actual ya es custom (raro pero posible)
+                    maq_row_g = maq_df_g[maq_df_g["Maquina"] == maquina]
+                    is_currently_custom = (
+                        not maq_row_g.empty
+                        and "_IsCustom" in maq_row_g.columns
+                        and bool(maq_row_g["_IsCustom"].iloc[0]) is True
+                    )
+
+                    if not is_currently_custom:
+                        # Buscar si existe alguna máquina custom para este proceso
+                        if "_IsCustom" in maq_df_g.columns:
+                            custom_para_proc = maq_df_g[
+                                (maq_df_g["_IsCustom"] == True) &
+                                (maq_df_g["Proceso"].str.lower().str.strip() == proc_lower_guard)
+                            ]
+                        else:
+                            custom_para_proc = maq_df_g.iloc[0:0]  # vacío
+
+                        if not custom_para_proc.empty:
+                            # Usar la primera máquina custom disponible para este proceso.
+                            # El balanceo de carga (paso 3.2 del scheduler) redistribuirá
+                            # entre todas las customs si hay más de una.
+                            maquina = custom_para_proc.iloc[0]["Maquina"]
+                        else:
+                            # Sin máquina custom → TERCERIZADO
+                            maquina = "TERCERIZADO"
+                            is_outsourced = True
+
+
+
             # Manual Priority (check with ORIGINAL machine name or new one? Original makes sense for user input)
             # User selected "Imp. Offset 1" in UI. If we change it to TERCERIZADO, we lose that key.
             # But priority only matters if it stays internal. 
@@ -125,9 +274,37 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # Check for (OT, Machine)
                 # We use the assigned machine 'maquina'
                 # Note: 'elegir_maquina' might return generic; need to match what User sees (Specific Machine).
-                # The user selects from valid machines. `elegir_maquina` returns one of those.
+                # Need to use normalized name for lookup because Priority Keys are normalized
+                # but 'maquina' variable might come from:
+                # 1. 'maquina_from_priority' (Normalized, if priorities loaded correctly)
+                # 2. 'elegir_maquina' (Normalized, from Config)
+                # 3. 'locked_assignments' (Potentially UN-NORMALIZED if from old history)
+                
+                
                 key_prio = (str_ot, str_maq)
                 manual_prio = priorities.get(key_prio, 9999)
+                
+                # Fallback if case mismatch or normalization mismatch:
+                if manual_prio == 9999:
+                    str_maq_norm = normalize_machine_name(str_maq)
+                    for (p_ot, p_maq), p_val in priorities.items():
+                        if str(p_ot) == str_ot and normalize_machine_name(p_maq) == str_maq_norm:
+                            manual_prio = p_val
+                            break
+
+            # --- PERSISTENCE LOCKING LOGIC ---
+            # If this task was scheduled for "Today" in the previous run, FORCE it.
+            # We assume cfg["locked_assignments"] contains {(str_ot, str_proc): str_machine}
+            locked_assignments = cfg.get("locked_assignments", {})
+            lock_key = (str_ot, str_proc)
+            
+            if lock_key in locked_assignments:
+                locked_machine = locked_assignments[lock_key]
+                # Force assignment only if not explicitly prioritized manually
+                if not has_manual_prio_machine:
+                    maquina = locked_machine
+                pass 
+
 
             # Cálculo de pliegos
             cant_prod = float(row.get("CantidadProductos", row.get("CantidadPliegos", 0)) or 0)
@@ -137,12 +314,17 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 # Impresión: usa poses
                 pliegos = cant_prod / poses if poses > 0 else cant_prod
 
-            elif "troquel" in proceso.lower():
-                # TROQUELADO: SIEMPRE dividir cantidad por bocas
+            elif "troquel" in proceso.lower() or "cortadora bobina" in proceso.lower():
+                # TROQUELADO y CORTADORA BOBINA: SIEMPRE dividir cantidad por bocas
                 pliegos = cant_prod / bocas if bocas > 0 else cant_prod
+            elif "descarton" in proceso.lower():
+                # DESCARTONADO: usa la cantidad planificada de descartonado, no la genérica
+                cant_desc = float(row.get("CantDesPlanDdp", 0) or 0)
+                pliegos = cant_desc if cant_desc > 0 else float(row.get("CantidadPliegos", cant_prod))
             else:
                 # Procesos restantes
                 pliegos = float(row.get("CantidadPliegos", cant_prod))
+
 
             tareas.append({
                 "idx": idx, "OT_id": ot, "CodigoProducto": row["CodigoProducto"], "Subcodigo": row["Subcodigo"],
@@ -168,11 +350,22 @@ def _expandir_tareas(df: pd.DataFrame, cfg):
                 "_PEN_ImpresionFlexo": row.get("_PEN_ImpresionFlexo"),
                 "_PEN_ImpresionOffset": row.get("_PEN_ImpresionOffset"),
                 "ProcesoDpd": row.get("ProcesoDpd", ""), # ProcesoDpd para reordenamiento dinámico
+                "PrioriImp": row.get("PrioriImp", ""), # Prioridad desde Excel (Impresión)
+                "FechaImDdp": row.get("FechaImDdp"),    # Fecha asociada a la prioridad Excel (Impresión)
+                "PrioriTr": row.get("PrioriTr", ""),     # Prioridad desde Excel (Troquelado)
+                "FechaTroDdp": row.get("FechaTroDdp"),   # Fecha asociada a la prioridad Excel (Troquelado)
+                "TroqueladoraDdp": row.get("TroqueladoraDdp"),  # ID de troqueladora del Excel
+                "PrioriDesc": row.get("PrioriDesc", ""),  # Prioridad desde Excel (Descartonado)
+                "OpeDes1": row.get("OpeDes1", ""),         # ID de descartonadora del Excel
+                "PrioVenDdp": row.get("PrioVenDdp", ""),   # Prioridad desde Excel (Ventana)
+                "PrioPegDdp": row.get("PrioPegDdp", ""),   # Prioridad desde Excel (Pegado)
                 
                 # Manual Override Params
                 "ManualPriority": manual_prio,
                 "IsOutsourced": is_outsourced,
-                "IsSkipped": is_skipped
+                "IsSkipped": is_skipped,
+                "ManualAssignment": (lock_key in locked_assignments) or has_manual_prio_machine, # Force stickiness if locked or explicitly prioritized
+                "HistoryLocked": (lock_key in locked_assignments) # For UI/Debugging
             })  
 
     tasks = pd.DataFrame(tareas)

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, time
-from modules import config_loader as hours_module
-from modules.config_loader import proximo_dia_habil
+from modules.utils import config_loader as hours_module
+from modules.utils.config_loader import proximo_dia_habil
 
 def _reservar_en_agenda(agenda_m, horas_necesarias, cfg):
     """

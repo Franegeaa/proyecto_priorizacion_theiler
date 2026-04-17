@@ -33,7 +33,7 @@ def render_gantt_chart(schedule, cfg):
 
     tipo_filtro = st.radio(
         "Seleccionar Rango de Fechas:",
-        ["Ver todo", "Día", "Semana",  "Mes"], 
+        ["Día", "Ver todo", "Semana",  "Mes"], 
         index=0,
         horizontal=True,
         key="filtro_fecha_radio"
@@ -146,7 +146,7 @@ def render_gantt_chart(schedule, cfg):
 
     vista = st.radio(
         "Seleccioná el tipo de seguimiento:",
-        ["Por Orden de Trabajo (OT)", "Por Máquina"],
+        ["Por Máquina", "Por Orden de Trabajo (OT)"],
         horizontal=True
     )
 

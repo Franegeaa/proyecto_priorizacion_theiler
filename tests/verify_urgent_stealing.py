@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime, time
 from modules.scheduler import programar
-from modules.config_loader import cargar_config
+from modules.utils.config_loader import cargar_config
 
 def test_urgent_stealing():
     print("=== Testing Urgent Task Stealing (Strict Priority) ===")

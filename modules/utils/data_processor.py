@@ -5,6 +5,13 @@ def parse_spanish_date(date_str):
     if pd.isna(date_str) or str(date_str).strip() == "":
         return pd.NaT
     
+    # Si ya es un objeto de fecha/tiempo, retornarlo directamente (evitar re-parseo)
+    if isinstance(date_str, (pd.Timestamp, pd.DatetimeIndex)):
+        return date_str
+    import datetime
+    if isinstance(date_str, (datetime.datetime, datetime.date)):
+        return pd.to_datetime(date_str)
+
     s = str(date_str).lower().strip()
     # Mapa de meses abreviados español
     meses = {
@@ -63,6 +70,9 @@ def process_uploaded_dataframe(df):
     if "FechaLlegadaTroquel" in df.columns:
         df["FechaLlegadaTroquel"] = df["FechaLlegadaTroquel"].apply(parse_spanish_date)
 
+    if "FechaImDdp" in df.columns:
+        df["FechaImDdp"] = df["FechaImDdp"].apply(parse_spanish_date)
+
     # --- FLAGS SOLO PENDIENTES ---
     def to_bool_series(names):
         for c in names:
@@ -72,11 +82,11 @@ def process_uploaded_dataframe(df):
 
     df["_PEN_Corte_Bobina"] = to_bool_series(["CorteSNDdp"])
     df["_PEN_Guillotina"]   = to_bool_series(["GuillotinadoSNDpd"])
-    df["_PEN_Barnizado"]    = to_bool_series(["Barniz"])
-    df["_PEN_Encapado"]     = to_bool_series(["Encapa", "EncapadoSND"])
+    df["_PEN_Barnizado"]    = to_bool_series(["Barniz", "Barnizado"])
+    df["_PEN_Encapado"]     = to_bool_series(["Encapa", "EncapadoSND", "Encapado"])
     df["_PEN_Cuño"]         = to_bool_series(["Cuño", "CuñoSND"])
-    df["_PEN_Plastificado"]  = to_bool_series(["Plastifica", "PlastificadoSND"]) 
-    df["_PEN_Stamping"]     = to_bool_series(["StampSNDdp", "StampingSND"])
+    df["_PEN_Plastificado"] = to_bool_series(["Plastifica", "PlastificadoSND", "Plastificado"]) 
+    df["_PEN_Stamping"]     = to_bool_series(["StampSNDdp", "StampingSND", "Stamping"])
     df["_PEN_OPP"]          = to_bool_series(["OPPSNDpd", "OPPSND"])
     df["_PEN_Troquelado"]   = to_bool_series(["TroqueladoSNDpd", "TroqueladoSND"])
     df["_PEN_Descartonado"] = to_bool_series(["DescartonadoSNDpd", "DescartonadoSND"])
@@ -87,6 +97,8 @@ def process_uploaded_dataframe(df):
     df["_IMP_Dorso"]      = to_bool_series(["Dorso"])      # Flexo → doble pasada
     df["_IMP_FreyDorDpd"] = to_bool_series(["FreyDorDpd"])    # Offset → doble pasada
     
+    df["_PEN_Prensado"]  = df["TienePrensado"].notna() & (df["TienePrensado"].astype(str).str.strip() != "") & (df["TienePrensado"].astype(str).str.lower() != "false") & (df["TienePrensado"].astype(str).str.lower() != "nan") if "TienePrensado" in df.columns else pd.Series(False, index=df.index)
+
     # --- FLAGO DE REORDENAMIENTO (TROQUEL ANTES DE IMPRESION) ---
     df["_TroqAntes"] = to_bool_series(["TroqAntes", "TroquelAntes", "TroqueladoAntes"])
 
@@ -116,5 +128,12 @@ def process_uploaded_dataframe(df):
         df["OT_id"] = (
            df["CodigoProducto"].astype(str).str.strip() + "-" + df["Subcodigo"].astype(str).str.strip() 
         )
+
+    # --- URGENCIA (Check multiple possible headers) ---
+    df["Urgente"] = to_bool_series(["Urgencia", "UrgePed", "Urgente", "EsUrgente"])
+    
+    # --- BOOLEANS EXTRA ---
+    df["PeliculaArt"] = to_bool_series(["PeliculaArt", "Pelicula"])
+    df["TroquelArt"] = to_bool_series(["TroquelArt", "TroquelNuevo"])
     
     return df

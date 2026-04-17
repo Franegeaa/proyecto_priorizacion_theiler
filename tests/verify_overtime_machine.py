@@ -7,7 +7,7 @@ from datetime import datetime, time, date, timedelta
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from modules.schedulers.agenda import _reservar_en_agenda
-from modules.config_loader import get_horas_totales_dia, es_dia_habil
+from modules.utils.config_loader import get_horas_totales_dia, es_dia_habil
 
 def log(msg):
     with open("tests/debug_result_machine.txt", "a", encoding="utf-8") as f:

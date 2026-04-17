@@ -6,11 +6,11 @@ import os
 # Add root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from modules.config_loader import cargar_config, construir_calendario
-from modules.data_processor import cargar_datos
+from modules.utils.config_loader import cargar_config, construir_calendario
+from modules.utils.data_processor import cargar_datos
 from modules.schedulers.tasks import _expandir_tareas
 from modules.schedulers.priorities import _cola_impresora_offset, _clave_prioridad_maquina
-from modules.tiempos_y_setup import usa_setup_menor
+from modules.utils.tiempos_y_setup import usa_setup_menor
 
 def investigate():
     cfg = cargar_config()

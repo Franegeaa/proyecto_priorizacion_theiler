@@ -1,6 +1,8 @@
 import pandas as pd
 from datetime import date, datetime, time, timedelta
 import numpy as np
+import json
+import os
 
 def es_si(x):
     """Interpreta distintos formatos como 'sí' o verdadero."""
@@ -14,6 +16,27 @@ def es_si(x):
 
     s = str(x).strip().lower()
     return s in {"si", "sí", "s", "true", "1", "x", "ok", "offset", "flexo", "pegado", "verdadero"}
+
+def load_die_preferences(path="config/troquel_preferences.json"):
+    """Carga las preferencias de troqueles desde un JSON."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error cargando preferencias de troqueles: {e}")
+        return {}
+
+def save_die_preferences(prefs, path="config/troquel_preferences.json"):
+    """Guarda las preferencias de troqueles en un JSON."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(prefs, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error guardando preferencias de troqueles: {e}")
+        return False
 
 def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
     cfg = {}
@@ -45,7 +68,108 @@ def cargar_config(path="config/Config_Priorizacion_Theiler.xlsx"):
             index=df_abbr["Abbr"]
         ).to_dict()
     cfg["mapa_abreviaturas"] = mapa
+    
+    # Cargar preferencias de Troqueles
+    cfg["troquel_preferences"] = load_die_preferences()
+    
     return cfg
+
+
+def apply_custom_machines(cfg, custom_machines_list):
+    """
+    Reconstruye cfg['maquinas'] desde la copia base del Excel y luego inyecta
+    las máquinas personalizadas de la UI.
+
+    Al partir siempre desde '_maquinas_base' (copia inmutable cargada al inicio),
+    garantizamos que eliminar una máquina custom realmente la saca del DataFrame,
+    y que no se acumulan máquinas fantasma entre reruns.
+
+    Cada elemento de custom_machines_list es un dict con:
+      nombre, proceso, velocidad, setup_base, setup_menor, planta, activa_por_defecto,
+      es_troqueladora, tipo_troquel, pli_max_anc, pli_max_lar, pli_min_anc, pli_min_lar
+    """
+    # 1. Restaurar desde la base original (sea cual sea el estado actual)
+    base = cfg.get("_maquinas_base")
+    if base is not None:
+        cfg["maquinas"] = base.copy()
+        # Asegurar que las filas del Excel queden marcadas como NO custom
+        cfg["maquinas"]["_IsCustom"] = False
+    # Si no hay base (ej. tests que no pasan por app.py), trabajamos sobre lo que hay.
+
+    if not custom_machines_list:
+        return  # Solo se hizo el reset → listo
+
+    # 2. Asegurar que las columnas extra existan en la base restaurada
+    for col in ["PliMaxAnc", "PliMaxLar", "PliMinAnc", "PliMinLar", "TipoTroquel", "Planta", "_IsCustom"]:
+        if col not in cfg["maquinas"].columns:
+            cfg["maquinas"][col] = False if col == "_IsCustom" else None
+
+    # 3. Construir filas nuevas
+    required_cols = list(cfg["maquinas"].columns)
+    new_rows = []
+    existing_names = set(cfg["maquinas"]["Maquina"].str.lower())
+
+    for cm in custom_machines_list:
+        nombre = cm["nombre"]
+        if nombre.lower() in existing_names:
+            continue  # Nombre duplicado con el Excel (no debería pasar, UI lo valida)
+
+        row = {col: None for col in required_cols}
+        row["Maquina"] = nombre
+        row["Proceso"] = cm["proceso"]
+        row["Capacidad_pliegos_hora"] = cm["velocidad"]
+        row["Setup_base_min"] = cm["setup_base"]
+        row["Setup_menor_min"] = cm["setup_menor"]
+        row["PliMaxAnc"] = cm.get("pli_max_anc")
+        row["PliMaxLar"] = cm.get("pli_max_lar")
+        row["PliMinAnc"] = cm.get("pli_min_anc")
+        row["PliMinLar"] = cm.get("pli_min_lar")
+        row["TipoTroquel"] = cm.get("tipo_troquel")
+        row["Planta"] = cm.get("planta", "Planta 1")
+        row["_IsCustom"] = True  # ← marca clave que distingue de máquinas del Excel
+        new_rows.append(row)
+        existing_names.add(nombre.lower())
+
+    if not new_rows:
+        return
+
+    new_df = pd.DataFrame(new_rows)
+    cfg["maquinas"] = pd.concat([cfg["maquinas"], new_df], ignore_index=True)
+
+
+# Machine name aliases for priority mapping
+ALIAS_MAP = {
+    "Manual 2": "Troq Nº 1 Gus",
+    "Manual 1": "Troq Nº 2 Ema",
+    "Manual-2": "Troq Nº 1 Gus",
+    "Manual-1": "Troq Nº 2 Ema",
+    "Manual2": "Troq Nº 1 Gus",
+    "Manual1": "Troq Nº 2 Ema",
+}
+
+def normalize_machine_name(machine_name):
+    """
+    Normaliza nombres de máquina para que aliases apunten al nombre canónico.
+    Útil para prioridades manuales donde el usuario puede usar diferentes nombres.
+    También unificamos "°" (grado) y "º" (ordinal) que suelen confundirse.
+    """
+    if not machine_name:
+        return machine_name
+        
+    machine_name_std = machine_name.replace("°", "º")
+    
+    # Try exact match first
+    if machine_name_std in ALIAS_MAP:
+        return ALIAS_MAP[machine_name_std]
+    
+    # Try case-insensitive match
+    machine_lower = machine_name_std.lower().strip()
+    for alias, canonical in ALIAS_MAP.items():
+        if alias.lower().strip() == machine_lower:
+            return canonical
+    
+    # Return original if no match
+    return machine_name_std
 
 def horas_por_dia(cfg):
     j = cfg["jornada"]
@@ -190,3 +314,42 @@ def sumar_horas_habiles(inicio: datetime, horas: float, cfg: dict) -> datetime:
         cursor = datetime.combine(siguiente_dia, time.min)
         
     return cursor
+
+def calculate_business_hours(start_dt, end_dt, cfg, machine_name=None):
+    """
+    Calcula la cantidad de horas hábiles entre start_dt y end_dt.
+    Excluye horas fuera de turno, fines de semana y feriados.
+    """
+    if start_dt >= end_dt:
+        return 0.0
+    
+    total_hours = 0.0
+    cursor_date = start_dt.date()
+    end_date = end_dt.date()
+    
+    # Iterar por cada día en el rango
+    days_diff = (end_date - cursor_date).days
+    
+    for i in range(days_diff + 1):
+        d = cursor_date + timedelta(days=i)
+        
+        # Obtener horas totales para este día (considera feriados/finde retorno 0)
+        h_dia = get_horas_totales_dia(d, cfg, maquina=machine_name)
+        
+        if h_dia <= 0:
+            continue
+            
+        # Definir inicio y fin de turno para este día
+        # Asumimos inicio a las 07:00 como en el resto del sistema
+        shift_start = datetime.combine(d, time(7, 0))
+        shift_end = shift_start + timedelta(hours=h_dia)
+        
+        # Calcular solapamiento entre [start_dt, end_dt] y [shift_start, shift_end]
+        overlap_start = max(start_dt, shift_start)
+        overlap_end = min(end_dt, shift_end)
+        
+        if overlap_start < overlap_end:
+            diff = (overlap_end - overlap_start).total_seconds() / 3600.0
+            total_hours += diff
+            
+    return total_hours

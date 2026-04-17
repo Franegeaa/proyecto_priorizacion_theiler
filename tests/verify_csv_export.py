@@ -3,7 +3,7 @@ from io import BytesIO
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from modules.exporters import generar_excel_ot_horizontal
+from modules.utils.exporters import generar_excel_ot_horizontal
 
 def test_csv_export():
     data = {"OT_id": ["OT1"], "CodigoProducto": ["P1"], "Inicio": [1], "Proceso": ["Corte"]}
